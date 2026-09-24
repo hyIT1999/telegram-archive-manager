@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '@tam/database/nest';
-import { type Chat, SecretBox, type TelegramUser } from '@tam/telegram';
+import { SecretBox } from '@tam/crypto';
+import type { Chat, TelegramUser } from '@tam/telegram';
 import { inject, vi } from 'vitest';
 import type { TelegramApi, TelegramApiProvider } from '../../../src/telegram/telegram.tokens.js';
 

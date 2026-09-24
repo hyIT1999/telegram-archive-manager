@@ -1,0 +1,75 @@
+<h2 mat-dialog-title>{{ reconnecting ? 'Reconnect Google Drive' : 'Connect Google Drive' }}</h2>
+<mat-dialog-content>
+  @if (!data.available) {
+    <app-notice tone="warning" title="Google Drive is not set up on the server">
+      {{ data.reason }}
+    </app-notice>
+  } @else if (showForm()) {
+    <p class="lead">
+      The archive gets access only to the folder it creates in your Drive: it cannot see or
+      change your other files.
+    </p>
+    @if (data.location; as location) {
+      <p class="lead">
+        Sign in with {{ location.accountEmail ?? 'the Google account of this location' }} to restore
+        access to {{ location.displayPath }}.
+      </p>
+    } @else {
+      <mat-form-field>
+        <mat-label>Name in the archive</mat-label>
+        <input matInput autocomplete="off" [value]="name()" (input)="onName($event)" />
+      </mat-form-field>
+      <mat-form-field>
+        <mat-label>Folder in My Drive</mat-label>
+        <input matInput autocomplete="off" [value]="folderName()" (input)="onFolderName($event)" />
+        <mat-hint>Created on first use, or reused if this app made it before.</mat-hint>
+      </mat-form-field>
+    }
+  } @else if (flow(); as flow) {
+    <ol class="steps">
+      <li>
+        Open
+        <a [href]="flow.verificationUrl" target="_blank" rel="noopener noreferrer">
+          {{ flow.verificationUrl }}
+        </a>
+        on any device.
+      </li>
+      <li>
+        Enter this code:
+        <span class="code-row">
+          <code class="code">{{ flow.userCode }}</code>
+          <button matButton type="button" (click)="copy(flow.userCode)">
+            <mat-icon>{{ copied() ? 'check' : 'content_copy' }}</mat-icon>
+            {{ copied() ? 'Copied' : 'Copy' }}
+          </button>
+        </span>
+      </li>
+      <li>Choose your Google account and allow access, keeping the Google Drive permission ticked.</li>
+    </ol>
+    <p class="waiting" role="status">
+      <mat-progress-spinner mode="indeterminate" diameter="18" />
+      Waiting for your approval… The code is valid for {{ remaining() }}.
+    </p>
+  } @else if (failure(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button matButton type="button" [mat-dialog-close]="undefined">Cancel</button>
+  @if (data.available) {
+    @if (showForm()) {
+      <button
+        matButton="filled"
+        type="button"
+        [disabled]="starting() || !name().trim()"
+        [showProgress]="starting()"
+        (click)="start()"
+      >
+        Get a code
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    } @else if (failure()) {
+      <button matButton="filled" type="button" (click)="retry()">Try again</button>
+    }
+  }
+</mat-dialog-actions>

@@ -1,0 +1,22 @@
+{
+  "name": "@tam/storage",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Storage locations for archived media: a folder on the server or a Google Drive folder, behind one StorageDriver interface.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  }
+}

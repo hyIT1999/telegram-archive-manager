@@ -35,7 +35,6 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'info',
       BULLMQ_PREFIX: 'tam',
       WORKER_HEARTBEAT_INTERVAL_MS: 5000,
-      STORAGE_DRIVER: 'local',
       STORAGE_LOCAL_ROOT: './data/storage',
       MIN_FREE_DISK_MB: 2048,
     });
@@ -49,7 +48,6 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'debug',
       BULLMQ_PREFIX: 'tam-prod',
       WORKER_HEARTBEAT_INTERVAL_MS: '2500',
-      STORAGE_DRIVER: 's3',
       STORAGE_LOCAL_ROOT: '/data/media',
       MIN_FREE_DISK_MB: '0',
     });
@@ -58,7 +56,6 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'debug',
       BULLMQ_PREFIX: 'tam-prod',
       WORKER_HEARTBEAT_INTERVAL_MS: 2500,
-      STORAGE_DRIVER: 's3',
       STORAGE_LOCAL_ROOT: '/data/media',
       MIN_FREE_DISK_MB: 0,
     });
@@ -97,7 +94,6 @@ describe('validateWorkerEnv', () => {
     ['WORKER_HEARTBEAT_INTERVAL_MS', '60001'],
     ['WORKER_HEARTBEAT_INTERVAL_MS', '5s'],
     ['WORKER_HEARTBEAT_INTERVAL_MS', '1500.5'],
-    ['STORAGE_DRIVER', 'ftp'],
     ['MIN_FREE_DISK_MB', '-1'],
   ])('rejects %s=%s', (key, value) => {
     const problems = problemsOf({ ...required, [key]: value });

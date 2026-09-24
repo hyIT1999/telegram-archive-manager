@@ -1,0 +1,83 @@
+<h2 mat-dialog-title>Folder on this computer</h2>
+<mat-dialog-content>
+  <p class="lead">
+    Media is saved on the machine that runs the archive, in a folder inside
+    {{ data.roots.join(' or ') }}.
+  </p>
+
+  <div class="where">
+    <span class="label">Folder</span>
+    <span class="current">{{ listing()?.path ?? 'Choose one of the allowed folders' }}</span>
+  </div>
+
+  <div class="browser" role="list" aria-label="Folders">
+    @if (listing()?.path) {
+      <button type="button" class="row" role="listitem" (click)="up()">
+        <mat-icon aria-hidden="true">arrow_upward</mat-icon>
+        {{ listing()?.parent ? 'Up one level' : 'Back to the allowed folders' }}
+      </button>
+    }
+    @if (loading()) {
+      <p class="empty">
+        <mat-progress-spinner mode="indeterminate" diameter="18" />
+        Loading folders…
+      </p>
+    } @else {
+      @for (folder of listing()?.folders ?? []; track folder.path) {
+        <button type="button" class="row" role="listitem" (click)="open(folder.path)">
+          <mat-icon aria-hidden="true">folder</mat-icon>
+          <span class="folder-name">{{ folder.name }}</span>
+        </button>
+      } @empty {
+        @if (listing()) {
+          <p class="empty">No subfolders here.</p>
+        }
+      }
+      @if (listing()?.truncated) {
+        <p class="empty">Only the first 500 folders are shown.</p>
+      }
+    }
+  </div>
+
+  @if (browseError(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+
+  @if (listing()?.path) {
+    <mat-form-field>
+      <mat-label>New folder inside (optional)</mat-label>
+      <input matInput autocomplete="off" [value]="subfolder()" (input)="onSubfolder($event)" />
+      <mat-hint>Created when you save, e.g. "Telegram Archive".</mat-hint>
+    </mat-form-field>
+    <mat-form-field>
+      <mat-label>Name in the archive</mat-label>
+      <input
+        matInput
+        autocomplete="off"
+        [placeholder]="suggestedName()"
+        [value]="name()"
+        (input)="onName($event)"
+      />
+    </mat-form-field>
+    <p class="target">
+      Files go to <strong>{{ target() }}</strong>
+    </p>
+  }
+
+  @if (saveError(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button matButton type="button" [mat-dialog-close]="undefined">Cancel</button>
+  <button
+    matButton="filled"
+    type="button"
+    [disabled]="!listing()?.path || saving()"
+    [showProgress]="saving()"
+    (click)="save()"
+  >
+    Use this folder
+    <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+  </button>
+</mat-dialog-actions>

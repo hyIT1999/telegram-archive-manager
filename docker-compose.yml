@@ -109,6 +109,16 @@ services:
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8080}
       # nginx (web container) sits on the compose network; trust it for the client IP.
       TRUST_PROXY: loopback, uniquelocal
+      # Storage locations (README §9). The api checks and serves the folders, so it mounts the same
+      # media volume as the worker. To offer more folders, mount them into both containers
+      # (e.g. /data/nas) and list them here, separated by ";".
+      STORAGE_LOCAL_ROOT: /data/storage
+      STORAGE_LOCAL_ROOTS: /data/storage
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+    volumes:
+      - media:/data/storage
     expose:
       - "3100"
     depends_on:
@@ -140,7 +150,6 @@ services:
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_SESSION_DATABASE_URL: postgresql://tam:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/tam_tg
       TELEGRAM_SESSION_KEY: ${TELEGRAM_SESSION_KEY:-}
-      STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: /data/storage
       MIN_FREE_DISK_MB: ${MIN_FREE_DISK_MB:-2048}
     volumes:

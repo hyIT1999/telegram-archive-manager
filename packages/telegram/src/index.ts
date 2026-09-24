@@ -3,7 +3,6 @@ export * from './telegram-client.js';
 export * from './login-api.js';
 export * from './errors.js';
 export * from './file-id.js';
-export * from './crypto/secret-box.js';
 export { EncryptedAuthKeysRepository } from './mtcute/encrypted-auth-keys.js';
 export { createSessionStorage, type SessionStorage, type SessionStorageOptions } from './mtcute/session-storage.js';
 export { toTelegramError, translateErrors } from './mtcute/error-mapping.js';

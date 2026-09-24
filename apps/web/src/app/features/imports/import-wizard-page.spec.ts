@@ -9,12 +9,16 @@ import {
   makeDialog,
   makeDialogList,
   makeReadyStatus,
+  makeStorageCheck,
+  makeStorageList,
+  makeStorageLocation,
   makeTelegramStatus,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { NotifyService } from '../../core/services/notify-service';
 import type { TelegramDialogDto } from '../../shared/models';
+import { STORAGE_ENDPOINTS } from '../storage/storage-api';
 import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { TELEGRAM_POLLING } from '../telegram/telegram-session';
 import { ImportWizardPage } from './import-wizard-page';
@@ -83,6 +87,7 @@ describe('ImportWizardPage', () => {
       'Connect Telegram',
       'Channels & groups',
       'Select channel',
+      'Storage location',
       'Import mode',
       'Start',
       'Progress',
@@ -115,8 +120,9 @@ describe('ImportWizardPage', () => {
     await vi.waitFor(() =>
       expect(page().querySelector('app-notice')?.textContent).toContain('Added to your archive'),
     );
-    expect(page().querySelector(`a[href="/channels/${CHANNEL_ID}"]`)).not.toBeNull();
+    expect(button('Choose where to save')).toBeDefined();
     expect(stepButtons()[2].closest('.step')?.classList).toContain('done');
+    expect(stepButtons()[3].disabled).toBe(false);
 
     button('Add another chat')?.click();
     await vi.waitFor(() => expect(heading()).toBe('Channels & groups'));
@@ -179,5 +185,82 @@ describe('ImportWizardPage', () => {
     await vi.waitFor(() => expect(heading()).toBe('Connect Telegram'));
     expect(page().textContent).toContain('The Telegram session was revoked; log in again');
     expect(stepButtons()[1].disabled).toBe(true);
+  });
+
+  it('saves where the media of the new channel goes', async () => {
+    const lessons = makeDialog({ title: 'Lessons', type: 'CHANNEL' });
+    await signedInWith([lessons]);
+    await chooseAndContinue('Lessons');
+    button('Add to archive')?.click();
+    const channel = makeChannel({ id: CHANNEL_ID, title: 'Lessons', telegramChatId: '-1001234' });
+    (await nextRequest(http, '/api/channels')).flush(channel, { status: 201, statusText: 'Created' });
+    await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
+
+    button('Choose where to save')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Storage location'));
+    const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
+    const drive = makeStorageLocation({
+      kind: 'GOOGLE_DRIVE',
+      name: 'Drive',
+      displayPath: 'My Drive › Unofficial Telegram Archive',
+      accountEmail: 'teacher@example.com',
+    });
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(makeStorageList([computer, drive]));
+    for (const location of [computer, drive]) {
+      (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${location.id}/check`)).flush(
+        makeStorageCheck(location),
+      );
+    }
+
+    // The default location is picked until another is chosen.
+    const radios = () => Array.from(page().querySelectorAll<HTMLInputElement>('app-storage-location-list input[type="radio"]'));
+    await vi.waitFor(() => expect(radios().map((radio) => radio.checked)).toEqual([true, false]));
+    radios()[1]?.click();
+    await fixture.whenStable();
+
+    button('Save location')?.click();
+    const save = await nextRequest(http, `/api/channels/${CHANNEL_ID}`);
+    expect(save.request.method).toBe('PATCH');
+    expect(save.request.body).toEqual({ storageLocationId: drive.id });
+    save.flush({
+      ...channel,
+      storageLocation: { id: drive.id, kind: 'GOOGLE_DRIVE', name: 'Drive', displayPath: drive.displayPath },
+      storageFolder: 'Lessons (-1001234)',
+    });
+
+    await vi.waitFor(() =>
+      expect(page().querySelector('app-notice[data-tone="success"]')?.textContent).toContain(
+        'My Drive › Unofficial Telegram Archive › Lessons (-1001234)',
+      ),
+    );
+    expect(page().querySelector(`a[href="/channels/${CHANNEL_ID}"]`)).not.toBeNull();
+    expect(stepButtons()[3].closest('.step')?.classList).toContain('done');
+    expect(button('Save location')).toBeUndefined();
+  });
+
+  it('explains a location that cannot be saved', async () => {
+    await signedInWith([makeDialog({ title: 'Lessons' })]);
+    await chooseAndContinue('Lessons');
+    button('Add to archive')?.click();
+    (await nextRequest(http, '/api/channels')).flush(makeChannel({ id: CHANNEL_ID, title: 'Lessons' }), {
+      status: 201,
+      statusText: 'Created',
+    });
+    await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
+    button('Choose where to save')?.click();
+
+    const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(makeStorageList([computer]));
+    (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${computer.id}/check`)).flush(
+      makeStorageCheck(computer),
+    );
+    await vi.waitFor(() => expect(button('Save location')?.disabled).toBe(false));
+
+    button('Save location')?.click();
+    flushError(await nextRequest(http, `/api/channels/${CHANNEL_ID}`), 404, 'Storage location not found', 'NOT_FOUND');
+    await vi.waitFor(() =>
+      expect(page().querySelector('app-notice[role="alert"]')?.textContent).toContain('Storage location not found'),
+    );
+    expect(button('Save location')?.disabled).toBe(false);
   });
 });

@@ -1,0 +1,130 @@
+<ng-template #summary let-location>
+  <span class="icon" aria-hidden="true">
+    <mat-icon>{{ icon(location) }}</mat-icon>
+  </span>
+  <span class="text">
+    <span class="name">
+      {{ location.name }}
+      @if (location.isDefault) {
+        <span class="badge">Default</span>
+      }
+    </span>
+    <span class="path">{{ location.displayPath }}</span>
+    @if (location.accountEmail) {
+      <span class="meta">{{ location.accountEmail }}</span>
+    }
+    @let state = status(location);
+    @if (state.text) {
+      <span class="status" [attr.data-state]="state.state">
+        @switch (state.state) {
+          @case ('failed') {
+            <mat-icon aria-hidden="true">error</mat-icon>
+          }
+          @case ('ok') {
+            <mat-icon aria-hidden="true">check_circle</mat-icon>
+          }
+          @default {
+            <mat-icon aria-hidden="true">hourglass_top</mat-icon>
+          }
+        }
+        {{ state.text }}
+      </span>
+    }
+  </span>
+</ng-template>
+
+@if (store.error()) {
+  <app-error-state
+    title="Storage locations could not be loaded"
+    [message]="loadErrorMessage()"
+    (retry)="store.reload()"
+  />
+} @else if (store.list(); as list) {
+  <div class="locations" [attr.role]="selectable() ? 'radiogroup' : 'list'" aria-label="Storage locations">
+    @for (location of list.items; track location.id) {
+      <div
+        class="location"
+        [attr.role]="selectable() ? null : 'listitem'"
+        [class.selected]="selectable() && location.id === selectedId()"
+      >
+        @if (selectable()) {
+          <label class="choice">
+            <input
+              type="radio"
+              name="storage-location"
+              class="radio"
+              [checked]="location.id === selectedId()"
+              (change)="choose(location)"
+            />
+            <ng-container *ngTemplateOutlet="summary; context: { $implicit: location }" />
+          </label>
+        } @else {
+          <div class="choice">
+            <ng-container *ngTemplateOutlet="summary; context: { $implicit: location }" />
+          </div>
+        }
+        <button
+          matIconButton
+          type="button"
+          class="menu"
+          [matMenuTriggerFor]="actions"
+          [attr.aria-label]="'Actions for ' + location.name"
+        >
+          <mat-icon>more_vert</mat-icon>
+        </button>
+        <mat-menu #actions="matMenu" xPosition="before">
+          <button mat-menu-item type="button" (click)="check(location)">
+            <mat-icon>fact_check</mat-icon>
+            Check again
+          </button>
+          @if (!location.isDefault) {
+            <button mat-menu-item type="button" (click)="makeDefault(location)">
+              <mat-icon>star</mat-icon>
+              Use as default
+            </button>
+          }
+          @if (location.kind === 'GOOGLE_DRIVE') {
+            <button mat-menu-item type="button" (click)="connectGoogle(location)">
+              <mat-icon>sync</mat-icon>
+              Reconnect Google account
+            </button>
+          }
+          @if (!location.builtIn) {
+            <button mat-menu-item type="button" (click)="remove(location)">
+              <mat-icon>delete</mat-icon>
+              Remove
+            </button>
+          }
+        </mat-menu>
+      </div>
+    } @empty {
+      <app-notice icon="folder_off">
+        No storage location yet. Add a folder on this computer or connect Google Drive.
+      </app-notice>
+    }
+  </div>
+
+  <div class="add">
+    <button
+      matButton="tonal"
+      type="button"
+      [disabled]="list.capabilities.localRoots.length === 0"
+      (click)="addLocal()"
+    >
+      <mat-icon>create_new_folder</mat-icon>
+      Folder on this computer
+    </button>
+    <button matButton="tonal" type="button" (click)="connectGoogle()">
+      <mat-icon>add_to_drive</mat-icon>
+      Google Drive
+    </button>
+  </div>
+  @if (list.capabilities.localRoots.length === 0) {
+    <p class="hint">
+      Folders on this computer can be added once STORAGE_LOCAL_ROOTS (or STORAGE_LOCAL_ROOT) is set
+      on the server.
+    </p>
+  }
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading storage locations…" />
+}

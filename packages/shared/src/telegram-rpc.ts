@@ -9,12 +9,21 @@ import { z } from 'zod';
  * the api learns immediately when no worker holds the Telegram connection, and a stale request can
  * never run later.
  */
-export const TELEGRAM_RPC_CHANNELS = {
+export interface TelegramRpcChannels {
   /** Only the worker holding the Telegram owner lease subscribes here. */
-  request: 'tam:tg:rpc:request',
+  readonly request: string;
   /** Each api process listens on `${replyPrefix}${instanceId}`. */
-  replyPrefix: 'tam:tg:rpc:reply:',
-} as const;
+  readonly replyPrefix: string;
+}
+
+/**
+ * Pub/sub channels are global to a Redis server (database numbers do not separate them), so they
+ * carry the deployment's key prefix (BULLMQ_PREFIX): environments sharing a Redis server, or the
+ * tests next to a running dev stack, never answer each other's requests.
+ */
+export function telegramRpcChannels(prefix: string): TelegramRpcChannels {
+  return { request: `${prefix}:tg:rpc:request`, replyPrefix: `${prefix}:tg:rpc:reply:` };
+}
 
 export const telegramRpcCallSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('auth.phone'), phoneNumber: z.string().min(1).max(32) }),
@@ -29,7 +38,8 @@ export type TelegramRpcMethod = TelegramRpcCall['method'];
 
 export const telegramRpcRequestSchema = z.object({
   id: z.uuid(),
-  replyTo: z.string().startsWith(TELEGRAM_RPC_CHANNELS.replyPrefix),
+  /** A reply channel of the same deployment (the worker checks the prefix). */
+  replyTo: z.string().regex(/^\S+:tg:rpc:reply:\S+$/),
   /** Epoch ms after which the caller has given up; the worker skips expired requests. */
   deadline: z.number().int().positive(),
   call: telegramRpcCallSchema,

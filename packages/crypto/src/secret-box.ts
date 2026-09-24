@@ -1,7 +1,9 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
 const FORMAT_VERSION = 1;
-const KEY_BYTES = 32;
+/** Byte length of a SecretBox key once base64-decoded (an AES-256 key). */
+export const SECRET_KEY_BYTES = 32;
+const KEY_BYTES = SECRET_KEY_BYTES;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 const HEADER_BYTES = 1 + IV_BYTES + TAG_BYTES;
@@ -13,22 +15,29 @@ export class SecretBoxError extends Error {
   }
 }
 
+/** Whether `value` is the canonical base64 of exactly SECRET_KEY_BYTES bytes (for env checks). */
+export function isSecretKey(value: string): boolean {
+  const decoded = Buffer.from(value, 'base64');
+  return decoded.length === KEY_BYTES && decoded.toString('base64') === value;
+}
+
 /**
  * AES-256-GCM authenticated encryption for secrets at rest: the Telegram auth key, the pending
- * login's phone number and phone_code_hash. Layout: version (1 byte) | iv (12) | tag (16) | data.
+ * login's phone number and phone_code_hash, cloud storage refresh tokens.
+ * Layout: version (1 byte) | iv (12) | tag (16) | data.
  *
  * Every value is bound to a `context` string (used as additional authenticated data), so a
- * ciphertext copied into another field or another DC's row fails to decrypt instead of being
+ * ciphertext copied into another field or another row fails to decrypt instead of being
  * silently accepted.
  */
 export class SecretBox {
   private constructor(private readonly key: Buffer) {}
 
-  /** `key` is TELEGRAM_SESSION_KEY: 32 random bytes, base64-encoded. */
+  /** `key`: 32 random bytes, base64-encoded (TELEGRAM_SESSION_KEY, STORAGE_SECRET_KEY). */
   static fromBase64(key: string): SecretBox {
     const bytes = Buffer.from(key, 'base64');
     if (bytes.length !== KEY_BYTES) {
-      throw new SecretBoxError(`The session key must be ${KEY_BYTES} bytes (base64-encoded)`);
+      throw new SecretBoxError(`The key must be ${KEY_BYTES} bytes (base64-encoded)`);
     }
     return new SecretBox(bytes);
   }
@@ -55,7 +64,7 @@ export class SecretBox {
       return Buffer.concat([decipher.update(bytes.subarray(HEADER_BYTES)), decipher.final()]);
     } catch {
       throw new SecretBoxError(
-        'Cannot decrypt a stored secret: TELEGRAM_SESSION_KEY changed or the data was tampered with',
+        'Cannot decrypt a stored secret: the key changed or the data was tampered with',
       );
     }
   }

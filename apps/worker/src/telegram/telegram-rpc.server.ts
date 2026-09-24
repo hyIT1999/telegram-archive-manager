@@ -1,12 +1,13 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  TELEGRAM_RPC_CHANNELS,
   TelegramAuthState,
   TelegramErrorCode,
   type TelegramRpcCall,
   type TelegramRpcError,
   type TelegramRpcReply,
+  type TelegramRpcChannels,
+  telegramRpcChannels,
   telegramRpcRequestSchema,
 } from '@tam/shared';
 import { FloodWaitError, TelegramError } from '@tam/telegram';
@@ -30,13 +31,16 @@ export class TelegramRpcServer {
   private readonly logger = new Logger(TelegramRpcServer.name);
   private subscriber: Redis | undefined;
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly channels: TelegramRpcChannels;
 
   constructor(
     private readonly config: ConfigService<WorkerEnv, true>,
     @Inject(TELEGRAM_REDIS) private readonly publisher: Redis,
     private readonly auth: TelegramAuthService,
     private readonly dialogs: TelegramDialogsService,
-  ) {}
+  ) {
+    this.channels = telegramRpcChannels(config.get('BULLMQ_PREFIX', { infer: true }));
+  }
 
   async start(): Promise<void> {
     if (this.subscriber) {
@@ -49,7 +53,7 @@ export class TelegramRpcServer {
     subscriber.on('error', (error: Error) => this.logger.debug(`Redis: ${error.message}`));
     subscriber.on('message', (_channel: string, raw: string) => this.track(this.handle(raw)));
     await subscriber.connect();
-    await subscriber.subscribe(TELEGRAM_RPC_CHANNELS.request);
+    await subscriber.subscribe(this.channels.request);
     this.subscriber = subscriber;
   }
 
@@ -91,6 +95,10 @@ export class TelegramRpcServer {
       return;
     }
     const request = parsed.data;
+    if (!request.replyTo.startsWith(this.channels.replyPrefix)) {
+      this.logger.warn('Ignoring a Telegram RPC request that expects its reply elsewhere');
+      return;
+    }
     if (Date.now() > request.deadline) {
       this.logger.debug(`Skipping expired Telegram request ${request.call.method}`);
       return;

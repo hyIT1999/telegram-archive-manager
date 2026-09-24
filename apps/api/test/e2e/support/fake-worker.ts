@@ -1,9 +1,9 @@
 import {
   REDIS_KEYS,
-  TELEGRAM_RPC_CHANNELS,
   type TelegramRpcError,
   type TelegramRpcRequest,
   type WorkerHeartbeat,
+  telegramRpcChannels,
   telegramRpcRequestSchema,
 } from '@tam/shared';
 import { Redis } from 'ioredis';
@@ -47,7 +47,7 @@ export class FakeWorker {
     const subscriber = new Redis(inject('redisUrl'), { lazyConnect: true });
     subscriber.on('message', (_channel: string, raw: string) => void this.answer(raw));
     await subscriber.connect();
-    await subscriber.subscribe(TELEGRAM_RPC_CHANNELS.request);
+    await subscriber.subscribe(telegramRpcChannels(process.env['BULLMQ_PREFIX'] as string).request);
     this.subscriber = subscriber;
   }
 

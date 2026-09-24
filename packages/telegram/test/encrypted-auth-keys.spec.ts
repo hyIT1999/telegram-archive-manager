@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import type { IAuthKeysRepository } from '@mtcute/core';
 import { describe, expect, it } from 'vitest';
-import { EncryptedAuthKeysRepository, SecretBox } from '../src/index.js';
+import { SecretBox } from '@tam/crypto';
+import { EncryptedAuthKeysRepository } from '../src/index.js';
 
 /** In-memory stand-in for mtcute's PostgresAuthKeysRepository. */
 class MemoryAuthKeys implements IAuthKeysRepository {

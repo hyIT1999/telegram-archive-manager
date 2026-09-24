@@ -105,3 +105,10 @@ export const TelegramAuthState = {
   READY: 'READY',
 } as const;
 export type TelegramAuthState = (typeof TelegramAuthState)[keyof typeof TelegramAuthState];
+
+/** Where a storage location writes: a folder on the server, or a folder in Google Drive. */
+export const StorageKind = {
+  LOCAL: 'LOCAL',
+  GOOGLE_DRIVE: 'GOOGLE_DRIVE',
+} as const;
+export type StorageKind = (typeof StorageKind)[keyof typeof StorageKind];

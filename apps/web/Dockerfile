@@ -14,6 +14,7 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
     NG_CLI_ANALYTICS=false
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/crypto/package.json packages/crypto/
 COPY packages/database/package.json packages/database/
 COPY packages/storage/package.json packages/storage/
 COPY packages/telegram/package.json packages/telegram/

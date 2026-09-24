@@ -21,6 +21,7 @@
     "@nestjs/platform-express": "12.1.0",
     "@nestjs/terminus": "12.1.0",
     "@nestjs/throttler": "6.7.0",
+    "@tam/crypto": "0.0.0",
     "@tam/database": "0.0.0",
     "@tam/shared": "0.0.0",
     "@tam/storage": "0.0.0",

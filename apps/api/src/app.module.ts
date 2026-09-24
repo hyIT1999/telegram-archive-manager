@@ -7,11 +7,12 @@ import { AuthModule } from './auth/auth.module.js';
 import { SessionGuard } from './auth/session.guard.js';
 import { ChannelsModule } from './channels/channels.module.js';
 import { createValidationPipe } from './common/validation/validation.pipe.js';
-import { envFileParser, envFilePaths } from './config/env-files.js';
-import { ENV_KEYS, envSchema, type Env } from './config/env.js';
+import { configModuleOptions } from './config/config-module.js';
+import type { Env } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { StatsModule } from './stats/stats.module.js';
+import { StorageModule } from './storage/storage.module.js';
 import { TelegramModule } from './telegram/telegram.module.js';
 
 /** Requests per client IP and minute on every route (login is much stricter). */
@@ -19,14 +20,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
 
 @Module({
   imports: [
-    // Validates process.env + the root .env once at startup; an invalid environment aborts the boot.
-    ConfigModule.forRoot({
-      isGlobal: true,
-      cache: true,
-      envFilePath: envFilePaths(),
-      parser: envFileParser(ENV_KEYS),
-      validationSchema: envSchema,
-    }),
+    ConfigModule.forRoot(configModuleOptions()),
     PrismaModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<Env, true>) => ({
@@ -43,6 +37,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     HealthModule,
     ChannelsModule,
     StatsModule,
+    StorageModule,
     TelegramModule,
   ],
   providers: [

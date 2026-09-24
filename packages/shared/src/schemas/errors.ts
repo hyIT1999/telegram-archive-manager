@@ -51,6 +51,29 @@ export const TelegramErrorCode = {
 } as const;
 export type TelegramErrorCode = (typeof TelegramErrorCode)[keyof typeof TelegramErrorCode];
 
+/** Outcomes of storage location requests (folders on the server, Google Drive). */
+export const StorageErrorCode = {
+  /** The folder lies outside the roots the server allows (STORAGE_LOCAL_ROOTS). */
+  PATH_NOT_ALLOWED: 'PATH_NOT_ALLOWED',
+  /** The location cannot be written right now (permissions, full disk, missing folder…). */
+  STORAGE_NOT_WRITABLE: 'STORAGE_NOT_WRITABLE',
+  /** Another location already writes to the same folder. */
+  LOCATION_EXISTS: 'LOCATION_EXISTS',
+  /** Channels or stored files still use the location. */
+  LOCATION_IN_USE: 'LOCATION_IN_USE',
+  /** The location that follows STORAGE_LOCAL_ROOT cannot be removed. */
+  LOCATION_BUILT_IN: 'LOCATION_BUILT_IN',
+  /** The server lacks the Google OAuth client or STORAGE_SECRET_KEY. */
+  GOOGLE_DRIVE_UNAVAILABLE: 'GOOGLE_DRIVE_UNAVAILABLE',
+  /** The person did not tick the Google Drive permission on the consent screen. */
+  GOOGLE_SCOPE_DENIED: 'GOOGLE_SCOPE_DENIED',
+  /** The stored Google grant was revoked or expired: reconnect. */
+  GOOGLE_AUTH_REVOKED: 'GOOGLE_AUTH_REVOKED',
+  /** Google answered with an error or could not be reached. */
+  GOOGLE_DRIVE_ERROR: 'GOOGLE_DRIVE_ERROR',
+} as const;
+export type StorageErrorCode = (typeof StorageErrorCode)[keyof typeof StorageErrorCode];
+
 /** One entry of ApiErrorBody.details for a 400 VALIDATION_FAILED response. */
 export interface ValidationIssue {
   /** Dotted path of the offending field, e.g. `email` or `items.0.id`; empty for the whole value. */

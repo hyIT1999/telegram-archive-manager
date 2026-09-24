@@ -20,7 +20,7 @@ packages/database/src/generated/
 
 # Local runtime data (media storage, temp downloads)
 data/
-storage/
+/storage/
 *.part
 
 # Logs

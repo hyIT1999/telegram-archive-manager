@@ -104,15 +104,15 @@
             tone="success"
             [title]="result.created ? 'Added to your archive' : 'Already in your archive'"
           >
-            {{ result.channel.title }} is a channel of your archive. Choosing how much history to
-            import and starting the import arrive in Phase 3.
+            {{ result.channel.title }} is a channel of your archive. Next, choose where its media
+            is saved.
           </app-notice>
           <div class="panel-actions">
             <button matButton type="button" (click)="pickAnother()">Add another chat</button>
-            <a matButton="filled" [routerLink]="['/channels', result.channel.id]">
-              Open the channel
+            <button matButton="filled" type="button" (click)="open(3)">
+              Choose where to save
               <mat-icon iconPositionEnd>arrow_forward</mat-icon>
-            </a>
+            </button>
           </div>
         } @else {
           <p class="panel-hint">
@@ -136,6 +136,49 @@
             </button>
           </div>
         }
+      }
+    }
+
+    @case (3) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Storage location</h2>
+      @if (channel(); as item) {
+        <p class="panel-hint">
+          Where the media of <strong>{{ item.title }}</strong> is saved: in its own folder,
+          grouped by month, with the original file names. You can add a folder on this computer
+          or connect Google Drive.
+        </p>
+        <app-storage-location-list selectable [(selectedId)]="storageChoice" />
+
+        @if (storageError(); as message) {
+          <app-notice tone="error">{{ message }}</app-notice>
+        }
+        @if (storageSaved() && item.storageLocation; as location) {
+          <app-notice tone="success" title="Storage location saved">
+            Media of {{ item.title }} goes to {{ location.displayPath }} › {{ item.storageFolder }}.
+            Importing the history arrives in Phase 3 and downloading media in Phase 4.
+          </app-notice>
+        }
+
+        <div class="panel-actions">
+          <button matButton type="button" (click)="open(2)">Back</button>
+          @if (storageSaved()) {
+            <a matButton="filled" [routerLink]="['/channels', item.id]">
+              Open the channel
+              <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+            </a>
+          } @else {
+            <button
+              matButton="filled"
+              type="button"
+              [disabled]="!storageChoice() || savingStorage()"
+              [showProgress]="savingStorage()"
+              (click)="saveStorage()"
+            >
+              Save location
+              <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+            </button>
+          }
+        </div>
       }
     }
   }

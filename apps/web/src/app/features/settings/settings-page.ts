@@ -4,6 +4,7 @@ import { MatIcon } from '@angular/material/icon';
 import { THEME_OPTIONS, type ThemeMode, ThemeService } from '../../core/services/theme-service';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
+import { StorageLocationList } from '../storage/storage-location-list';
 import { TelegramConnect } from '../telegram/telegram-connect';
 import { TelegramSession } from '../telegram/telegram-session';
 
@@ -16,6 +17,7 @@ import { TelegramSession } from '../telegram/telegram-session';
     MatButtonToggleGroup,
     MatIcon,
     PageHeader,
+    StorageLocationList,
     TelegramConnect,
   ],
   template: `
@@ -32,6 +34,15 @@ import { TelegramSession } from '../telegram/telegram-session';
         encrypted.
       </p>
       <app-telegram-connect />
+    </section>
+
+    <section class="surface-card panel" aria-labelledby="storage-title">
+      <h2 id="storage-title" class="panel-title">Storage locations</h2>
+      <p class="panel-hint">
+        Where archived media is saved: folders on this computer or Google Drive. Each channel uses
+        one; the default applies to channels that did not choose.
+      </p>
+      <app-storage-location-list />
     </section>
 
     <section class="surface-card panel" aria-labelledby="appearance-title">

@@ -31,6 +31,9 @@ export const sharedConfig = {
       { find: /^@tam\/database\/nest$/, replacement: packageSource('database/src/nest.ts') },
       { find: /^@tam\/database$/, replacement: packageSource('database/src/index.ts') },
       { find: /^@tam\/shared$/, replacement: packageSource('shared/src/index.ts') },
+      { find: /^@tam\/crypto$/, replacement: packageSource('crypto/src/index.ts') },
+      { find: /^@tam\/storage\/testing$/, replacement: packageSource('storage/src/testing/index.ts') },
+      { find: /^@tam\/storage$/, replacement: packageSource('storage/src/index.ts') },
     ],
   },
 } satisfies ViteUserConfig;

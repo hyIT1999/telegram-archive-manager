@@ -2,12 +2,19 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
-import { makeReadyStatus } from '../../../testing/fixtures';
+import {
+  makeReadyStatus,
+  makeStorageCheck,
+  makeStorageList,
+  makeStorageLocation,
+} from '../../../testing/fixtures';
+import { nextRequest } from '../../../testing/http';
+import { STORAGE_ENDPOINTS } from '../storage/storage-api';
 import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { SettingsPage } from './settings-page';
 
 describe('SettingsPage', () => {
-  it('shows the connected Telegram account next to the appearance settings', async () => {
+  it('shows the Telegram account and the storage locations next to the appearance settings', async () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -19,16 +26,28 @@ describe('SettingsPage', () => {
     const fixture = TestBed.createComponent(SettingsPage);
     TestBed.tick();
 
+    const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
     http.expectOne(TELEGRAM_ENDPOINTS.status).flush(makeReadyStatus());
+    http.expectOne(STORAGE_ENDPOINTS.locations).flush(makeStorageList([computer]));
+    (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${computer.id}/check`)).flush(
+      makeStorageCheck(computer),
+    );
     await fixture.whenStable();
 
     const page = fixture.nativeElement as HTMLElement;
     const headings = Array.from(page.querySelectorAll('h2')).map((title) => title.textContent);
-    expect(headings).toEqual(['Telegram account', 'Appearance', 'Archive settings are on their way']);
+    expect(headings).toEqual([
+      'Telegram account',
+      'Storage locations',
+      'Appearance',
+      'Archive settings are on their way',
+    ]);
     expect(page.querySelector('app-telegram-connect .account-name')?.textContent).toContain(
       'An Archivist',
     );
-    expect(page.textContent).toContain('Log out of Telegram');
+    expect(page.querySelector('app-storage-location-list')?.textContent).toContain('This computer');
+    // Settings manages the locations; nothing is picked here.
+    expect(page.querySelector('app-storage-location-list input[type="radio"]')).toBeNull();
     http.verify();
   });
 });

@@ -1,7 +1,7 @@
 import type { ITelegramStorageProvider } from '@mtcute/core';
 import { PostgresStorage } from '@mtcute/postgres';
 import pg from 'pg';
-import type { SecretBox } from '../crypto/secret-box.js';
+import type { SecretBox } from '@tam/crypto';
 import { EncryptedAuthKeysRepository } from './encrypted-auth-keys.js';
 
 export interface SessionStorageOptions {

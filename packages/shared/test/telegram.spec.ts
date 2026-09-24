@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  TELEGRAM_RPC_CHANNELS,
+  telegramRpcChannels,
   createChannelRequestSchema,
   phoneNumberSchema,
   telegramAuthenticateRequestSchema,
@@ -59,7 +59,7 @@ describe('telegram RPC contract', () => {
   it('validates requests, including the reply channel prefix', () => {
     const request = {
       id,
-      replyTo: `${TELEGRAM_RPC_CHANNELS.replyPrefix}api-1`,
+      replyTo: `${telegramRpcChannels('tam').replyPrefix}api-1`,
       deadline: Date.now() + 30_000,
       call: { method: 'auth.code', code: '12345' },
     };

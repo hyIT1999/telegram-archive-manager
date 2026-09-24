@@ -13,12 +13,13 @@ import { ConfigService } from '@nestjs/config';
 import {
   ApiErrorCode,
   REDIS_KEYS,
-  TELEGRAM_RPC_CHANNELS,
   TelegramConnectionState,
   TelegramErrorCode,
   type TelegramRpcCall,
   type TelegramRpcError,
   type WorkerHeartbeat,
+  type TelegramRpcChannels,
+  telegramRpcChannels,
   telegramRpcReplySchema,
   workerHeartbeatSchema,
 } from '@tam/shared';
@@ -56,7 +57,8 @@ const TIMED_OUT: TelegramRpcError = { code: ApiErrorCode.TELEGRAM_TIMEOUT, messa
 @Injectable()
 export class TelegramRpcClient implements OnModuleDestroy {
   private readonly logger = new Logger(TelegramRpcClient.name);
-  private readonly replyChannel = `${TELEGRAM_RPC_CHANNELS.replyPrefix}${randomUUID()}`;
+  private readonly channels: TelegramRpcChannels;
+  private readonly replyChannel: string;
   private readonly pending = new Map<string, PendingCall>();
   private readonly timeoutMs: number;
   private subscriber: Redis | undefined;
@@ -67,6 +69,8 @@ export class TelegramRpcClient implements OnModuleDestroy {
     private readonly config: ConfigService<Env, true>,
   ) {
     this.timeoutMs = config.get('TELEGRAM_RPC_TIMEOUT_MS', { infer: true });
+    this.channels = telegramRpcChannels(config.get('BULLMQ_PREFIX', { infer: true }));
+    this.replyChannel = `${this.channels.replyPrefix}${randomUUID()}`;
   }
 
   /** Resolves when the worker completed the call; throws an HttpException otherwise. */
@@ -88,7 +92,7 @@ export class TelegramRpcClient implements OnModuleDestroy {
     let receivers: number;
     try {
       receivers = await this.redis.publish(
-        TELEGRAM_RPC_CHANNELS.request,
+        this.channels.request,
         JSON.stringify({ id, replyTo: this.replyChannel, deadline: Date.now() + this.timeoutMs, call }),
       );
     } catch {

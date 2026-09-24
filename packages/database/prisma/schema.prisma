@@ -105,6 +105,11 @@ enum TelegramAuthState {
   READY
 }
 
+enum StorageKind {
+  LOCAL
+  GOOGLE_DRIVE
+}
+
 // ---------------------------------------------------------------------------
 // Web authentication
 // ---------------------------------------------------------------------------
@@ -196,6 +201,43 @@ model TelegramDialog {
 }
 
 // ---------------------------------------------------------------------------
+// Storage locations (where downloaded media is written)
+// ---------------------------------------------------------------------------
+
+/// A folder on the server or in a Google Drive. Channels choose one; each media row remembers
+/// the location its file was written to, so changing a channel's location never loses files.
+model StorageLocation {
+  id            String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  kind          StorageKind
+  name          String
+  /// Where files go, for people: an absolute folder, or "My Drive › <folder>".
+  displayPath   String      @map("display_path")
+  /// Identity of the target: the folder path (case-folded on Windows) or the Drive folder id.
+  target        String
+  /// Non-secret settings: { path } or { folderId, folderName, accountEmail }.
+  config        Json
+  /// AES-256-GCM sealed credentials (Google refresh token, STORAGE_SECRET_KEY); api/worker only.
+  secretEnc     Bytes?      @map("secret_enc")
+  /// Used by channels that did not choose a location. At most one.
+  isDefault     Boolean     @default(false) @map("is_default")
+  /// The location that follows STORAGE_LOCAL_ROOT; kept in step by the api at startup.
+  builtIn       Boolean     @default(false) @map("built_in")
+  /// Outcome of the last check (probe); null when it worked.
+  lastError     String?     @map("last_error")
+  lastCheckedAt DateTime?   @map("last_checked_at") @db.Timestamptz(3)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  channels Channel[]
+  media    Media[]
+
+  @@unique([kind, target])
+  @@unique([isDefault], map: "storage_locations_one_default", where: raw("is_default"))
+  @@unique([builtIn], map: "storage_locations_one_built_in", where: raw("built_in"))
+  @@map("storage_locations")
+}
+
+// ---------------------------------------------------------------------------
 // Archive
 // ---------------------------------------------------------------------------
 
@@ -220,15 +262,21 @@ model Channel {
   migratedFromChatId  BigInt?   @map("migrated_from_chat_id")
   /// Set on the legacy basic-group row; points at the supergroup row.
   migratedToChannelId String?   @map("migrated_to_channel_id") @db.Uuid
+  /// Where new media of this channel is written; null = the default location.
+  storageLocationId   String?   @map("storage_location_id") @db.Uuid
+  /// The channel's folder inside its location ("Title (chat id)"), fixed once chosen.
+  storageFolder       String?   @map("storage_folder")
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  migratedTo   Channel?    @relation("ChannelMigration", fields: [migratedToChannelId], references: [id], onDelete: SetNull)
-  migratedFrom Channel[]   @relation("ChannelMigration")
-  messages     Message[]
-  importJobs   ImportJob[]
+  migratedTo      Channel?         @relation("ChannelMigration", fields: [migratedToChannelId], references: [id], onDelete: SetNull)
+  migratedFrom    Channel[]        @relation("ChannelMigration")
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+  messages        Message[]
+  importJobs      ImportJob[]
 
   @@index([migratedToChannelId])
+  @@index([storageLocationId])
   @@map("channels")
 }
 
@@ -289,6 +337,9 @@ model Media {
   height               Int?
   /// Seconds.
   duration             Float?
+  /// The location holding the stored object; set when the download completes.
+  storageLocationId    String?        @map("storage_location_id") @db.Uuid
+  /// Readable path inside that location (see @tam/storage paths.ts).
   storageKey           String?        @map("storage_key")
   thumbnailKey         String?        @map("thumbnail_key")
   downloadStatus       DownloadStatus @default(PENDING) @map("download_status")
@@ -301,10 +352,12 @@ model Media {
   createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  message     Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  downloadJob DownloadJob?
+  message         Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+  downloadJob     DownloadJob?
 
   @@unique([messageId, telegramFileUniqueId])
+  @@index([storageLocationId])
   @@index([telegramFileUniqueId])
   @@index([checksum])
   @@index([downloadStatus, type])

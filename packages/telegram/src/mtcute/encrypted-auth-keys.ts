@@ -1,5 +1,5 @@
 import type { IAuthKeysRepository } from '@mtcute/core';
-import type { SecretBox } from '../crypto/secret-box.js';
+import type { SecretBox } from '@tam/crypto';
 
 /**
  * Wraps mtcute's auth key repository so the keys — which grant full access to the Telegram

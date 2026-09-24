@@ -2,7 +2,7 @@ import { HttpClient, HttpContext, HttpParams, HttpStatusCode } from '@angular/co
 import { Injectable, inject } from '@angular/core';
 import { type Observable, map } from 'rxjs';
 import { ERRORS_SHOWN_INLINE } from '../../core/interceptors/server-error-interceptor';
-import type { ChannelDto, Page } from '../../shared/models';
+import type { ChannelDto, Page, UpdateChannelRequest } from '../../shared/models';
 
 export interface ChannelListParams {
   readonly limit?: number;
@@ -38,6 +38,13 @@ export class ChannelsApi {
   /** A single channel with its statistics (`GET /api/channels/:id`). */
   get(id: string): Observable<ChannelDto> {
     return this.http.get<ChannelDto>(`/api/channels/${encodeURIComponent(id)}`);
+  }
+
+  /** Chooses where the channel's media is saved (`PATCH /api/channels/:id`). */
+  update(id: string, request: UpdateChannelRequest): Observable<ChannelDto> {
+    return this.http.patch<ChannelDto>(`/api/channels/${encodeURIComponent(id)}`, request, {
+      context: new HttpContext().set(ERRORS_SHOWN_INLINE, true),
+    });
   }
 
   /**

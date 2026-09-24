@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -110,6 +111,47 @@ describe('envSchema', () => {
     expect(message).toMatch(/LOG_LEVEL: /);
     expect(message).toContain('"http://localhost:4300/app" is not an origin');
     expect(message).not.toContain('hunter2');
+  });
+
+  it('reads storage folders, the storage key and the Google OAuth client', () => {
+    const root = path.resolve('archive');
+    const other = path.resolve('more folders');
+    const key = randomBytes(32).toString('base64');
+    expect(
+      parse({
+        STORAGE_LOCAL_ROOT: root,
+        STORAGE_LOCAL_ROOTS: ` ${root} ; ${other} ;`,
+        STORAGE_SECRET_KEY: key,
+        GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com',
+        GOOGLE_OAUTH_CLIENT_SECRET: 'GOCSPX-secret-value',
+      }).data,
+    ).toMatchObject({
+      STORAGE_LOCAL_ROOT: root,
+      STORAGE_LOCAL_ROOTS: [root, other],
+      STORAGE_SECRET_KEY: key,
+      GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com',
+      GOOGLE_OAUTH_CLIENT_SECRET: 'GOCSPX-secret-value',
+    });
+  });
+
+  it('rejects relative storage folders and a malformed storage key, without echoing it', () => {
+    const message = errorsOf({
+      STORAGE_LOCAL_ROOT: 'relative/archive',
+      STORAGE_LOCAL_ROOTS: 'also/relative',
+      STORAGE_SECRET_KEY: 'not-a-key-hunter2',
+      GOOGLE_OAUTH_CLIENT_ID: 'not-a-client-id',
+    });
+    expect(message).toContain('STORAGE_LOCAL_ROOT: must be an absolute path');
+    expect(message).toContain('STORAGE_LOCAL_ROOTS.0: must be an absolute path');
+    expect(message).toContain('STORAGE_SECRET_KEY: must be 32 random bytes');
+    expect(message).toContain('GOOGLE_OAUTH_CLIENT_ID: must be the client ID of a Google OAuth client');
+    expect(message).not.toContain('hunter2');
+  });
+
+  it('requires the Google client ID and secret together', () => {
+    expect(errorsOf({ GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com' })).toBe(
+      'GOOGLE_OAUTH_CLIENT_ID: GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    );
   });
 
   it('validates only DATABASE_URL for the CLI', () => {

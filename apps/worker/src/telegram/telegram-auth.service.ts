@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { TelegramAccount } from '@tam/database';
+import { type SecretBox, SecretBoxError } from '@tam/crypto';
 import { PrismaService } from '@tam/database/nest';
 import {
   TELEGRAM_ACCOUNT_KEY,
@@ -10,8 +11,6 @@ import {
 import {
   AuthRequiredError,
   LoginStepError,
-  type SecretBox,
-  SecretBoxError,
   TelegramError,
   type TelegramUser,
 } from '@tam/telegram';

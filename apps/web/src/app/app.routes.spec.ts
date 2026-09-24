@@ -13,7 +13,13 @@ import {
 } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { MEDIA_CATEGORIES } from '@tam/shared';
-import { makePage, makeStats, makeTelegramStatus, makeUser } from '../testing/fixtures';
+import {
+  makePage,
+  makeStats,
+  makeStorageList,
+  makeTelegramStatus,
+  makeUser,
+} from '../testing/fixtures';
 import { answerSessionCheck } from '../testing/http';
 import { routes } from './app.routes';
 import { serverErrorInterceptor } from './core/interceptors/server-error-interceptor';
@@ -91,6 +97,9 @@ describe('app routes', () => {
     }
     for (const request of http.match('/api/telegram/status')) {
       request.flush(makeTelegramStatus());
+    }
+    for (const request of http.match('/api/storage/locations')) {
+      request.flush(makeStorageList([]));
     }
   }
 

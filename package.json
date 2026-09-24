@@ -6,6 +6,7 @@
   "type": "module",
   "workspaces": [
     "packages/shared",
+    "packages/crypto",
     "packages/database",
     "packages/storage",
     "packages/telegram",
@@ -29,7 +30,7 @@
     "db:deploy": "npm run migrate:deploy -w @tam/database",
     "db:check": "npm run migrate:check -w @tam/database",
     "db:recreate": "npm run recreate -w @tam/database --",
-    "build:packages": "npm run db:generate && tsc -b packages/shared packages/database packages/storage packages/telegram",
+    "build:packages": "npm run db:generate && tsc -b packages/shared packages/crypto packages/database packages/storage packages/telegram",
     "build": "npm run build:packages && npm run build -w @tam/api -w @tam/worker -w @tam/web",
     "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
     "lint": "eslint .",

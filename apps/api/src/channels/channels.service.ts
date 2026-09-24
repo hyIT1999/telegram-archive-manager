@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import type { Channel, Prisma } from '@tam/database';
+import type { Prisma } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   ApiErrorCode,
@@ -7,10 +7,17 @@ import {
   type ChannelListQuery,
   type Page,
   TelegramErrorCode,
+  type UpdateChannelRequest,
 } from '@tam/shared';
+import { channelFolderName } from '@tam/storage';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor } from '../common/pagination/cursor.js';
-import { EMPTY_CHANNEL_STATS, toChannelDto } from './channel.mapper.js';
+import {
+  CHANNEL_INCLUDE,
+  type ChannelWithStorage,
+  EMPTY_CHANNEL_STATS,
+  toChannelDto,
+} from './channel.mapper.js';
 import { loadChannelStats } from './channel-stats.js';
 
 /** Keyset position in the (createdAt desc, id desc) order. */
@@ -30,23 +37,54 @@ export class ChannelsService {
       where: { AND: [searchFilter(query.q), afterCursor(cursor)] },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
+      include: CHANNEL_INCLUDE,
     });
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
     const last = page.at(-1);
     return {
-      items: await this.withStats(page),
+      items: await this.withStatsAll(page),
       nextCursor: hasMore && last ? encodeCursor([last.createdAt.toISOString(), last.id]) : null,
     };
   }
 
   async get(id: string): Promise<ChannelDto> {
+    const channel = await this.prisma.channel.findUnique({ where: { id }, include: CHANNEL_INCLUDE });
+    if (!channel) {
+      throw channelNotFound();
+    }
+    return this.withStats(channel);
+  }
+
+  /**
+   * Chooses where the channel's media is saved. The channel's folder name is fixed the first
+   * time, so a later rename in Telegram does not split its files over two folders.
+   */
+  async update(id: string, request: UpdateChannelRequest): Promise<ChannelDto> {
     const channel = await this.prisma.channel.findUnique({ where: { id } });
     if (!channel) {
-      throw new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
+      throw channelNotFound();
     }
-    const stats = await loadChannelStats(this.prisma, [channel.id]);
-    return toChannelDto(channel, stats.get(channel.id) ?? EMPTY_CHANNEL_STATS);
+    const location = await this.prisma.storageLocation.findUnique({
+      where: { id: request.storageLocationId },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new NotFoundException({
+        message: 'Storage location not found',
+        code: ApiErrorCode.NOT_FOUND,
+      });
+    }
+    const updated = await this.prisma.channel.update({
+      where: { id },
+      data: {
+        storageLocationId: location.id,
+        storageFolder:
+          channel.storageFolder ?? channelFolderName(channel.title, channel.telegramChatId.toString()),
+      },
+      include: CHANNEL_INCLUDE,
+    });
+    return this.withStats(updated);
   }
 
   /**
@@ -85,17 +123,25 @@ export class ChannelsService {
     });
     const channel =
       count === 1
-        ? await this.prisma.channel.findUniqueOrThrow({ where: { telegramChatId: chatId } })
-        : await this.prisma.channel.update({ where: { telegramChatId: chatId }, data: details });
-    const stats = await loadChannelStats(this.prisma, [channel.id]);
-    return {
-      channel: toChannelDto(channel, stats.get(channel.id) ?? EMPTY_CHANNEL_STATS),
-      created: count === 1,
-    };
+        ? await this.prisma.channel.findUniqueOrThrow({
+            where: { telegramChatId: chatId },
+            include: CHANNEL_INCLUDE,
+          })
+        : await this.prisma.channel.update({
+            where: { telegramChatId: chatId },
+            data: details,
+            include: CHANNEL_INCLUDE,
+          });
+    return { channel: await this.withStats(channel), created: count === 1 };
+  }
+
+  private async withStats(channel: ChannelWithStorage): Promise<ChannelDto> {
+    const [dto] = await this.withStatsAll([channel]);
+    return dto as ChannelDto;
   }
 
   /** Attaches counters to a page of channels with a single stats query. */
-  private async withStats(channels: readonly Channel[]): Promise<ChannelDto[]> {
+  private async withStatsAll(channels: readonly ChannelWithStorage[]): Promise<ChannelDto[]> {
     const stats = await loadChannelStats(
       this.prisma,
       channels.map((channel) => channel.id),
@@ -104,6 +150,10 @@ export class ChannelsService {
       toChannelDto(channel, stats.get(channel.id) ?? EMPTY_CHANNEL_STATS),
     );
   }
+}
+
+function channelNotFound(): NotFoundException {
+  return new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
 }
 
 function searchFilter(q: string | undefined): Prisma.ChannelWhereInput {

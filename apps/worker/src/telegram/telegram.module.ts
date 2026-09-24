@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SecretBox } from '@tam/telegram';
+import { SecretBox } from '@tam/crypto';
 import type { WorkerEnv } from '../config/env.schema.js';
 import { TelegramAuthService } from './telegram-auth.service.js';
 import { TelegramConnection } from './telegram-connection.js';

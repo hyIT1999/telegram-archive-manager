@@ -14,6 +14,7 @@ ENV NPM_CONFIG_UPDATE_NOTIFIER=false \
 FROM base AS manifests
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/crypto/package.json packages/crypto/
 COPY packages/database/package.json packages/database/
 COPY packages/storage/package.json packages/storage/
 COPY packages/telegram/package.json packages/telegram/
@@ -44,6 +45,7 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-deps /app/packages ./packages
 COPY --from=prod-deps /app/apps/worker ./apps/worker
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
+COPY --from=build /app/packages/crypto/dist ./packages/crypto/dist
 COPY --from=build /app/packages/database/dist ./packages/database/dist
 COPY --from=build /app/packages/storage/dist ./packages/storage/dist
 COPY --from=build /app/packages/telegram/dist ./packages/telegram/dist

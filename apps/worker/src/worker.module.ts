@@ -4,7 +4,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '@tam/database/nest';
 import { ALL_QUEUES } from '@tam/shared';
-import { validateWorkerEnv, type WorkerEnv } from './config/env.schema.js';
+import { workerConfigOptions } from './config/config-module.js';
+import type { WorkerEnv } from './config/env.schema.js';
 import { DatabaseStartupCheck } from './database/database-startup-check.js';
 import { HeartbeatService } from './heartbeat/heartbeat.service.js';
 import { bullRootOptions } from './queues/bull-options.js';
@@ -15,13 +16,7 @@ import { TelegramModule } from './telegram/telegram.module.js';
 
 @Module({
   imports: [
-    // main.ts loads the .env files before this module is evaluated; tests set process.env.
-    ConfigModule.forRoot({
-      isGlobal: true,
-      cache: true,
-      ignoreEnvFile: true,
-      validate: validateWorkerEnv,
-    }),
+    ConfigModule.forRoot(workerConfigOptions()),
     PrismaModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<WorkerEnv, true>) => ({

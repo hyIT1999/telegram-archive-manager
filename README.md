@@ -20,8 +20,9 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 |---|---|---|
 | 1 | Kiến trúc, monorepo, PostgreSQL, Redis, Prisma, NestJS API nền, worker khung, Angular shell, Docker | ✅ Hoàn thành |
 | 2 | Đăng nhập Telegram (mtcute), danh sách channel/group, chọn channel | ✅ Hoàn thành |
+| 2b | Chọn nơi lưu cho từng channel: thư mục trên máy hoặc Google Drive | ✅ Hoàn thành |
 | 3 | Import lịch sử message, import jobs, BullMQ | ⏳ Tiếp theo |
-| 4 | Tải media (resume/retry/dedup/checksum), storage local/S3, thumbnail | Kế hoạch |
+| 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | Kế hoạch |
 | 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | Kế hoạch |
 | 6 | Search, Tags, Favorites, Filters | Kế hoạch |
 | 7 | Tiến trình realtime (SSE), sync message mới | Kế hoạch |
@@ -31,12 +32,12 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 
 | Trang | Phase |
 |---|---|
-| Import Jobs: danh sách job, bước 4–6 của wizard `imports/new`, chi tiết `imports/:id` | 3 (realtime ở 7) |
+| Import Jobs: danh sách job, bước 5–7 của wizard `imports/new`, chi tiết `imports/:id` | 3 (realtime ở 7) |
 | All Messages, Message detail, Videos/Images/Documents/Audio | 5 |
 | Settings → Archive settings | 5 (phần Appearance đã dùng được) |
 | Search, Tags, Favorites | 6 |
 
-Đã dùng được từ Phase 2: bước 1–3 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive) và mục **Settings → Telegram account**.
+Đã dùng được từ Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu) và các mục **Settings → Telegram account**, **Settings → Storage locations**.
 
 ## Kiến trúc tổng quan
 
@@ -50,14 +51,17 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
                                   queues: telegram-import, media-download,
                                           thumbnail-generation, metadata-processing
                                                      │
-                                          Storage: local FS (dev) | S3-compatible (prod)
+                            Nơi lưu (chọn theo từng channel): thư mục trên máy | Google Drive
 ```
 
 - **PostgreSQL là nguồn sự thật duy nhất.** BullMQ chỉ vận chuyển job. Mọi chuyển trạng thái đều là compare-and-set; unique constraint bảo đảm không bao giờ có message hoặc media trùng (idempotency).
 - **Chỉ worker giữ kết nối Telegram**, vì hai process dùng chung một auth key sẽ gặp `AUTH_KEY_DUPLICATED`. API không có `TELEGRAM_API_ID/HASH`.
   - Nếu lỡ chạy hai worker, chỉ worker giữ Redis lease `tam:tg:owner` mới kết nối Telegram; worker kia ở trạng thái `STANDBY` và tự thay thế khi worker đầu dừng.
-  - Thao tác Telegram từ web (các bước đăng nhập, làm mới danh sách chat) đi qua **RPC trên Redis pub/sub**: API publish yêu cầu vào `tam:tg:rpc:request` và chờ trả lời trên `tam:tg:rpc:reply:<id>`, tối đa `TELEGRAM_RPC_TIMEOUT_MS`. Pub/sub không ghi vào AOF, nên mã đăng nhập và mật khẩu 2FA không bao giờ nằm lại trong Redis. Nếu không worker nào nhận yêu cầu, API trả `503` ngay.
-- **Binary media không bao giờ nằm trong PostgreSQL.** Storage key có dạng `channels/{channelId}/messages/{messageId}/media/{mediaId}/original`.
+  - Thao tác Telegram từ web (các bước đăng nhập, làm mới danh sách chat) đi qua **RPC trên Redis pub/sub**: API publish yêu cầu vào `<BULLMQ_PREFIX>:tg:rpc:request` và chờ trả lời trên `<BULLMQ_PREFIX>:tg:rpc:reply:<id>`, tối đa `TELEGRAM_RPC_TIMEOUT_MS`.
+    - Pub/sub không ghi vào AOF, nên mã đăng nhập và mật khẩu 2FA không bao giờ nằm lại trong Redis.
+    - Nếu không worker nào nhận yêu cầu, API trả `503` ngay.
+    - Kênh pub/sub có prefix vì Redis không tách pub/sub theo số database. Nhờ vậy test chạy song song với dev stack, hay nhiều môi trường dùng chung một Redis, không trả lời nhầm yêu cầu của nhau.
+- **Binary media không bao giờ nằm trong PostgreSQL.** File nằm ở nơi lưu mà channel đã chọn, theo cấu trúc dễ đọc: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
 
@@ -66,9 +70,10 @@ apps/web           Angular 22 (standalone, zoneless, signals, Material 3)
 apps/api           NestJS 12 REST (+ SSE từ Phase 7), CLI create-user
 apps/worker        NestJS 12 standalone + BullMQ
 packages/shared    Contract dùng chung: enums, zod schemas, DTO, tên queue, event
+packages/crypto    SecretBox (AES-256-GCM) cho bí mật lưu trong DB: session Telegram, token Google
 packages/database  Prisma schema + migrations + generated client
 packages/telegram  Interface TelegramClient, adapter mtcute, mapper message/media, session PostgreSQL mã hoá
-packages/storage   Interface StorageDriver (+ Local/S3 từ Phase 4)
+packages/storage   StorageDriver: thư mục trên máy, Google Drive (OAuth device flow, upload resumable)
 ```
 
 ---
@@ -84,7 +89,7 @@ packages/storage   Interface StorageDriver (+ Local/S3 từ Phase 4)
 | Docker Engine + Compose v2 | mới | Chỉ cho production trên **Linux** |
 | Tài khoản Telegram + `api_id`/`api_hash` | — | Cần từ Phase 2 |
 
-Dung lượng đĩa: `node_modules` khoảng 0.6–1 GB. Media tải về có thể rất lớn, nên đặt `STORAGE_LOCAL_ROOT` ở ổ còn nhiều chỗ, hoặc dùng S3 (Phase 4).
+Dung lượng đĩa: `node_modules` khoảng 0.6–1 GB. Media tải về có thể rất lớn, nên cho channel lưu vào thư mục ở ổ còn nhiều chỗ (`STORAGE_LOCAL_ROOTS`) hoặc vào Google Drive (mục 9).
 
 ## 2. Install
 
@@ -124,15 +129,17 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `TELEGRAM_SESSION_DATABASE_URL` | worker | — | DB riêng cho session Telegram (`…/tam_tg`) |
 | `TELEGRAM_SESSION_KEY` | worker | — | 32 byte base64, dùng mã hoá auth key và trạng thái đăng nhập |
 | `WORKER_HEARTBEAT_INTERVAL_MS` | worker | `5000` | Chu kỳ heartbeat (1000–60000); key có TTL = 3 × chu kỳ |
-| `STORAGE_DRIVER` | worker (api từ Phase 4) | `local` | `local` \| `s3` |
-| `STORAGE_LOCAL_ROOT` | worker (api từ Phase 4) | `./data/storage` | **Dùng đường dẫn tuyệt đối**, vì api và worker chạy ở thư mục khác nhau |
+| `STORAGE_LOCAL_ROOT` | api, worker | — | Thư mục của nơi lưu có sẵn "This computer". **Dùng đường dẫn tuyệt đối**, vì api và worker chạy ở thư mục khác nhau |
+| `STORAGE_LOCAL_ROOTS` | api (worker từ Phase 4) | = `STORAGE_LOCAL_ROOT` | Các thư mục, ngăn cách bằng `;`, mà web được phép thêm làm nơi lưu (và thư mục con bên trong). Web không bao giờ ghi được ra ngoài các thư mục này |
+| `STORAGE_SECRET_KEY` | api (worker từ Phase 4) | — | 32 byte base64, dùng mã hoá token Google Drive lưu trong DB. Cần khi dùng Google Drive |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | api (worker từ Phase 4) | — | OAuth client loại "TVs and Limited Input devices" để kết nối Google Drive (mục 9). Phải đặt cả hai cùng lúc |
 | `MIN_FREE_DISK_MB` | worker | `2048` | Dừng tải khi dung lượng trống thấp hơn ngưỡng này (Phase 4) |
-| `S3_*` | worker/api (Phase 4) | — | Endpoint/bucket/key cho storage S3-compatible; chỉ nằm ở server |
+| `S3_*` | — | — | Dự kiến cho storage S3-compatible, chưa dùng |
 | `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | docker compose | — | Nên dùng chuỗi **hex** (`openssl rand -hex 24`), vì chúng nằm trong URL |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | docker compose (`bootstrap`) | — | Admin web đầu tiên; mật khẩu tối thiểu 12 ký tự |
 | `WEB_PORT` | docker compose | `8080` | Cổng host của container web (nginx) |
 
-Tạo key session Telegram:
+Tạo `TELEGRAM_SESSION_KEY` và `STORAGE_SECRET_KEY` (mỗi biến một key riêng, chạy lệnh hai lần):
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
@@ -180,7 +187,7 @@ Quy ước:
 | `redis` | Redis 7.4.11, có mật khẩu, AOF, `noeviction` (volume `redisdata`) |
 | `migrate` | One-shot `prisma migrate deploy` |
 | `bootstrap` | One-shot tạo admin từ `ADMIN_EMAIL`/`ADMIN_PASSWORD` nếu chưa có. Mật khẩu truyền qua stdin |
-| `api` | NestJS API (cổng nội bộ 3100, healthcheck `/api/health/live`) |
+| `api` | NestJS API (cổng nội bộ 3100, healthcheck `/api/health/live`); volume `media` để kiểm tra và phục vụ nơi lưu |
 | `worker` | BullMQ worker. **Đúng 1 replica**; `stop_grace_period: 60s`; volume `media` |
 | `web` | nginx phục vụ Angular và proxy `/api/`, cổng `${WEB_PORT:-8080}` |
 
@@ -200,6 +207,7 @@ bash scripts/compose-smoke.sh              # cổng 18080; đổi bằng SMOKE_W
 ```
 
 - Mỗi service chỉ nhận đúng các biến nó cần: secret Telegram chỉ vào `worker`, credential DB không vào `web`.
+- Nơi lưu "This computer" trong Docker là volume `media` (`/data/storage`). Muốn cho phép thêm thư mục khác (ổ NAS, ổ phụ), mount thư mục đó vào **cả** `api` và `worker` (ví dụ `/mnt/nas:/data/nas`), rồi đặt `STORAGE_LOCAL_ROOTS: /data/storage;/data/nas` cho `api` trong `docker-compose.yml`.
 - `nginx` gửi `Host $http_host` (giữ cả port), vì CSRF fallback của API so sánh `Origin` với `Host`.
 - SPA có CSP `script-src 'self'`: script khởi tạo theme nằm ở file riêng (`theme-init.js`) và build đã tắt inline critical CSS.
 
@@ -304,7 +312,7 @@ Lỗi có mã ổn định trong `code`:
 
 ## 9. Import channel
 
-Wizard **Import Jobs → New import** gồm 6 bước. Bước 1–3 có từ Phase 2:
+Wizard **Import Jobs → New import** gồm 7 bước. Bước 1–4 đã dùng được:
 1. **Connect Telegram** (mục 8). Nếu đã đăng nhập, wizard tự chuyển sang bước 2.
 2. **Channels & groups:** danh sách channel, supergroup và group mà tài khoản đã tham gia, có ô tìm kiếm (không phân biệt dấu: "hoc" tìm ra "Học") và bộ lọc loại chat.
    - Danh sách được worker cache trong bảng `telegram_dialogs`: tự đọc sau khi đăng nhập, khi worker khởi động nếu cache cũ hơn 6 giờ, và khi bấm **Refresh**. Trong lúc worker đọc, trang tự cập nhật.
@@ -313,11 +321,67 @@ Wizard **Import Jobs → New import** gồm 6 bước. Bước 1–3 có từ Ph
    - Server chỉ nhận chat có trong danh sách cache và lấy mọi thông tin (tên, access hash, cờ protected) từ đó, không tin dữ liệu từ trình duyệt.
    - Chat không còn trong danh sách trả `404 DIALOG_NOT_FOUND`; chat protected trả `422 CHAT_PROTECTED`.
    - Thao tác idempotent: `201` khi tạo mới, `200` khi chat đã có. Gửi trùng hay gửi đồng thời cũng chỉ tạo đúng một channel.
+4. **Storage location:** chọn nơi lưu media của channel (xem "Nơi lưu" bên dưới), rồi bấm **Save location** (`PATCH /api/channels/:id` với `{storageLocationId}`).
+   - Nơi lưu mặc định được chọn sẵn.
+   - Thêm nơi lưu mới ngay tại đây: **Folder on this computer** hoặc **Google Drive**.
 
-*(Bước 4–6 triển khai ở Phase 3–4.)* Luồng dự kiến:
+*(Bước 5–7 triển khai ở Phase 3–4.)* Luồng dự kiến:
 1. Chọn **Import all history** hoặc **Import from date**, rồi bấm Start.
 2. Lịch sử được đọc theo trang 100 message. Mỗi trang được ghi trong một transaction, cùng với cursor, nên crash hay restart đều tiếp tục đúng chỗ và **không tạo bản trùng**.
-3. Media được tải qua queue `media-download`: resume từ file `.part`, retry với exponential backoff, kiểm tra SHA-256, không tải lại file trùng. Có thể Pause/Resume/Cancel.
+3. Media được tải qua queue `media-download` vào nơi lưu của channel: resume từ file `.part`, retry với exponential backoff, kiểm tra SHA-256, không tải lại file trùng. Có thể Pause/Resume/Cancel.
+
+### Nơi lưu (storage locations)
+
+Mỗi channel lưu media vào một nơi lưu. Quản lý ở **Settings → Storage locations**, hoặc ngay tại bước 4 của wizard.
+
+| Loại | Chi tiết |
+|---|---|
+| **This computer** (có sẵn) | Thư mục `STORAGE_LOCAL_ROOT`. Là nơi lưu mặc định lúc đầu, và không xoá được |
+| **Folder on this computer** | Thư mục trên máy chạy archive (máy chạy api/worker, không phải máy đang mở trình duyệt), chọn bằng trình duyệt thư mục. Chỉ được chọn bên trong `STORAGE_LOCAL_ROOTS`, nên web không thể ghi vào chỗ nhạy cảm, kể cả qua symlink/junction. Có thể tạo thư mục con mới khi thêm |
+| **Google Drive** | Một thư mục trong My Drive, do ứng dụng tạo (mặc định "Unofficial Telegram Archive"). Ứng dụng chỉ có quyền `drive.file`: chỉ thấy các file và thư mục nó tạo ra, không đọc được file khác của bạn |
+
+- **Cấu trúc file** trong mọi loại nơi lưu, dễ xem như một bản sao của channel: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`, ví dụ `Học tập Vật Lý (-1001234567890)/2026-09/1523 - Bài giảng 5.pdf`.
+  - Tên được làm sạch để hợp lệ trên Windows, Linux và Google Drive: bỏ ký tự cấm, giữ tiếng Việt.
+  - Tên thư mục channel được giữ cố định từ lần chọn đầu, nên đổi tên channel trên Telegram không làm tách file ra hai thư mục.
+- **Kiểm tra (Check):** ghi, đọc lại rồi xoá một file nhỏ, sau đó báo dung lượng trống (với Google Drive là quota của tài khoản). Web tự kiểm tra mỗi nơi lưu khi mở danh sách, nên nơi lưu hỏng (thư mục bị xoá, quyền Google bị thu hồi) hiện lỗi ngay.
+- **Đổi nơi lưu** của một channel chỉ áp dụng cho file tải sau đó. File đã lưu vẫn ở chỗ cũ, vì mỗi file ghi nhớ nơi lưu của nó.
+- **Xoá nơi lưu** chỉ được khi không còn channel hay file nào dùng. Các file đã lưu trong thư mục hoặc Drive vẫn còn nguyên. Với Google Drive, ứng dụng thu hồi luôn quyền truy cập.
+
+API (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `GET /api/storage/locations` | Danh sách nơi lưu, kèm những gì server cho phép thêm (`localRoots`, Google Drive có dùng được không) |
+| `GET /api/storage/local/folders?path=` | Thư mục con của `path` (trong các thư mục được phép); không có `path` thì trả các thư mục gốc |
+| `POST /api/storage/locations` | Thêm thư mục trên máy: `{name, path, subfolder?}`. Chỉ tạo khi ghi thử thành công |
+| `PATCH /api/storage/locations/:id` | Đổi tên, hoặc đặt làm mặc định (`{isDefault: true}`) |
+| `POST /api/storage/locations/:id/check` | Ghi, đọc, xoá thử một file nhỏ, rồi báo dung lượng |
+| `DELETE /api/storage/locations/:id` | Xoá nơi lưu không còn dùng (`409 LOCATION_IN_USE` / `LOCATION_BUILT_IN`) |
+| `POST /api/storage/google/connect` | Bắt đầu đăng nhập Google bằng mã thiết bị: `{name, folderName?, locationId?}` |
+| `POST /api/storage/google/connect/:flowId/poll` | Hỏi Google đã được đồng ý chưa: `pending` / `authorized` / `denied` / `expired` |
+
+### Kết nối Google Drive
+
+Làm một lần, giống việc tạo `api_id` cho Telegram. Tài khoản Google dùng để tạo client không cần là tài khoản sẽ lưu file.
+
+1. Vào <https://console.cloud.google.com>, tạo một project (ví dụ "Telegram Archive").
+2. **APIs & Services → Library**: bật **Google Drive API**.
+3. **Google Auth Platform** (hoặc **OAuth consent screen**):
+   - Chọn User type **External**, điền tên ứng dụng và email.
+   - Tên ứng dụng không được chứa "Google". Nếu có chữ "Telegram", phải có "Unofficial" đứng trước.
+   - Scope chỉ cần `.../auth/drive.file`, `openid` và `email`.
+4. **Publish app** (chuyển sang *In production*). **Bắt buộc**: ở trạng thái *Testing*, Google cho refresh token hết hạn sau 7 ngày và bạn phải kết nối lại mỗi tuần. Vì chỉ dùng scope *non-sensitive*, Google không cần duyệt ứng dụng.
+5. **Credentials → Create credentials → OAuth client ID**, chọn loại **TVs and Limited Input devices**.
+6. Chép Client ID và Client secret vào `.env`:
+   ```env
+   GOOGLE_OAUTH_CLIENT_ID=1234567890-xxxx.apps.googleusercontent.com
+   GOOGLE_OAUTH_CLIENT_SECRET=GOCSPX-...
+   STORAGE_SECRET_KEY=<32 byte base64, xem mục 3>
+   ```
+   Sau đó khởi động lại api.
+7. Trên web: **Settings → Storage locations → Google Drive** (hoặc bước 4 của wizard) → **Get a code**. Mở <https://www.google.com/device> trên bất kỳ thiết bị nào, nhập mã hiển thị, chọn tài khoản rồi cho phép. Giữ nguyên dấu tích quyền Google Drive.
+
+Vì sao dùng mã thiết bị: cách này không cần redirect URI, nên dùng được dù bạn mở archive bằng `localhost`, IP LAN hay domain. Refresh token được mã hoá bằng `STORAGE_SECRET_KEY` và không bao giờ gửi xuống trình duyệt.
 
 ## 10. Start sync
 
@@ -342,13 +406,13 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | Lỡ kết nối vào Redis 6379 | Đó là Redis 5 của dự án khác. BullMQ 6 sẽ cảnh báo phiên bản và job có thể mất khi restart. Hãy dùng 6380 |
 | `EADDRINUSE :3000` / `:4200` | Cổng của dự án khác. Dự án này dùng 3100 (API) và 4300 (web) |
 | `/api/health/ready` báo `worker: missing` | Worker chưa chạy, hoặc không ghi được heartbeat vào Redis. Chạy `npm run dev:run -w @tam/worker` sau khi build |
-| API/worker thoát ngay với `Config validation error` / `Invalid environment` | Biến trong `.env` sai định dạng; thông báo liệt kê đúng tên biến (không in giá trị) |
+| API/worker thoát ngay với `Invalid api environment` / `Invalid worker environment` | Biến trong `.env` sai định dạng; thông báo liệt kê đúng tên biến (không in giá trị). Biến để trống (`KEY=`) được coi như chưa đặt |
 | `prisma migrate reset` bị từ chối | Prisma chặn lệnh này khi chạy từ AI agent. Dùng `npm run db:recreate -- --yes` (chỉ cho dev) |
 | `npm warn Unknown cli config "--email"` khi tạo user | PowerShell nuốt dấu `--` khi pipe vào `npm`. Gọi thẳng `node apps/api/dist/cli/create-user.js --email … --password-stdin` |
 | `db:check` báo khác biệt | Có index/constraint chỉ tồn tại trong SQL tay. Hãy khai báo trong `schema.prisma` |
 | npm cảnh báo `install-scripts … not yet covered` | Xem `npm install-scripts ls`, duyệt package tin cậy bằng `npm install-scripts approve <pkg>` |
 | Ai đó nâng TypeScript lên 7.x | Build Angular/ESLint hỏng. Giữ `typescript ~6.0.3` (đã ghim bằng `overrides`) |
-| Ổ đĩa đầy | Giảm `MIN_FREE_DISK_MB` là không đủ; chuyển `STORAGE_LOCAL_ROOT` sang ổ khác hoặc dùng S3 (Phase 4). Có thể dọn cache: `npm cache clean --force` |
+| Ổ đĩa đầy | Giảm `MIN_FREE_DISK_MB` là không đủ. Hãy thêm ổ khác vào `STORAGE_LOCAL_ROOTS` rồi chọn thư mục ở đó, hoặc chuyển channel sang Google Drive (mục 9). Có thể dọn cache: `npm cache clean --force` |
 | Nhiều tab mở cùng lúc, request bị treo (HTTP/1.1) | Trình duyệt giới hạn 6 kết nối mỗi host cho mọi tab. Dev: đóng bớt tab. Production: bật HTTP/2 ở reverse proxy |
 | Giao diện web mất style sau nginx | Kiểm tra CSP: build phải tắt `inlineCritical` và không có inline script (`theme-init.js` là file riêng) |
 | Web báo "The background worker is not running" / API trả `503 WORKER_UNAVAILABLE` | Không có heartbeat của worker trong Redis. Chạy worker (`npm run dev` chạy tất cả); trang tự nhận khi worker lên |
@@ -361,3 +425,13 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | "The code has expired" / `409 INVALID_LOGIN_STATE` | Mã hết hạn, hoặc lần đăng nhập đang dở đã quá 15 phút. Trang tự quay về bước nhập số điện thoại; gửi lại số để nhận mã mới |
 | `422 SIGN_UP_REQUIRED` / `PAYMENT_REQUIRED` | Số điện thoại chưa có tài khoản Telegram, hoặc Telegram yêu cầu đăng nhập bằng app chính thức trước. Ứng dụng này không tạo tài khoản mới |
 | Danh sách chat trống sau khi đăng nhập | Worker đang đọc danh sách (trang hiện "Reading your chats from Telegram…"). Nếu vẫn trống, bấm **Refresh**; chỉ channel, supergroup và group đã tham gia mới được liệt kê (không có chat riêng/bot) |
+| Nút **Folder on this computer** bị mờ | Server chưa có thư mục nào được phép. Đặt `STORAGE_LOCAL_ROOT` (và/hoặc `STORAGE_LOCAL_ROOTS`) rồi khởi động lại api |
+| `422 PATH_NOT_ALLOWED`: "Choose a folder inside …" | Thư mục nằm ngoài `STORAGE_LOCAL_ROOTS`, hoặc là symlink/junction trỏ ra ngoài. Thêm ổ/thư mục đó vào `STORAGE_LOCAL_ROOTS` (ngăn cách bằng `;`) |
+| `422 STORAGE_NOT_WRITABLE`: "No permission to write…" | Tài khoản chạy api/worker không ghi được vào thư mục. Cấp quyền ghi, hoặc chọn thư mục khác |
+| Google Drive: "Google Drive is not set up on the server" | Thiếu `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` hoặc `STORAGE_SECRET_KEY` (thông báo ghi rõ thiếu gì). Làm theo "Kết nối Google Drive" ở mục 9, rồi khởi động lại api |
+| "Google rejected the OAuth client" | Client ID/secret sai, hoặc client không phải loại **TVs and Limited Input devices** |
+| Nơi lưu Google báo "access was revoked or has expired", **cứ mỗi tuần một lần** | Ứng dụng OAuth còn ở trạng thái *Testing* (refresh token chỉ sống 7 ngày). **Publish app** trên Google Cloud Console, rồi chọn **Reconnect Google account** trên nơi lưu đó |
+| "Google Drive access was not allowed" | Khi đồng ý trên trang Google, quyền Google Drive đã bị bỏ tích. Kết nối lại và giữ dấu tích |
+| "This Google account cannot open the folder …" | Khi kết nối lại, bạn đã chọn một tài khoản Google khác. Hãy đăng nhập đúng tài khoản ghi trên nơi lưu, hoặc thêm một nơi lưu Google Drive mới |
+| "Google Drive is full." | Hết dung lượng Google. Giải phóng dung lượng, hoặc chuyển channel sang nơi lưu khác |
+| Đổi `STORAGE_SECRET_KEY` xong, nơi lưu Google báo lỗi giải mã | Token cũ được mã hoá bằng key cũ. Chọn **Reconnect Google account** cho từng nơi lưu Google Drive |

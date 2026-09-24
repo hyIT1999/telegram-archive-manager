@@ -5,6 +5,9 @@ import type {
   ChannelDto,
   Page,
   StatsDto,
+  StorageCheckDto,
+  StorageLocationDto,
+  StorageLocationListDto,
   TelegramDialogDto,
   TelegramDialogListDto,
   TelegramStatusDto,
@@ -67,6 +70,8 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
     backfillComplete: true,
     lastSyncedAt: '2026-09-23T21:15:00.000Z',
     migratedToChannelId: null,
+    storageLocation: null,
+    storageFolder: null,
     createdAt: '2026-09-01T10:00:00.000Z',
     updatedAt: '2026-09-23T21:15:00.000Z',
     stats: { messages: 4_812, media: 640, downloadedMedia: 600, storageBytes: 3 * 1024 ** 3 },
@@ -76,6 +81,53 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
 
 export function makePage<T>(items: T[], nextCursor: string | null = null): Page<T> {
   return { items, nextCursor };
+}
+
+let locationSequence = 0;
+
+export function makeStorageLocation(overrides: Partial<StorageLocationDto> = {}): StorageLocationDto {
+  locationSequence += 1;
+  return {
+    id: `0199a0b1-0000-7000-8000-5${String(locationSequence).padStart(11, '0')}`,
+    kind: 'LOCAL',
+    name: `Archive ${locationSequence}`,
+    displayPath: `D:\\Archive\\Folder ${locationSequence}`,
+    accountEmail: null,
+    isDefault: false,
+    builtIn: false,
+    lastError: null,
+    lastCheckedAt: '2026-09-24T08:00:00.000Z',
+    channelCount: 0,
+    createdAt: '2026-09-24T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** A successful check: the location could be written, with its free space. */
+export function makeStorageCheck(
+  location: StorageLocationDto,
+  overrides: Partial<StorageCheckDto> = {},
+): StorageCheckDto {
+  return {
+    location,
+    ok: true,
+    space: { freeBytes: 120 * 1024 ** 3, totalBytes: 500 * 1024 ** 3, usedBytes: 380 * 1024 ** 3 },
+    ...overrides,
+  };
+}
+
+export function makeStorageList(
+  items: StorageLocationDto[],
+  capabilities: Partial<StorageLocationListDto['capabilities']> = {},
+): StorageLocationListDto {
+  return {
+    items,
+    capabilities: {
+      localRoots: ['D:\\Archive'],
+      googleDrive: { available: true, reason: null },
+      ...capabilities,
+    },
+  };
 }
 
 /** A worker connected to Telegram, with the account logged out. */

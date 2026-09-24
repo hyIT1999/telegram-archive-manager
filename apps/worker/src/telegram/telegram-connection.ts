@@ -1,10 +1,10 @@
 import { hostname } from 'node:os';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { SecretBox } from '@tam/crypto';
 import { REDIS_KEYS, TelegramErrorCode } from '@tam/shared';
 import {
   MtcuteTelegramAdapter,
-  type SecretBox,
   type SessionStorage,
   TelegramError,
   createMtcuteClient,

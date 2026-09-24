@@ -1,0 +1,129 @@
+:host {
+  display: grid;
+  gap: 12px;
+}
+
+.locations {
+  display: grid;
+  gap: 8px;
+}
+
+.location {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 4px 8px 16px;
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: var(--mat-sys-corner-medium);
+  background: var(--mat-sys-surface-container-lowest);
+
+  &:has(.radio:focus-visible) {
+    outline: 2px solid var(--mat-sys-primary);
+    outline-offset: 2px;
+  }
+
+  &.selected {
+    border-color: var(--mat-sys-primary);
+    background: var(--mat-sys-secondary-container);
+    color: var(--mat-sys-on-secondary-container);
+  }
+}
+
+.choice {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 0;
+}
+
+label.choice {
+  cursor: pointer;
+}
+
+.radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 11px 0 0;
+  accent-color: var(--mat-sys-primary);
+}
+
+.icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--mat-sys-corner-medium);
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+}
+
+.text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font: var(--mat-sys-title-small);
+}
+
+.path,
+.meta {
+  font: var(--mat-sys-body-small);
+  color: var(--mat-sys-on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 0 8px;
+  border-radius: var(--mat-sys-corner-full);
+  background: var(--mat-sys-tertiary-container);
+  color: var(--mat-sys-on-tertiary-container);
+  font: var(--mat-sys-label-small);
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: var(--mat-sys-label-medium);
+  color: var(--mat-sys-on-surface-variant);
+
+  mat-icon {
+    width: 16px;
+    height: 16px;
+    font-size: 16px;
+  }
+
+  &[data-state='ok'] mat-icon {
+    color: var(--mat-sys-primary);
+  }
+
+  &[data-state='failed'] {
+    color: var(--mat-sys-error);
+  }
+}
+
+.menu {
+  flex: none;
+}
+
+.add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.hint {
+  margin: 0;
+  font: var(--mat-sys-body-small);
+  color: var(--mat-sys-on-surface-variant);
+}

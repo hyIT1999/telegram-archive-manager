@@ -18,9 +18,10 @@ import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { Notice } from '../../shared/components/notice/notice';
 import { PageHeader } from '../../shared/components/page-header/page-header';
-import { toApiError } from '../../shared/models';
+import { type ChannelDto, toApiError } from '../../shared/models';
 import { channelHandle, channelInitials, chatTypeLabel } from '../channels/channel-labels';
 import { ChannelsApi, type CreatedChannel } from '../channels/channels-api';
+import { StorageLocationList } from '../storage/storage-location-list';
 import { ChatPicker } from '../telegram/chat-picker';
 import { TelegramChats } from '../telegram/telegram-chats';
 import { TelegramConnect } from '../telegram/telegram-connect';
@@ -32,11 +33,12 @@ export interface WizardStep {
   readonly arrives?: string;
 }
 
-/** The import flow: steps 1–3 pick and add a chat; the importer (Phase 3) adds 4–6. */
+/** The import flow: steps 1–4 pick a chat and where to save it; the importer (Phase 3) adds 5–7. */
 export const WIZARD_STEPS: readonly WizardStep[] = [
   { label: 'Connect Telegram' },
   { label: 'Channels & groups' },
   { label: 'Select channel' },
+  { label: 'Storage location' },
   { label: 'Import mode', arrives: 'Phase 3' },
   { label: 'Start', arrives: 'Phase 3' },
   { label: 'Progress', arrives: 'Phase 3' },
@@ -45,6 +47,7 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
 const CONNECT = 0;
 const CHATS = 1;
 const CONFIRM = 2;
+const STORAGE = 3;
 
 @Component({
   selector: 'app-import-wizard-page',
@@ -57,6 +60,7 @@ const CONFIRM = 2;
     Notice,
     PageHeader,
     RouterLink,
+    StorageLocationList,
     TelegramConnect,
   ],
   templateUrl: './import-wizard-page.html',
@@ -77,7 +81,10 @@ export class ImportWizardPage {
     if (!this.session.ready()) {
       return CONNECT;
     }
-    return this.chats.selected() ? CONFIRM : CHATS;
+    if (!this.chats.selected()) {
+      return CHATS;
+    }
+    return this.added() ? STORAGE : CONFIRM;
   });
 
   /**
@@ -108,10 +115,31 @@ export class ImportWizardPage {
   });
   protected readonly adding = signal(false);
 
+  /** The archive channel, kept up to date after its storage location is saved. */
+  protected readonly channel = linkedSignal<CreatedChannel | null, ChannelDto | null>({
+    source: this.added,
+    computation: (added) => added?.channel ?? null,
+  });
+  /** The location picked in step 4; starts from the channel's own. */
+  protected readonly storageChoice = linkedSignal<ChannelDto | null, string | null>({
+    source: this.channel,
+    computation: (channel, previous) => channel?.storageLocation?.id ?? previous?.value ?? null,
+  });
+  protected readonly storageSaved = computed(() => {
+    const saved = this.channel()?.storageLocation?.id;
+    return saved !== undefined && saved === this.storageChoice();
+  });
+  protected readonly savingStorage = signal(false);
+  protected readonly storageError = linkedSignal<string | null, string | null>({
+    source: this.storageChoice,
+    computation: () => null,
+  });
+
   protected readonly done = computed(() => [
     this.session.ready(),
     this.chats.selected() !== null,
     this.added() !== null,
+    this.channel()?.storageLocation ? true : false,
   ]);
   protected readonly selectedInitials = computed(() =>
     channelInitials(this.chats.selected()?.title ?? ''),
@@ -160,6 +188,26 @@ export class ImportWizardPage {
             this.chats.reload();
           }
         },
+      });
+  }
+
+  protected saveStorage(): void {
+    const channel = this.channel();
+    const storageLocationId = this.storageChoice();
+    if (!channel || !storageLocationId || this.savingStorage()) {
+      return;
+    }
+    this.savingStorage.set(true);
+    this.storageError.set(null);
+    this.channelsApi
+      .update(channel.id, { storageLocationId })
+      .pipe(
+        finalize(() => this.savingStorage.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated) => this.channel.set(updated),
+        error: (error: unknown) => this.storageError.set(toApiError(error).message),
       });
   }
 

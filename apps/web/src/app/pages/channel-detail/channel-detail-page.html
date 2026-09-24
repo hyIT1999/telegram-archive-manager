@@ -86,6 +86,16 @@
           <dd>{{ item.memberCount === null ? 'Unknown' : (item.memberCount | number) }}</dd>
         </div>
         <div>
+          <dt>Media saved to</dt>
+          <dd>
+            @if (item.storageLocation; as location) {
+              {{ location.displayPath }} › {{ item.storageFolder }}
+            } @else {
+              The default location (not chosen yet)
+            }
+          </dd>
+        </div>
+        <div>
           <dt>Automatic sync</dt>
           <dd>{{ item.syncEnabled ? 'On' : 'Off' }}</dd>
         </div>

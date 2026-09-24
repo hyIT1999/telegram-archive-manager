@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { SecretBox, SecretBoxError } from '../src/index.js';
+import { SecretBox, SecretBoxError, isSecretKey } from '../src/index.js';
 
 const key = randomBytes(32).toString('base64');
 
@@ -30,7 +30,7 @@ describe('SecretBox', () => {
   it('rejects a different key and tampered data', () => {
     const sealed = SecretBox.fromBase64(key).seal(Buffer.from('secret'), 'ctx');
     const otherBox = SecretBox.fromBase64(randomBytes(32).toString('base64'));
-    expect(() => otherBox.open(sealed, 'ctx')).toThrow(/TELEGRAM_SESSION_KEY/);
+    expect(() => otherBox.open(sealed, 'ctx')).toThrow(/key changed/);
 
     const tampered = Buffer.from(sealed);
     tampered[tampered.length - 1] = (tampered.at(-1) ?? 0) ^ 0xff;
@@ -40,5 +40,14 @@ describe('SecretBox', () => {
 
   it('requires a 32-byte key', () => {
     expect(() => SecretBox.fromBase64(randomBytes(16).toString('base64'))).toThrow(/32 bytes/);
+  });
+});
+
+describe('isSecretKey', () => {
+  it('accepts only the canonical base64 of 32 bytes', () => {
+    expect(isSecretKey(key)).toBe(true);
+    expect(isSecretKey(randomBytes(16).toString('base64'))).toBe(false);
+    expect(isSecretKey(key.replace(/=+$/, ''))).toBe(false);
+    expect(isSecretKey('not base64 at all')).toBe(false);
   });
 });

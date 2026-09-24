@@ -1,5 +1,7 @@
 import { isIP } from 'node:net';
+import path from 'node:path';
 import type { ConfigService } from '@nestjs/config';
+import { isSecretKey } from '@tam/crypto';
 import { z } from 'zod';
 
 /** Values accepted by LOG_LEVEL (see .env.example). */
@@ -58,6 +60,19 @@ function toTrustProxySetting(value: string): TrustProxySetting {
   return HOP_COUNT_PATTERN.test(value) ? Number(value) : splitList(value);
 }
 
+const absolutePath = z
+  .string()
+  .trim()
+  .refine((value) => path.isAbsolute(value), 'must be an absolute path');
+
+/** Folder lists are separated by ";" (Windows paths contain ":" and may contain ","). */
+function splitPaths(value: string): string[] {
+  return value
+    .split(';')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
 function requiredUrl(description: string) {
   return (issue: { input?: unknown }) =>
     issue.input === undefined ? 'is required' : `must be a ${description}`;
@@ -95,6 +110,30 @@ const envObjectSchema = z.object({
     .default([]),
   /** How long a Telegram request (login step, chat list refresh) waits for the worker. */
   TELEGRAM_RPC_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(30_000),
+  /** Folder of the built-in "This computer" storage location. */
+  STORAGE_LOCAL_ROOT: absolutePath.optional(),
+  /** Folders under which people may add storage locations; defaults to STORAGE_LOCAL_ROOT. */
+  STORAGE_LOCAL_ROOTS: z
+    .string()
+    .transform(splitPaths)
+    .pipe(z.array(absolutePath).min(1, 'must list at least one folder'))
+    .optional(),
+  /** Encrypts cloud storage credentials (Google refresh tokens) at rest. */
+  STORAGE_SECRET_KEY: z
+    .string()
+    .trim()
+    .refine(isSecretKey, 'must be 32 random bytes encoded as base64 (see .env.example)')
+    .optional(),
+  /** OAuth client of type "TVs and Limited Input devices", for Google Drive locations. */
+  GOOGLE_OAUTH_CLIENT_ID: z
+    .string()
+    .trim()
+    .regex(
+      /^[\w.-]+\.apps\.googleusercontent\.com$/,
+      'must be the client ID of a Google OAuth client (…apps.googleusercontent.com)',
+    )
+    .optional(),
+  GOOGLE_OAUTH_CLIENT_SECRET: z.string().trim().min(8, 'is too short').optional(),
   TRUST_PROXY: z
     .string()
     .trim()
@@ -121,7 +160,16 @@ function withoutEmptyValues(input: unknown): unknown {
 }
 
 /** Validates the api environment (process.env merged with the .env files) at startup. */
-export const envSchema = z.preprocess(withoutEmptyValues, envObjectSchema);
+export const envSchema = z.preprocess(
+  withoutEmptyValues,
+  envObjectSchema.refine(
+    (env) => (env.GOOGLE_OAUTH_CLIENT_ID === undefined) === (env.GOOGLE_OAUTH_CLIENT_SECRET === undefined),
+    {
+      path: ['GOOGLE_OAUTH_CLIENT_ID'],
+      message: 'GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    },
+  ),
+);
 
 /** Variables the api reads; nothing else is taken from the .env files. */
 export const ENV_KEYS = Object.keys(envObjectSchema.shape) as (keyof Env)[];
@@ -135,6 +183,18 @@ export const CLI_ENV_KEYS = Object.keys(cliEnvObjectSchema.shape);
 /** The validated environment, as ConfigModule parsed it at startup. */
 export function readEnv(config: ConfigService<Env, true>): Env {
   return Object.fromEntries(ENV_KEYS.map((key) => [key, config.get(key, { infer: true })])) as Env;
+}
+
+/**
+ * ConfigModule's `validate` hook: the parsed environment is used as-is (a validation schema
+ * would get the raw values merged back in, turning a blank `KEY=` into "" instead of unset).
+ */
+export function validateEnv(config: Record<string, unknown>): Env {
+  const result = envSchema.safeParse(config);
+  if (!result.success) {
+    throw new Error(`Invalid api environment:\n${formatEnvIssues(result.error)}`);
+  }
+  return result.data;
 }
 
 /** One line per problem, e.g. `API_PORT: Too big: expected number to be <=65535`. Never echoes secrets. */

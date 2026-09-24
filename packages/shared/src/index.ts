@@ -7,6 +7,7 @@ export * from './schemas/common.js';
 export * from './schemas/errors.js';
 export * from './schemas/auth.js';
 export * from './schemas/channels.js';
+export * from './schemas/storage.js';
 export * from './schemas/telegram.js';
 export * from './schemas/imports.js';
 export * from './schemas/messages.js';
