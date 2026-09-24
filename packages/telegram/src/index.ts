@@ -1,4 +1,12 @@
 export * from './types.js';
 export * from './telegram-client.js';
+export * from './login-api.js';
 export * from './errors.js';
 export * from './file-id.js';
+export * from './crypto/secret-box.js';
+export { EncryptedAuthKeysRepository } from './mtcute/encrypted-auth-keys.js';
+export { createSessionStorage, type SessionStorage, type SessionStorageOptions } from './mtcute/session-storage.js';
+export { toTelegramError, translateErrors } from './mtcute/error-mapping.js';
+export { mapChat, mapMedia, mapMessage, mapUser, messageTypeOf } from './mtcute/mappers.js';
+export { MAX_HISTORY_PAGE, MtcuteTelegramAdapter } from './mtcute/mtcute-adapter.js';
+export { DEVICE_MODEL, createMtcuteClient, type MtcuteClientOptions } from './mtcute/create-client.js';

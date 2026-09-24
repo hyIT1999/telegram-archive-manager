@@ -75,6 +75,18 @@ describe('worker application context', () => {
     expect(await redis.exists(REDIS_KEYS.workerHeartbeat)).toBe(0);
   });
 
+  it('reports in its heartbeat that Telegram is not configured', async () => {
+    const app = await bootWorker();
+    try {
+      expect((await readHeartbeat())?.telegram).toEqual({
+        state: 'UNCONFIGURED',
+        detail: 'TELEGRAM_API_ID and TELEGRAM_API_HASH are not set',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('does not delete a heartbeat another worker wrote in the meantime', async () => {
     const app = await bootWorker();
     const now = new Date().toISOString();

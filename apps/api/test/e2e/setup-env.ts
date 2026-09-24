@@ -16,4 +16,6 @@ Object.assign(process.env, {
   SESSION_ABSOLUTE_TTL_DAYS: '30',
   CSRF_TRUSTED_ORIGINS: 'http://localhost:4300',
   TRUST_PROXY: 'loopback',
+  // Short, so the "worker never answers" scenario does not slow the suite down.
+  TELEGRAM_RPC_TIMEOUT_MS: '1500',
 });

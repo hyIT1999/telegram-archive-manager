@@ -203,6 +203,24 @@ describe('ApiExceptionFilter', () => {
     });
   });
 
+  it('logs deliberate server errors as a warning without a stack trace', () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const warnings = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const response = fakeResponse();
+    new ApiExceptionFilter().catch(
+      new ServiceUnavailableException({
+        message: 'The background worker is not running.',
+        code: 'WORKER_UNAVAILABLE',
+      }),
+      hostFor(response),
+    );
+    expect(errors).not.toHaveBeenCalled();
+    expect(warnings).toHaveBeenCalledExactlyOnceWith(
+      'GET /api/stats failed: ServiceUnavailableException: The background worker is not running.',
+    );
+    expect(response.status).toHaveBeenCalledWith(HttpStatus.SERVICE_UNAVAILABLE);
+  });
+
   it('drops the connection when the response already started', () => {
     vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const response = fakeResponse(true);

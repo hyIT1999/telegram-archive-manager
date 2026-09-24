@@ -1,14 +1,23 @@
-import { HttpErrorResponse, type HttpInterceptorFn } from '@angular/common/http';
+import { HttpContextToken, HttpErrorResponse, type HttpInterceptorFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { catchError, throwError } from 'rxjs';
 import { toApiError } from '../../shared/models';
 import { NotifyService } from '../services/notify-service';
 
 /**
+ * Marks a request whose failures the calling page explains next to the action (e.g. a login
+ * form), so no toast repeats the same message.
+ */
+export const ERRORS_SHOWN_INLINE = new HttpContextToken<boolean>(() => false);
+
+/**
  * Toasts failures the page cannot explain on its own: the network is down or the server broke.
  * 4xx answers (401, 404, 409, validation) are left to the pages, which show them in context.
  */
 export const serverErrorInterceptor: HttpInterceptorFn = (req, next) => {
+  if (req.context.get(ERRORS_SHOWN_INLINE)) {
+    return next(req);
+  }
   const notify = inject(NotifyService);
 
   return next(req).pipe(

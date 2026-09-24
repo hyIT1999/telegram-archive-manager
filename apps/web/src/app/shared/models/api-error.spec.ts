@@ -5,7 +5,9 @@ import {
   UNAVAILABLE_ERROR_MESSAGE,
   UNKNOWN_ERROR_MESSAGE,
   isNotFoundError,
+  retryAfterSeconds,
   toApiError,
+  validationMessage,
 } from './api-error';
 
 function httpError(status: number, error: unknown = null): HttpErrorResponse {
@@ -77,5 +79,47 @@ describe('toApiError', () => {
 
   it('falls back to the status when the body has no message', () => {
     expect(toApiError(httpError(418, 'teapot')).message).toBe('Request failed (418).');
+  });
+});
+
+describe('retryAfterSeconds', () => {
+  it('reads the wait Telegram asked for', () => {
+    const error = httpError(429, {
+      message: 'Telegram asks to wait 90 s before trying again',
+      code: 'FLOOD_WAIT',
+      details: { retryAfterSeconds: 90 },
+    });
+    expect(retryAfterSeconds(error)).toBe(90);
+  });
+
+  it.each([
+    ['no details', { message: 'Too many requests', code: 'RATE_LIMITED' }],
+    ['a list of issues', { details: [{ path: 'code', message: 'x' }] }],
+    ['a malformed value', { details: { retryAfterSeconds: '90' } }],
+  ])('is null for %s', (_label, body) => {
+    expect(retryAfterSeconds(httpError(429, body))).toBeNull();
+  });
+
+  it('is null for errors that are not HTTP errors', () => {
+    expect(retryAfterSeconds(new Error('boom'))).toBeNull();
+  });
+});
+
+describe('validationMessage', () => {
+  it('returns the first field message of a validation failure', () => {
+    const error = httpError(400, {
+      message: 'Request validation failed',
+      code: 'VALIDATION_FAILED',
+      details: [
+        { path: 'phoneNumber', message: 'Enter the phone number in international format' },
+        { path: 'step', message: 'Invalid input' },
+      ],
+    });
+    expect(validationMessage(error)).toBe('Enter the phone number in international format');
+  });
+
+  it('is null without field messages', () => {
+    expect(validationMessage(httpError(400, { message: 'Bad request' }))).toBeNull();
+    expect(validationMessage(httpError(400, { details: [{ path: 'x' }] }))).toBeNull();
   });
 });

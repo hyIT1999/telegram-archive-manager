@@ -8,11 +8,13 @@ export function buildHeartbeat(fields: {
   startedAt: Date;
   pid: number;
   host: string;
+  telegram?: WorkerHeartbeat['telegram'];
 }): WorkerHeartbeat {
   return {
     ts: fields.now.toISOString(),
     pid: fields.pid,
     host: fields.host,
     startedAt: fields.startedAt.toISOString(),
+    ...(fields.telegram ? { telegram: fields.telegram } : {}),
   };
 }

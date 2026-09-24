@@ -93,6 +93,8 @@ const envObjectSchema = z.object({
       ),
     )
     .default([]),
+  /** How long a Telegram request (login step, chat list refresh) waits for the worker. */
+  TELEGRAM_RPC_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(30_000),
   TRUST_PROXY: z
     .string()
     .trim()

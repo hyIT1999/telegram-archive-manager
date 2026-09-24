@@ -12,6 +12,7 @@ import { ENV_KEYS, envSchema, type Env } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { StatsModule } from './stats/stats.module.js';
+import { TelegramModule } from './telegram/telegram.module.js';
 
 /** Requests per client IP and minute on every route (login is much stricter). */
 const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
@@ -42,6 +43,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     HealthModule,
     ChannelsModule,
     StatsModule,
+    TelegramModule,
   ],
   providers: [
     // Global guards run in this order: rate limiting first, then authentication.

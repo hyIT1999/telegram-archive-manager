@@ -148,23 +148,30 @@ model Session {
 // ---------------------------------------------------------------------------
 
 model TelegramAccount {
-  id               String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  id                 String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
   /// Single-tenant: one row with accountKey = 'default'.
-  accountKey       String            @unique @default("default") @map("account_key")
-  telegramUserId   BigInt?           @map("telegram_user_id")
-  username         String?
-  displayName      String?           @map("display_name")
+  accountKey         String            @unique @default("default") @map("account_key")
+  telegramUserId     BigInt?           @map("telegram_user_id")
+  username           String?
+  displayName        String?           @map("display_name")
   /// AES-256-GCM encrypted phone number (worker key).
-  phoneEnc         Bytes?            @map("phone_enc")
-  phoneMasked      String?           @map("phone_masked")
-  authState        TelegramAuthState @default(LOGGED_OUT) @map("auth_state")
+  phoneEnc           Bytes?            @map("phone_enc")
+  phoneMasked        String?           @map("phone_masked")
+  authState          TelegramAuthState @default(LOGGED_OUT) @map("auth_state")
   /// AES-256-GCM encrypted phone_code_hash of the pending login.
-  phoneCodeHashEnc Bytes?            @map("phone_code_hash_enc")
-  codeExpiresAt    DateTime?         @map("code_expires_at") @db.Timestamptz(3)
-  nextCodeType     String?           @map("next_code_type")
-  lastError        String?           @map("last_error")
-  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  phoneCodeHashEnc   Bytes?            @map("phone_code_hash_enc")
+  /// The pending login is abandoned after this moment.
+  codeExpiresAt      DateTime?         @map("code_expires_at") @db.Timestamptz(3)
+  /// How the pending code was delivered (app, sms, call, …).
+  codeType           String?           @map("code_type")
+  nextCodeType       String?           @map("next_code_type")
+  /// Telegram allows requesting another code from this moment.
+  codeResendAt       DateTime?         @map("code_resend_at") @db.Timestamptz(3)
+  lastError          String?           @map("last_error")
+  /// Last completed refresh of telegram_dialogs.
+  dialogsRefreshedAt DateTime?         @map("dialogs_refreshed_at") @db.Timestamptz(3)
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("telegram_accounts")
 }

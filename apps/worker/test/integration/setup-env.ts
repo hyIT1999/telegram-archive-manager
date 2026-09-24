@@ -10,3 +10,13 @@ Object.assign(process.env, {
   BULLMQ_PREFIX: TEST_BULLMQ_PREFIX,
   WORKER_HEARTBEAT_INTERVAL_MS: String(TEST_HEARTBEAT_INTERVAL_MS),
 });
+
+// A booted worker must never connect to real Telegram or touch the real session database.
+for (const key of [
+  'TELEGRAM_API_ID',
+  'TELEGRAM_API_HASH',
+  'TELEGRAM_SESSION_DATABASE_URL',
+  'TELEGRAM_SESSION_KEY',
+]) {
+  delete process.env[key];
+}

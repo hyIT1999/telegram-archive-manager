@@ -1,4 +1,4 @@
-import { HttpClient, provideHttpClient, withInterceptors } from '@angular/common/http';
+import { HttpClient, HttpContext, provideHttpClient, withInterceptors } from '@angular/common/http';
 import {
   HttpTestingController,
   type TestRequest,
@@ -9,7 +9,7 @@ import { firstValueFrom } from 'rxjs';
 import { failNetwork, flushError } from '../../../testing/fixtures';
 import { NETWORK_ERROR_MESSAGE, SERVER_ERROR_MESSAGE } from '../../shared/models';
 import { NotifyService } from '../services/notify-service';
-import { serverErrorInterceptor } from './server-error-interceptor';
+import { ERRORS_SHOWN_INLINE, serverErrorInterceptor } from './server-error-interceptor';
 
 describe('serverErrorInterceptor', () => {
   let http: HttpTestingController;
@@ -56,6 +56,19 @@ describe('serverErrorInterceptor', () => {
 
   it.each([400, 401, 404, 409, 422])('leaves %i responses to the page', async (status) => {
     await failWith((request) => flushError(request, status, 'Nope'));
+    expect(notify.error).not.toHaveBeenCalled();
+  });
+
+  it('stays quiet for requests whose page shows the error itself', async () => {
+    const context = new HttpContext().set(ERRORS_SHOWN_INLINE, true);
+    const result = firstValueFrom(client.post('/api/telegram/authenticate', {}, { context }));
+    flushError(
+      http.expectOne('/api/telegram/authenticate'),
+      503,
+      'The worker is not running.',
+      'WORKER_UNAVAILABLE',
+    );
+    await expect(result).rejects.toBeDefined();
     expect(notify.error).not.toHaveBeenCalled();
   });
 });

@@ -1,5 +1,14 @@
 import type { TestRequest } from '@angular/common/http/testing';
-import type { ApiErrorBody, AuthUserDto, ChannelDto, Page, StatsDto } from '@tam/shared';
+import type {
+  ApiErrorBody,
+  AuthUserDto,
+  ChannelDto,
+  Page,
+  StatsDto,
+  TelegramDialogDto,
+  TelegramDialogListDto,
+  TelegramStatusDto,
+} from '@tam/shared';
 
 // Test data builders and HTTP helpers. Only specs import this folder; the app build excludes it.
 
@@ -69,15 +78,69 @@ export function makePage<T>(items: T[], nextCursor: string | null = null): Page<
   return { items, nextCursor };
 }
 
+/** A worker connected to Telegram, with the account logged out. */
+export function makeTelegramStatus(overrides: Partial<TelegramStatusDto> = {}): TelegramStatusDto {
+  return {
+    worker: 'online',
+    connection: 'CONNECTED',
+    connectionDetail: null,
+    state: 'LOGGED_OUT',
+    user: null,
+    phoneMasked: null,
+    codeType: null,
+    nextCodeType: null,
+    codeResendAt: null,
+    lastError: null,
+    dialogsRefreshedAt: null,
+    ...overrides,
+  };
+}
+
+export function makeReadyStatus(overrides: Partial<TelegramStatusDto> = {}): TelegramStatusDto {
+  return makeTelegramStatus({
+    state: 'READY',
+    user: { id: '424242', username: 'archivist', displayName: 'An Archivist' },
+    phoneMasked: '+84•••••••78',
+    dialogsRefreshedAt: '2026-09-24T08:00:00.000Z',
+    ...overrides,
+  });
+}
+
+let dialogSequence = 0;
+
+export function makeDialog(overrides: Partial<TelegramDialogDto> = {}): TelegramDialogDto {
+  dialogSequence += 1;
+  return {
+    telegramChatId: `-100${2_000_000_000 + dialogSequence}`,
+    title: `Study Group ${dialogSequence}`,
+    username: null,
+    type: 'SUPERGROUP',
+    isProtected: false,
+    isForum: false,
+    memberCount: 120,
+    archivedChannelId: null,
+    lastSeenAt: '2026-09-24T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeDialogList(
+  items: TelegramDialogDto[],
+  overrides: Partial<TelegramDialogListDto> = {},
+): TelegramDialogListDto {
+  return { items, refreshing: false, refreshedAt: '2026-09-24T08:00:00.000Z', ...overrides };
+}
+
 /** Answers a pending request with an error body shaped like the API's. */
 export function flushError(
   request: TestRequest,
   status: number,
   message = 'Request failed',
   code?: string,
+  details?: unknown,
 ): void {
   const statusText = STATUS_TEXT[status] ?? 'Error';
-  const body: ApiErrorBody = { statusCode: status, error: statusText, message, code };
+  const body: ApiErrorBody = { statusCode: status, error: statusText, message, code, details };
   request.flush(body, { status, statusText });
 }
 

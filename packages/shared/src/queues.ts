@@ -1,6 +1,8 @@
-/** BullMQ queue names. BullMQ is transport only — PostgreSQL holds the authoritative state. */
+/**
+ * BullMQ queue names. BullMQ is transport only — PostgreSQL holds the authoritative state.
+ * Interactive Telegram calls (login steps) do not use a queue: see telegram-rpc.ts.
+ */
 export const QUEUES = {
-  telegramControl: 'telegram-control',
   telegramImport: 'telegram-import',
   mediaDownload: 'media-download',
   thumbnailGeneration: 'thumbnail-generation',
@@ -16,6 +18,8 @@ export const REDIS_KEYS = {
   workerHeartbeat: 'tam:worker:heartbeat',
   /** Lease held by the single process that owns the Telegram connection. */
   telegramOwner: 'tam:tg:owner',
+  /** Present (with a TTL) while the worker re-reads the chat list from Telegram. */
+  telegramDialogsRefreshing: 'tam:tg:dialogs:refreshing',
   /** Pub/sub channel for progress and state events (worker → api → SSE). */
   eventsChannel: 'tam:events',
 } as const;

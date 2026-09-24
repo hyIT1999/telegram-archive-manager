@@ -1,0 +1,206 @@
+@if (session.status(); as status) {
+  @if (notice(); as info) {
+    <app-notice [tone]="info.tone" [icon]="info.icon" [title]="info.title">
+      {{ info.message }}
+    </app-notice>
+  }
+  @if (actionError(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+
+  @switch (status.state) {
+    @case ('READY') {
+      <div class="account">
+        <span class="avatar" aria-hidden="true">{{ initials() }}</span>
+        <div class="account-text">
+          <p class="account-name">{{ status.user?.displayName ?? 'Telegram account' }}</p>
+          @if (accountDetails()) {
+            <p class="account-details">{{ accountDetails() }}</p>
+          }
+        </div>
+        <span class="signed-in">
+          <mat-icon aria-hidden="true">check_circle</mat-icon>
+          Signed in
+        </span>
+      </div>
+      <div class="actions">
+        <button
+          matButton="outlined"
+          type="button"
+          [disabled]="busy()"
+          [showProgress]="pending() === 'logout'"
+          (click)="logout()"
+        >
+          <mat-icon>logout</mat-icon>
+          Log out of Telegram
+          <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+        </button>
+      </div>
+    }
+
+    @case ('CODE_SENT') {
+      <p class="lead">{{ deliveryText() }}</p>
+      @if (status.phoneMasked) {
+        <p class="phone">
+          Signing in with <strong>{{ status.phoneMasked }}</strong>
+        </p>
+      }
+      <form class="form" [formRoot]="codeForm">
+        <mat-form-field>
+          <mat-label>Login code</mat-label>
+          <input
+            matInput
+            autocomplete="one-time-code"
+            [attr.inputmode]="numericCode() ? 'numeric' : 'text'"
+            [formField]="codeForm.code"
+          />
+          @if (codeForm.code().errors()[0]; as error) {
+            <mat-error>{{ error.message }}</mat-error>
+          }
+        </mat-form-field>
+        <div class="actions">
+          <button
+            matButton="filled"
+            type="submit"
+            [disabled]="busy()"
+            [showProgress]="pending() === 'code'"
+          >
+            Sign in
+            <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+          </button>
+          @if (resendText(); as label) {
+            <button
+              matButton
+              type="button"
+              class="resend"
+              [disabled]="busy() || resendWait() > 0"
+              [showProgress]="pending() === 'resend'"
+              (click)="resend()"
+            >
+              {{ label }}
+              @if (resendWait() > 0) {
+                <span class="countdown">({{ resendCountdown() }})</span>
+              }
+              <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+            </button>
+          }
+          <button
+            matButton
+            type="button"
+            [disabled]="busy()"
+            [showProgress]="pending() === 'cancel'"
+            (click)="cancelLogin()"
+          >
+            Use another number
+            <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+          </button>
+        </div>
+      </form>
+    }
+
+    @case ('PASSWORD_REQUIRED') {
+      <p class="lead">
+        This account is protected by two-step verification. Enter its password to finish signing
+        in.
+      </p>
+      <form class="form" [formRoot]="passwordForm">
+        <mat-form-field>
+          <mat-label>Two-step verification password</mat-label>
+          <input
+            matInput
+            autocomplete="off"
+            [type]="passwordHidden() ? 'password' : 'text'"
+            [formField]="passwordForm.password"
+          />
+          <button
+            matIconButton
+            matSuffix
+            type="button"
+            [attr.aria-label]="passwordHidden() ? 'Show password' : 'Hide password'"
+            [attr.aria-pressed]="!passwordHidden()"
+            (click)="togglePassword()"
+          >
+            <mat-icon>{{ passwordHidden() ? 'visibility' : 'visibility_off' }}</mat-icon>
+          </button>
+          @if (passwordForm.password().errors()[0]; as error) {
+            <mat-error>{{ error.message }}</mat-error>
+          }
+        </mat-form-field>
+        <div class="actions">
+          <button
+            matButton="filled"
+            type="submit"
+            [disabled]="busy()"
+            [showProgress]="pending() === 'password'"
+          >
+            Sign in
+            <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+          </button>
+          <button
+            matButton
+            type="button"
+            [disabled]="busy()"
+            [showProgress]="pending() === 'cancel'"
+            (click)="cancelLogin()"
+          >
+            Cancel
+            <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+          </button>
+        </div>
+      </form>
+    }
+
+    @default {
+      <p class="lead">
+        Sign in with the phone number of your Telegram account. Telegram then sends a login code,
+        usually to your Telegram app.
+      </p>
+      @if (status.lastError; as reason) {
+        <app-notice icon="logout">{{ reason }}</app-notice>
+      }
+      <form class="form" [formRoot]="phoneForm">
+        <mat-form-field>
+          <mat-label>Phone number</mat-label>
+          <input
+            matInput
+            type="tel"
+            autocomplete="tel"
+            placeholder="+84 912 345 678"
+            [formField]="phoneForm.phoneNumber"
+          />
+          <mat-hint>International format: + and the country code first.</mat-hint>
+          @if (phoneForm.phoneNumber().errors()[0]; as error) {
+            <mat-error>{{ error.message }}</mat-error>
+          }
+        </mat-form-field>
+        <div class="actions">
+          <button
+            matButton="filled"
+            type="submit"
+            [disabled]="busy()"
+            [showProgress]="pending() === 'phone'"
+          >
+            Send code
+            <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+          </button>
+        </div>
+      </form>
+    }
+  }
+
+  <p class="fine-print">
+    <mat-icon aria-hidden="true">shield</mat-icon>
+    <span>
+      Codes and passwords go straight to the worker and are never stored. Only chats this account
+      can open are listed, and chats with content protection are never archived.
+    </span>
+  </p>
+} @else if (session.error()) {
+  <app-error-state
+    title="The Telegram status could not be loaded"
+    [message]="loadErrorMessage()"
+    (retry)="session.reload()"
+  />
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Checking the Telegram connection…" />
+}

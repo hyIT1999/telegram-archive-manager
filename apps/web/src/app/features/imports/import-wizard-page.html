@@ -1,0 +1,142 @@
+<app-page-header
+  eyebrow="Manage"
+  title="New import"
+  subtitle="Connect Telegram, then pick a channel or group this account can access and add it to the archive."
+>
+  <a pageActions matButton="outlined" routerLink="/imports">
+    <mat-icon>arrow_back</mat-icon>
+    Import Jobs
+  </a>
+</app-page-header>
+
+<nav aria-label="Import steps">
+  <ol class="steps">
+    @for (item of steps; track item.label; let index = $index) {
+      <li
+        class="step"
+        [class.current]="index === step()"
+        [class.done]="done()[index]"
+        [class.later]="item.arrives !== undefined"
+      >
+        <button
+          type="button"
+          class="step-button"
+          [disabled]="index > reachable()"
+          [attr.aria-current]="index === step() ? 'step' : null"
+          (click)="open(index)"
+        >
+          <span class="marker" aria-hidden="true">
+            @if (done()[index] && index !== step()) {
+              <mat-icon>check</mat-icon>
+            } @else {
+              {{ index + 1 }}
+            }
+          </span>
+          <span class="step-text">
+            <span class="step-label">{{ item.label }}</span>
+            @if (item.arrives) {
+              <span class="step-note">{{ item.arrives }}</span>
+            }
+            @if (done()[index]) {
+              <span class="sr-only">(done)</span>
+            }
+          </span>
+        </button>
+      </li>
+    }
+  </ol>
+</nav>
+
+<section class="surface-card panel" aria-labelledby="wizard-step-title">
+  @switch (step()) {
+    @case (0) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">
+        Connect Telegram
+      </h2>
+      <p class="panel-hint">The archive reads Telegram with your own account, through the worker.</p>
+      <app-telegram-connect />
+      @if (session.ready()) {
+        <div class="panel-actions">
+          <button matButton="filled" type="button" (click)="open(1)">
+            Choose a chat
+            <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+          </button>
+        </div>
+      }
+    }
+
+    @case (1) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">
+        Channels &amp; groups
+      </h2>
+      <p class="panel-hint">
+        Pick the chat to archive. Chats with content protection are listed but cannot be archived.
+      </p>
+      <!-- Adding failed because the picked chat left the list or became protected. -->
+      @if (!chats.selected()) {
+        @if (addError(); as message) {
+          <app-notice tone="error">{{ message }}</app-notice>
+        }
+      }
+      <app-chat-picker />
+      <div class="panel-actions">
+        <button matButton type="button" (click)="open(0)">Back</button>
+        <button matButton="filled" type="button" [disabled]="!chats.selected()" (click)="open(2)">
+          Continue
+          <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+        </button>
+      </div>
+    }
+
+    @case (2) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Select channel</h2>
+      @if (chats.selected(); as chat) {
+        <div class="chosen">
+          <span class="avatar" aria-hidden="true">{{ selectedInitials() }}</span>
+          <div class="chosen-text">
+            <p class="chosen-title">{{ chat.title }}</p>
+            <p class="chosen-details">{{ selectedDetails() }}</p>
+          </div>
+        </div>
+
+        @if (added(); as result) {
+          <app-notice
+            tone="success"
+            [title]="result.created ? 'Added to your archive' : 'Already in your archive'"
+          >
+            {{ result.channel.title }} is a channel of your archive. Choosing how much history to
+            import and starting the import arrive in Phase 3.
+          </app-notice>
+          <div class="panel-actions">
+            <button matButton type="button" (click)="pickAnother()">Add another chat</button>
+            <a matButton="filled" [routerLink]="['/channels', result.channel.id]">
+              Open the channel
+              <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+            </a>
+          </div>
+        } @else {
+          <p class="panel-hint">
+            Adding the chat saves it as a channel of your archive, with its title and type. Nothing
+            is downloaded yet.
+          </p>
+          @if (addError(); as message) {
+            <app-notice tone="error">{{ message }}</app-notice>
+          }
+          <div class="panel-actions">
+            <button matButton type="button" (click)="open(1)">Back</button>
+            <button
+              matButton="filled"
+              type="button"
+              [disabled]="adding()"
+              [showProgress]="adding()"
+              (click)="addToArchive()"
+            >
+              {{ chat.archivedChannelId ? 'Use this chat' : 'Add to archive' }}
+              <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+            </button>
+          </div>
+        }
+      }
+    }
+  }
+</section>

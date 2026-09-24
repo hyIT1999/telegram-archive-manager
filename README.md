@@ -19,8 +19,8 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | Phase | Nội dung | Trạng thái |
 |---|---|---|
 | 1 | Kiến trúc, monorepo, PostgreSQL, Redis, Prisma, NestJS API nền, worker khung, Angular shell, Docker | ✅ Hoàn thành |
-| 2 | Đăng nhập Telegram (mtcute), danh sách channel/group, chọn channel | ⏳ Tiếp theo |
-| 3 | Import lịch sử message, import jobs, BullMQ | Kế hoạch |
+| 2 | Đăng nhập Telegram (mtcute), danh sách channel/group, chọn channel | ✅ Hoàn thành |
+| 3 | Import lịch sử message, import jobs, BullMQ | ⏳ Tiếp theo |
 | 4 | Tải media (resume/retry/dedup/checksum), storage local/S3, thumbnail | Kế hoạch |
 | 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | Kế hoạch |
 | 6 | Search, Tags, Favorites, Filters | Kế hoạch |
@@ -31,10 +31,12 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 
 | Trang | Phase |
 |---|---|
-| Import Jobs (danh sách, wizard `imports/new`, chi tiết `imports/:id`) | 2–3 (realtime ở 7) |
+| Import Jobs: danh sách job, bước 4–6 của wizard `imports/new`, chi tiết `imports/:id` | 3 (realtime ở 7) |
 | All Messages, Message detail, Videos/Images/Documents/Audio | 5 |
 | Settings → Archive settings | 5 (phần Appearance đã dùng được) |
 | Search, Tags, Favorites | 6 |
+
+Đã dùng được từ Phase 2: bước 1–3 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive) và mục **Settings → Telegram account**.
 
 ## Kiến trúc tổng quan
 
@@ -42,10 +44,10 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/api) ──Prisma──► PostgreSQL 18
                                                      │  RPC/jobs        ▲ events            (metadata; DB tam_tg: session Telegram)
                                                      ▼                  │
-                                             Redis 7 ── BullMQ (prefix tam), pub/sub, heartbeat
+                                             Redis 7 ── BullMQ (prefix tam), pub/sub (RPC Telegram, events), heartbeat, lease
                                                      │
                                   Worker (apps/worker) — process DUY NHẤT giữ kết nối Telegram
-                                  queues: telegram-control, telegram-import, media-download,
+                                  queues: telegram-import, media-download,
                                           thumbnail-generation, metadata-processing
                                                      │
                                           Storage: local FS (dev) | S3-compatible (prod)
@@ -53,6 +55,8 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
 
 - **PostgreSQL là nguồn sự thật duy nhất.** BullMQ chỉ vận chuyển job. Mọi chuyển trạng thái đều là compare-and-set; unique constraint bảo đảm không bao giờ có message hoặc media trùng (idempotency).
 - **Chỉ worker giữ kết nối Telegram**, vì hai process dùng chung một auth key sẽ gặp `AUTH_KEY_DUPLICATED`. API không có `TELEGRAM_API_ID/HASH`.
+  - Nếu lỡ chạy hai worker, chỉ worker giữ Redis lease `tam:tg:owner` mới kết nối Telegram; worker kia ở trạng thái `STANDBY` và tự thay thế khi worker đầu dừng.
+  - Thao tác Telegram từ web (các bước đăng nhập, làm mới danh sách chat) đi qua **RPC trên Redis pub/sub**: API publish yêu cầu vào `tam:tg:rpc:request` và chờ trả lời trên `tam:tg:rpc:reply:<id>`, tối đa `TELEGRAM_RPC_TIMEOUT_MS`. Pub/sub không ghi vào AOF, nên mã đăng nhập và mật khẩu 2FA không bao giờ nằm lại trong Redis. Nếu không worker nào nhận yêu cầu, API trả `503` ngay.
 - **Binary media không bao giờ nằm trong PostgreSQL.** Storage key có dạng `channels/{channelId}/messages/{messageId}/media/{mediaId}/original`.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
@@ -63,7 +67,7 @@ apps/api           NestJS 12 REST (+ SSE từ Phase 7), CLI create-user
 apps/worker        NestJS 12 standalone + BullMQ
 packages/shared    Contract dùng chung: enums, zod schemas, DTO, tên queue, event
 packages/database  Prisma schema + migrations + generated client
-packages/telegram  Interface TelegramClient (+ adapter mtcute từ Phase 2)
+packages/telegram  Interface TelegramClient, adapter mtcute, mapper message/media, session PostgreSQL mã hoá
 packages/storage   Interface StorageDriver (+ Local/S3 từ Phase 4)
 ```
 
@@ -115,6 +119,7 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `SESSION_ABSOLUTE_TTL_DAYS` | api | `30` | Hạn tối đa tính từ lúc đăng nhập |
 | `CSRF_TRUSTED_ORIGINS` | api | (rỗng) | Danh sách origin cách nhau bằng dấu phẩy, dạng `scheme://host[:port]`, **không có path** |
 | `TRUST_PROXY` | api | `loopback` | Giá trị "trust proxy" của Express: `true`/`false`, số hop, hoặc danh sách `loopback`, `linklocal`, `uniquelocal`, IP/CIDR. Sau nginx trong Docker: `loopback, uniquelocal` |
+| `TELEGRAM_RPC_TIMEOUT_MS` | api | `30000` | Thời gian API chờ worker trả lời một thao tác Telegram (500–120000), quá hạn thì trả `504 TELEGRAM_TIMEOUT` |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | **chỉ worker** | — | Từ my.telegram.org. Phải đặt cả hai cùng lúc; hash là 32 ký tự hex |
 | `TELEGRAM_SESSION_DATABASE_URL` | worker | — | DB riêng cho session Telegram (`…/tam_tg`) |
 | `TELEGRAM_SESSION_KEY` | worker | — | 32 byte base64, dùng mã hoá auth key và trạng thái đăng nhập |
@@ -139,11 +144,13 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 2. Tạo ứng dụng mới. Tên ứng dụng **phải có "Unofficial" đứng trước "Telegram"**, hoặc không chứa chữ "Telegram". Platform chọn *Web* hoặc *Other*.
 3. Chép `api_id` và `api_hash` vào `.env` (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`). **Chỉ worker** nhận hai biến này.
 4. Đặt `TELEGRAM_SESSION_KEY` (xem mục 3) và `TELEGRAM_SESSION_DATABASE_URL`, trỏ tới DB `tam_tg`.
+5. Khởi động lại worker. Trang **Settings → Telegram account** phải hết báo "Telegram is not set up on the worker" và hiện ô nhập số điện thoại. Sau đó đăng nhập như mục 8.
 
 Lưu ý:
+- Thiếu một trong các biến trên thì worker vẫn chạy bình thường nhưng báo trạng thái Telegram `UNCONFIGURED` kèm tên biến còn thiếu. Web hiển thị đúng thông báo đó.
 - Không chia sẻ `api_hash`, `.env` hay database `tam_tg`.
 - Không dùng session của production trên máy dev. Hai nơi dùng cùng một auth key sẽ làm Telegram huỷ session.
-- Luồng đăng nhập trên web được triển khai ở Phase 2 (mục 8).
+- Đổi `TELEGRAM_SESSION_KEY` thì session cũ không giải mã được nữa: worker coi như chưa đăng nhập và bạn đăng nhập lại.
 
 ## 5. Database migration
 
@@ -263,20 +270,54 @@ Integration test **không bao giờ đụng dữ liệu dev**. Chúng tự xoá 
 
 ## 8. Telegram authentication
 
-*(Triển khai ở Phase 2.)* Luồng dự kiến trên trang **Import Jobs → New import**:
-1. **Connect Telegram:** nhập số điện thoại. Worker gửi yêu cầu mã; mã thường đến qua app Telegram, có thể yêu cầu gửi lại.
-2. Nhập mã. Nếu tài khoản bật mật khẩu 2 bước (2FA), nhập tiếp mật khẩu.
-3. Trạng thái (`LOGGED_OUT → CODE_SENT → PASSWORD_REQUIRED → READY`) được lưu (có mã hoá) trong DB, nên worker restart không làm mất.
+Cần làm xong mục 4 và worker đang chạy. Đăng nhập ở **Import Jobs → New import** (bước 1) hoặc **Settings → Telegram account**:
 
-Mọi bước đều đi qua API tới worker. Nếu worker không chạy, API trả `503 WORKER_UNAVAILABLE`. Khi phiên bị thu hồi từ điện thoại, trạng thái quay về `LOGGED_OUT`.
+1. Nhập số điện thoại của tài khoản Telegram theo định dạng quốc tế (`+84 912 345 678`) rồi bấm **Send code**.
+2. Telegram gửi mã, thường là vào app Telegram trên thiết bị đang đăng nhập (tin nhắn từ "Telegram"), đôi khi qua SMS hoặc cuộc gọi. Trang cho biết mã được gửi bằng cách nào.
+   - Nút gửi lại (ví dụ **Send the code by SMS**) chỉ bấm được sau thời gian chờ Telegram yêu cầu, và chỉ hiện khi Telegram còn cách gửi khác.
+   - **Use another number** huỷ lần đăng nhập đang dở.
+3. Nhập mã và bấm **Sign in**. Nếu tài khoản bật xác minh 2 bước, nhập tiếp mật khẩu 2FA.
+4. Khi thành công, trang hiện tài khoản đã kết nối. Worker tự đọc danh sách channel/group ngay sau đó (bước 2 của wizard).
+
+Trạng thái đăng nhập:
+- Trạng thái `LOGGED_OUT → CODE_SENT → PASSWORD_REQUIRED → READY` nằm trong bảng `telegram_accounts`. Số điện thoại và `phone_code_hash` được mã hoá bằng `TELEGRAM_SESSION_KEY`, và API chỉ trả về số đã che (`+84•••••••78`). Vì vậy restart worker không làm mất trạng thái.
+- Lần đăng nhập đang dở tự hết hạn sau 15 phút.
+- Auth key của Telegram nằm trong DB `tam_tg`, cũng được mã hoá AES-256-GCM.
+- Mã đăng nhập và mật khẩu 2FA đi từ API tới worker qua Redis pub/sub và không được lưu ở đâu.
+- **Log out of Telegram** (có hỏi xác nhận) huỷ session ở phía Telegram và xoá danh sách chat đã cache. Nếu phiên bị thu hồi từ điện thoại (Settings → Devices), worker phát hiện khi khởi động hoặc ở lần đọc danh sách chat kế tiếp, đưa trạng thái về `LOGGED_OUT` và web ghi rõ lý do.
+
+API (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `GET /api/telegram/status` | Worker `online`/`offline`, kết nối Telegram (`UNCONFIGURED`, `STANDBY`, `CONNECTING`, `CONNECTED`, `ERROR`), trạng thái đăng nhập, tài khoản |
+| `POST /api/telegram/authenticate` | Một bước: `{step:'phone',phoneNumber}`, `{step:'code',code}`, `{step:'password',password}`, `{step:'resend'}`. Giới hạn 10 lần/phút mỗi IP |
+| `POST /api/telegram/logout` | Đăng xuất, hoặc huỷ lần đăng nhập đang dở |
+| `GET /api/telegram/chats` | Danh sách channel/group đã cache, kèm `refreshing` và `refreshedAt` |
+| `POST /api/telegram/chats/refresh` | Yêu cầu worker đọc lại danh sách từ Telegram (`202`, chạy nền) |
+
+Lỗi có mã ổn định trong `code`:
+- `409` khi trạng thái không cho phép: `INVALID_LOGIN_STATE`, `TELEGRAM_NOT_READY`, `SESSION_REVOKED`.
+- `422` khi Telegram từ chối: `PHONE_NUMBER_INVALID`, `PHONE_CODE_INVALID`, `PHONE_CODE_EXPIRED`, `PASSWORD_INVALID`, `SIGN_UP_REQUIRED`, …
+- `429 FLOOD_WAIT`, kèm `details.retryAfterSeconds`.
+- `503 WORKER_UNAVAILABLE` / `TELEGRAM_UNAVAILABLE`; `504 TELEGRAM_TIMEOUT`.
 
 ## 9. Import channel
 
-*(Triển khai ở Phase 3–4.)* Luồng dự kiến:
-1. Chọn channel/group trong danh sách truy cập được. Chat protected hiển thị nhãn "Protected" và không import được.
-2. Chọn **Import all history** hoặc **Import from date**, rồi bấm Start.
-3. Lịch sử được đọc theo trang 100 message. Mỗi trang được ghi trong một transaction, cùng với cursor, nên crash hay restart đều tiếp tục đúng chỗ và **không tạo bản trùng**.
-4. Media được tải qua queue `media-download`: resume từ file `.part`, retry với exponential backoff, kiểm tra SHA-256, không tải lại file trùng. Có thể Pause/Resume/Cancel.
+Wizard **Import Jobs → New import** gồm 6 bước. Bước 1–3 có từ Phase 2:
+1. **Connect Telegram** (mục 8). Nếu đã đăng nhập, wizard tự chuyển sang bước 2.
+2. **Channels & groups:** danh sách channel, supergroup và group mà tài khoản đã tham gia, có ô tìm kiếm (không phân biệt dấu: "hoc" tìm ra "Học") và bộ lọc loại chat.
+   - Danh sách được worker cache trong bảng `telegram_dialogs`: tự đọc sau khi đăng nhập, khi worker khởi động nếu cache cũ hơn 6 giờ, và khi bấm **Refresh**. Trong lúc worker đọc, trang tự cập nhật.
+   - Chat có content protection hiện nhãn **Protected** và không chọn được. Chat đã có trong archive hiện nhãn **In archive**.
+3. **Select channel:** bấm **Add to archive** để tạo channel trong archive (`POST /api/channels` với `{telegramChatId}`).
+   - Server chỉ nhận chat có trong danh sách cache và lấy mọi thông tin (tên, access hash, cờ protected) từ đó, không tin dữ liệu từ trình duyệt.
+   - Chat không còn trong danh sách trả `404 DIALOG_NOT_FOUND`; chat protected trả `422 CHAT_PROTECTED`.
+   - Thao tác idempotent: `201` khi tạo mới, `200` khi chat đã có. Gửi trùng hay gửi đồng thời cũng chỉ tạo đúng một channel.
+
+*(Bước 4–6 triển khai ở Phase 3–4.)* Luồng dự kiến:
+1. Chọn **Import all history** hoặc **Import from date**, rồi bấm Start.
+2. Lịch sử được đọc theo trang 100 message. Mỗi trang được ghi trong một transaction, cùng với cursor, nên crash hay restart đều tiếp tục đúng chỗ và **không tạo bản trùng**.
+3. Media được tải qua queue `media-download`: resume từ file `.part`, retry với exponential backoff, kiểm tra SHA-256, không tải lại file trùng. Có thể Pause/Resume/Cancel.
 
 ## 10. Start sync
 
@@ -310,3 +351,13 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | Ổ đĩa đầy | Giảm `MIN_FREE_DISK_MB` là không đủ; chuyển `STORAGE_LOCAL_ROOT` sang ổ khác hoặc dùng S3 (Phase 4). Có thể dọn cache: `npm cache clean --force` |
 | Nhiều tab mở cùng lúc, request bị treo (HTTP/1.1) | Trình duyệt giới hạn 6 kết nối mỗi host cho mọi tab. Dev: đóng bớt tab. Production: bật HTTP/2 ở reverse proxy |
 | Giao diện web mất style sau nginx | Kiểm tra CSP: build phải tắt `inlineCritical` và không có inline script (`theme-init.js` là file riêng) |
+| Web báo "The background worker is not running" / API trả `503 WORKER_UNAVAILABLE` | Không có heartbeat của worker trong Redis. Chạy worker (`npm run dev` chạy tất cả); trang tự nhận khi worker lên |
+| "Telegram is not set up on the worker" / `503 TELEGRAM_UNAVAILABLE` | Worker thiếu `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`, `TELEGRAM_SESSION_DATABASE_URL` hoặc `TELEGRAM_SESSION_KEY` (thông báo ghi đúng biến thiếu). Điền `.env` theo mục 4 rồi restart worker |
+| "Waiting for the Telegram connection": *Another worker process owns the Telegram connection* | Đang có worker khác (ví dụ một terminal cũ) giữ lease `tam:tg:owner`. Dừng worker thừa; worker còn lại tiếp quản trong vòng một phút |
+| "The worker cannot reach Telegram" (`ERROR`) | Lỗi mạng hoặc Telegram từ chối kết nối; chi tiết nằm trong thông báo và log worker. Worker tự thử lại sau 30 giây |
+| `429 FLOOD_WAIT`: "Telegram asks to wait …" | Telegram giới hạn tần suất (thường do yêu cầu mã quá nhiều lần). Chờ đúng thời gian được báo; thử lại sớm hơn sẽ khiến thời gian chờ dài thêm |
+| `429 RATE_LIMITED` khi đăng nhập Telegram | Giới hạn của chính API: 10 bước đăng nhập mỗi phút mỗi IP. Chờ một phút |
+| `504 TELEGRAM_TIMEOUT` | Worker không trả lời trong `TELEGRAM_RPC_TIMEOUT_MS` (mặc định 30 giây), thường do mạng tới Telegram chậm. Thử lại |
+| "The code has expired" / `409 INVALID_LOGIN_STATE` | Mã hết hạn, hoặc lần đăng nhập đang dở đã quá 15 phút. Trang tự quay về bước nhập số điện thoại; gửi lại số để nhận mã mới |
+| `422 SIGN_UP_REQUIRED` / `PAYMENT_REQUIRED` | Số điện thoại chưa có tài khoản Telegram, hoặc Telegram yêu cầu đăng nhập bằng app chính thức trước. Ứng dụng này không tạo tài khoản mới |
+| Danh sách chat trống sau khi đăng nhập | Worker đang đọc danh sách (trang hiện "Reading your chats from Telegram…"). Nếu vẫn trống, bấm **Refresh**; chỉ channel, supergroup và group đã tham gia mới được liệt kê (không có chat riêng/bot) |

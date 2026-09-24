@@ -49,13 +49,13 @@ describe('ChannelListPage', () => {
     request.flush(makePage([]));
   });
 
-  it('shows an empty state that leads to Import Jobs', async () => {
+  it('shows an empty state that leads to the import wizard', async () => {
     http.expectOne(isChannelsRequest()).flush(makePage([]));
     await fixture.whenStable();
 
     const empty = element().querySelector('app-empty-state');
     expect(empty?.textContent).toContain('No channels archived yet');
-    expect(empty?.querySelector('a')?.getAttribute('href')).toBe('/imports');
+    expect(empty?.querySelector('a')?.getAttribute('href')).toBe('/imports/new');
     expect(element().querySelector('app-skeleton')).toBeNull();
   });
 

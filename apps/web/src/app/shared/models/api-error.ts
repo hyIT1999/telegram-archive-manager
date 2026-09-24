@@ -54,6 +54,41 @@ export function isNotFoundError(error: unknown): boolean {
   return status === 404;
 }
 
+/** The wait Telegram asked for (`details.retryAfterSeconds` of a 429 FLOOD_WAIT), if any. */
+export function retryAfterSeconds(error: unknown): number | null {
+  const details = readDetails(error);
+  const seconds =
+    typeof details === 'object' && details !== null && !Array.isArray(details)
+      ? (details as Record<string, unknown>)['retryAfterSeconds']
+      : undefined;
+  return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+
+/** The first field message of a 400 VALIDATION_FAILED answer (`details: [{ path, message }]`). */
+export function validationMessage(error: unknown): string | null {
+  const details = readDetails(error);
+  if (!Array.isArray(details)) {
+    return null;
+  }
+  for (const issue of details as unknown[]) {
+    const message =
+      typeof issue === 'object' && issue !== null
+        ? (issue as Record<string, unknown>)['message']
+        : undefined;
+    if (typeof message === 'string' && message) {
+      return message;
+    }
+  }
+  return null;
+}
+
+function readDetails(error: unknown): unknown {
+  const body = findHttpErrorResponse(error)?.error;
+  return typeof body === 'object' && body !== null
+    ? (body as Record<string, unknown>)['details']
+    : undefined;
+}
+
 function findHttpErrorResponse(error: unknown): HttpErrorResponse | null {
   if (error instanceof HttpErrorResponse) {
     return error;

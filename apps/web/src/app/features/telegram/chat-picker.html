@@ -1,0 +1,139 @@
+<div class="toolbar">
+  <mat-form-field class="search">
+    <mat-label>Search chats</mat-label>
+    <mat-icon matPrefix>search</mat-icon>
+    <input
+      matInput
+      type="search"
+      autocomplete="off"
+      [value]="chats.query()"
+      (input)="onSearch($event)"
+    />
+  </mat-form-field>
+  <mat-button-toggle-group
+    aria-label="Chat type"
+    hideSingleSelectionIndicator
+    [value]="chats.filter()"
+    (change)="onFilter($event.value)"
+  >
+    @for (option of filters; track option.value) {
+      <mat-button-toggle [value]="option.value">{{ option.label }}</mat-button-toggle>
+    }
+  </mat-button-toggle-group>
+  <button
+    matButton="tonal"
+    type="button"
+    [disabled]="chats.refreshing()"
+    [showProgress]="chats.refreshing()"
+    (click)="chats.refresh()"
+  >
+    <mat-icon>refresh</mat-icon>
+    Refresh
+    <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+  </button>
+</div>
+
+<p class="summary" aria-live="polite">
+  @if (chats.refreshing()) {
+    Reading your chats from Telegram…
+  } @else if (chats.list(); as list) {
+    @if (list.refreshedAt) {
+      {{ list.items.length }} {{ list.items.length === 1 ? 'chat' : 'chats' }} · updated
+      {{ list.refreshedAt | date: 'short' }}
+    }
+  }
+</p>
+
+@if (chats.refreshError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+}
+
+@if (chats.error()) {
+  <app-error-state
+    title="Your chats could not be loaded"
+    [message]="loadErrorMessage()"
+    (retry)="chats.reload()"
+  />
+} @else if (chats.list(); as list) {
+  @if (list.items.length === 0) {
+    @if (chats.refreshing()) {
+      <app-skeleton variant="line" [count]="6" label="Reading your chats from Telegram…" />
+    } @else if (list.refreshedAt) {
+      <app-empty-state
+        icon="forum"
+        title="No channels or groups found"
+        message="Only channels, supergroups and groups this account has joined are listed."
+      />
+    } @else {
+      <app-empty-state
+        icon="forum"
+        title="Your chats are not loaded yet"
+        message="Read the channels and groups of this account from Telegram to pick one."
+      >
+        <button matButton="filled" type="button" (click)="chats.refresh()">
+          <mat-icon>refresh</mat-icon>
+          Load chats from Telegram
+        </button>
+      </app-empty-state>
+    }
+  } @else if (rows().length === 0) {
+    <app-empty-state
+      icon="search_off"
+      title="No chats match"
+      message="Try another name, or show all chat types."
+    />
+  } @else {
+    <fieldset class="chat-list">
+      <legend class="sr-only">Channels and groups this account can access</legend>
+      @for (row of rows(); track row.chat.telegramChatId) {
+        <label
+          class="chat"
+          [class.selected]="row.chat.telegramChatId === chats.selectedId()"
+          [class.locked]="row.chat.isProtected"
+        >
+          <input
+            type="radio"
+            name="telegram-chat"
+            class="radio"
+            [value]="row.chat.telegramChatId"
+            [checked]="row.chat.telegramChatId === chats.selectedId()"
+            [disabled]="row.chat.isProtected"
+            (change)="chats.select(row.chat)"
+          />
+          <span class="avatar" aria-hidden="true">{{ row.initials }}</span>
+          <span class="text">
+            <span class="title">{{ row.chat.title }}</span>
+            <span class="meta">{{ row.description }}</span>
+            @if (row.chat.isProtected) {
+              <span class="why">Content protection is on, so this chat cannot be archived.</span>
+            }
+          </span>
+          @if (row.chat.isProtected || row.chat.archivedChannelId || row.chat.isForum) {
+            <span class="badges">
+              @if (row.chat.isProtected) {
+                <span class="badge badge-protected">
+                  <mat-icon aria-hidden="true">lock</mat-icon>
+                  Protected
+                </span>
+              }
+              @if (row.chat.archivedChannelId) {
+                <span class="badge badge-archived">
+                  <mat-icon aria-hidden="true">inventory_2</mat-icon>
+                  In archive
+                </span>
+              }
+              @if (row.chat.isForum) {
+                <span class="badge">
+                  <mat-icon aria-hidden="true">topic</mat-icon>
+                  Forum
+                </span>
+              }
+            </span>
+          }
+        </label>
+      }
+    </fieldset>
+  }
+} @else {
+  <app-skeleton variant="line" [count]="6" label="Loading your chats…" />
+}

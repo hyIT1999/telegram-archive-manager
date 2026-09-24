@@ -16,6 +16,14 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@tam/shared": "0.0.0"
+    "@mtcute/core": "0.32.2",
+    "@mtcute/node": "0.32.2",
+    "@mtcute/postgres": "0.32.2",
+    "@tam/shared": "0.0.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@mtcute/test": "0.32.2",
+    "@types/pg": "8.23.1"
   }
 }

@@ -4,10 +4,17 @@ export type {
   AuthUserDto,
   ChannelDto,
   ChannelStatsDto,
+  ChatType,
   ImportJobDto,
   MediaCategory,
   Page,
   StatsDto,
+  TelegramAuthenticateRequest,
+  TelegramConnectionState,
+  TelegramDialogDto,
+  TelegramDialogListDto,
+  TelegramStatusDto,
+  TelegramUserDto,
 } from '@tam/shared';
 
 export {
@@ -16,6 +23,8 @@ export {
   UNAVAILABLE_ERROR_MESSAGE,
   UNKNOWN_ERROR_MESSAGE,
   isNotFoundError,
+  retryAfterSeconds,
   toApiError,
+  validationMessage,
   type ApiError,
 } from './api-error';

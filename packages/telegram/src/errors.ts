@@ -1,3 +1,5 @@
+import { TelegramErrorCode } from '@tam/shared';
+
 /** Base class for adapter errors the worker reacts to explicitly. */
 export class TelegramError extends Error {
   constructor(
@@ -9,10 +11,10 @@ export class TelegramError extends Error {
   }
 }
 
-/** Telegram asked us to wait (FLOOD_WAIT_X). The job is delayed, not failed. */
+/** Telegram asked us to wait (FLOOD_WAIT_X). Jobs are delayed, not failed. */
 export class FloodWaitError extends TelegramError {
   constructor(readonly seconds: number) {
-    super(`Telegram rate limit: wait ${seconds}s`, 'FLOOD_WAIT');
+    super(`Telegram asks to wait ${seconds} s before trying again`, TelegramErrorCode.FLOOD_WAIT);
   }
 }
 
@@ -26,16 +28,20 @@ export class FileReferenceExpiredError extends TelegramError {
 /** The chat has content protection enabled; it must not be archived. */
 export class ChatProtectedError extends TelegramError {
   constructor(readonly chatId: string) {
-    super(`Chat ${chatId} has content protection enabled`, 'CHAT_PROTECTED');
+    super(`Chat ${chatId} has content protection enabled`, TelegramErrorCode.CHAT_PROTECTED);
   }
 }
 
 /** The session is missing, revoked or unregistered — the user has to log in again. */
 export class AuthRequiredError extends TelegramError {
-  constructor(reason = 'Telegram login required') {
-    super(reason, 'AUTH_REQUIRED');
+  constructor(reason = 'The Telegram session is no longer valid; log in again') {
+    super(reason, TelegramErrorCode.SESSION_REVOKED);
   }
 }
 
 /** A login step was rejected (wrong code, expired code, wrong password, …). */
-export class LoginStepError extends TelegramError {}
+export class LoginStepError extends TelegramError {
+  constructor(code: TelegramErrorCode, message: string) {
+    super(message, code);
+  }
+}

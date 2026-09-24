@@ -4,16 +4,35 @@ import { MatIcon } from '@angular/material/icon';
 import { THEME_OPTIONS, type ThemeMode, ThemeService } from '../../core/services/theme-service';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
+import { TelegramConnect } from '../telegram/telegram-connect';
+import { TelegramSession } from '../telegram/telegram-session';
 
 @Component({
   selector: 'app-settings-page',
-  imports: [EmptyState, MatButtonToggle, MatButtonToggleGroup, MatIcon, PageHeader],
+  providers: [TelegramSession],
+  imports: [
+    EmptyState,
+    MatButtonToggle,
+    MatButtonToggleGroup,
+    MatIcon,
+    PageHeader,
+    TelegramConnect,
+  ],
   template: `
     <app-page-header
       eyebrow="Manage"
       title="Settings"
       subtitle="How the archive looks and behaves."
     />
+
+    <section class="surface-card panel" aria-labelledby="telegram-title">
+      <h2 id="telegram-title" class="panel-title">Telegram account</h2>
+      <p class="panel-hint">
+        The account the archive reads channels and groups with. The worker keeps its session
+        encrypted.
+      </p>
+      <app-telegram-connect />
+    </section>
 
     <section class="surface-card panel" aria-labelledby="appearance-title">
       <h2 id="appearance-title" class="panel-title">Appearance</h2>
@@ -65,9 +84,15 @@ import { PageHeader } from '../../shared/components/page-header/page-header';
       color: var(--mat-sys-on-surface-variant);
     }
 
-    mat-icon {
+    mat-button-toggle mat-icon {
       margin-inline-end: 6px;
       vertical-align: middle;
+    }
+
+    @media (max-width: 599.98px) {
+      .panel {
+        padding: 16px;
+      }
     }
   `,
 })

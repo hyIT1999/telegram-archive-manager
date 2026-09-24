@@ -10,6 +10,7 @@ import { REDIS_KEYS } from '@tam/shared';
 import { Redis } from 'ioredis';
 import { errorMessage } from '../common/error-message.js';
 import type { WorkerEnv } from '../config/env.schema.js';
+import { WorkerStatusService } from '../status/worker-status.service.js';
 import { buildHeartbeat, heartbeatTtlMs } from './heartbeat.js';
 
 /** Deletes the key only while it still holds our last beat, so a newer worker's beat survives. */
@@ -37,7 +38,10 @@ export class HeartbeatService implements OnApplicationBootstrap, OnModuleDestroy
   private lastConnectionError: Error | undefined;
   private failing = false;
 
-  constructor(config: ConfigService<WorkerEnv, true>) {
+  constructor(
+    config: ConfigService<WorkerEnv, true>,
+    private readonly status: WorkerStatusService,
+  ) {
     this.intervalMs = config.get('WORKER_HEARTBEAT_INTERVAL_MS', { infer: true });
     this.redis = new Redis(config.get('REDIS_URL', { infer: true }), {
       connectionName: 'tam-worker-heartbeat',
@@ -105,6 +109,7 @@ export class HeartbeatService implements OnApplicationBootstrap, OnModuleDestroy
         startedAt: this.startedAt,
         pid: process.pid,
         host: this.host,
+        telegram: this.status.telegram(),
       }),
     );
     await this.redis.set(

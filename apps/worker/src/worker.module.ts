@@ -10,6 +10,8 @@ import { HeartbeatService } from './heartbeat/heartbeat.service.js';
 import { bullRootOptions } from './queues/bull-options.js';
 import { QueueErrorLogger } from './queues/queue-error-logger.js';
 import { ShutdownCoordinator } from './shutdown/shutdown-coordinator.js';
+import { WorkerStatusModule } from './status/worker-status.module.js';
+import { TelegramModule } from './telegram/telegram.module.js';
 
 @Module({
   imports: [
@@ -28,9 +30,12 @@ import { ShutdownCoordinator } from './shutdown/shutdown-coordinator.js';
       }),
     }),
     BullModule.forRootAsync({ inject: [ConfigService], useFactory: bullRootOptions }),
-    // Producers for every queue. Processors arrive with the feature modules of Phases 2–4.
+    // Producers for every queue. Processors arrive with the feature modules of Phases 3–4.
     BullModule.registerQueue(...ALL_QUEUES.map((name) => ({ name }))),
     DiscoveryModule,
+    WorkerStatusModule,
+    // The single Telegram connection (owner lease, login state machine, RPC server).
+    TelegramModule,
   ],
   // HeartbeatService and ShutdownCoordinator must stay here, in the root module: Nest runs
   // onModuleDestroy for the root module first and for global modules (PrismaModule) last.

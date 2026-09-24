@@ -22,10 +22,15 @@ import { PageHeader } from '../../shared/components/page-header/page-header';
     <app-empty-state
       class="surface-card"
       icon="download"
-      note="Arrives in Phases 2–3"
-      title="Importing is on its way"
-      message="Connecting your Telegram account arrives in Phase 2; importing channels and tracking import jobs in Phase 3."
-    />
+      note="Arrives in Phase 3"
+      title="Import jobs are on their way"
+      message="Importing channel history and tracking import jobs arrive in Phase 3. You can already connect Telegram and add chats to the archive with New import."
+    >
+      <a matButton="filled" routerLink="/imports/new">
+        <mat-icon>add</mat-icon>
+        New import
+      </a>
+    </app-empty-state>
   `,
 })
 export class ImportListPage {}

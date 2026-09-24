@@ -2,6 +2,7 @@ import {
   type ArgumentsHost,
   Catch,
   type ExceptionFilter,
+  HttpException,
   HttpStatus,
   Logger,
 } from '@nestjs/common';
@@ -20,10 +21,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const errorBody = toApiErrorBody(exception);
 
     if (errorBody.statusCode >= HttpStatus.INTERNAL_SERVER_ERROR) {
-      this.logger.error(
-        `${request.method} ${request.originalUrl} failed: ${describe(exception)}`,
-        exception instanceof Error ? exception.stack : undefined,
-      );
+      const summary = `${request.method} ${request.originalUrl} failed: ${describe(exception)}`;
+      if (exception instanceof HttpException) {
+        // Raised on purpose (worker offline, Telegram timeout, …): a condition, not a bug.
+        this.logger.warn(summary);
+      } else {
+        this.logger.error(summary, exception instanceof Error ? exception.stack : undefined);
+      }
     }
     if (response.headersSent) {
       // Too late for a JSON error; drop the connection so the client sees a failure.
