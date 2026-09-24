@@ -1,0 +1,7 @@
+{
+  "extends": "../../tsconfig.node.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src", "test", "prisma.config.ts", "vitest.integration.config.ts"]
+}

@@ -1,0 +1,19 @@
+<!-- mat-nav-list is the navigation landmark itself (it carries role="navigation"). -->
+<mat-nav-list class="sidebar" aria-label="Main navigation">
+  @for (section of sections; track section.title) {
+    <div matSubheader class="section-title">{{ section.title }}</div>
+    @for (item of section.items; track item.path) {
+      <a
+        mat-list-item
+        [routerLink]="item.path"
+        routerLinkActive
+        #link="routerLinkActive"
+        ariaCurrentWhenActive="page"
+        [activated]="link.isActive"
+      >
+        <mat-icon matListItemIcon [class.icon-filled]="link.isActive">{{ item.icon }}</mat-icon>
+        <span matListItemTitle>{{ item.label }}</span>
+      </a>
+    }
+  }
+</mat-nav-list>

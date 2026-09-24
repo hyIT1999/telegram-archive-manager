@@ -1,0 +1,61 @@
+<app-page-header
+  eyebrow="Overview"
+  title="Dashboard"
+  subtitle="Everything your archive holds, at a glance."
+>
+  <button
+    pageActions
+    matButton="outlined"
+    type="button"
+    [disabled]="stats.isLoading()"
+    (click)="stats.reload()"
+  >
+    <mat-icon>refresh</mat-icon>
+    Refresh
+  </button>
+</app-page-header>
+
+@if (stats.error()) {
+  <app-error-state
+    title="The dashboard could not be loaded"
+    [message]="errorMessage()"
+    (retry)="stats.reload()"
+  />
+} @else if (groups(); as groups) {
+  @if (isEmptyArchive()) {
+    <section class="surface-card empty-hint" aria-labelledby="empty-hint-title">
+      <span class="empty-hint-icon" aria-hidden="true">
+        <mat-icon>inventory_2</mat-icon>
+      </span>
+      <div class="empty-hint-text">
+        <h2 id="empty-hint-title">Your archive is empty</h2>
+        <p>Import a Telegram channel or group to start building it.</p>
+      </div>
+      <a matButton="filled" routerLink="/imports">
+        <mat-icon>download</mat-icon>
+        Go to Import Jobs
+      </a>
+    </section>
+  }
+
+  @for (group of groups; track group.title) {
+    <section class="group" [attr.aria-labelledby]="'stat-group-' + $index">
+      <h2 class="group-title" [id]="'stat-group-' + $index">{{ group.title }}</h2>
+      <div class="grid">
+        @for (stat of group.stats; track stat.key) {
+          <app-stat-card
+            [attr.data-stat]="stat.key"
+            [label]="stat.label"
+            [value]="stat.value"
+            [icon]="stat.icon"
+            [tone]="stat.tone"
+            [link]="stat.link"
+            [hint]="stat.hint"
+          />
+        }
+      </div>
+    </section>
+  }
+} @else {
+  <app-skeleton variant="stat" [count]="10" label="Loading statistics…" />
+}

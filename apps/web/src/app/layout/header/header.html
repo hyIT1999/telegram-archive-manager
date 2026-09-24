@@ -1,0 +1,90 @@
+<mat-toolbar class="header">
+  @if (showMenuToggle()) {
+    <button
+      matIconButton
+      type="button"
+      aria-label="Toggle navigation"
+      aria-controls="app-sidenav"
+      [attr.aria-expanded]="navOpen()"
+      (click)="menuToggle.emit()"
+    >
+      <mat-icon>menu</mat-icon>
+    </button>
+  }
+
+  <a class="brand" routerLink="/dashboard" [attr.aria-label]="appName + ', go to dashboard'">
+    <span class="brand-mark" aria-hidden="true">
+      <mat-icon>auto_stories</mat-icon>
+    </span>
+    <span class="brand-text" aria-hidden="true">
+      <span class="brand-eyebrow">Unofficial Telegram</span>
+      <span class="brand-name">Archive Manager</span>
+    </span>
+  </a>
+
+  <form class="search" role="search" (submit)="search($event)">
+    <mat-icon class="search-icon" aria-hidden="true">search</mat-icon>
+    <input
+      #searchInput
+      class="search-input"
+      type="search"
+      name="q"
+      autocomplete="off"
+      placeholder="Search the archive"
+      aria-label="Search the archive"
+      appFocusShortcut
+      [value]="searchQuery()"
+      (input)="searchQuery.set(searchInput.value)"
+    />
+    <kbd class="search-hint" aria-hidden="true">/</kbd>
+  </form>
+
+  <div class="actions">
+    <button
+      matIconButton
+      type="button"
+      aria-label="Change theme"
+      matTooltip="Theme"
+      [matMenuTriggerFor]="themeMenu"
+    >
+      <mat-icon>{{ themeIcon() }}</mat-icon>
+    </button>
+    <button
+      matIconButton
+      type="button"
+      aria-label="Account menu"
+      matTooltip="Account"
+      [matMenuTriggerFor]="accountMenu"
+    >
+      <mat-icon>account_circle</mat-icon>
+    </button>
+  </div>
+</mat-toolbar>
+
+<mat-menu #themeMenu="matMenu" xPosition="before">
+  @for (option of themeOptions; track option.mode) {
+    <button
+      mat-menu-item
+      type="button"
+      role="menuitemradio"
+      [class.is-selected]="theme.mode() === option.mode"
+      [attr.aria-checked]="theme.mode() === option.mode"
+      (click)="theme.setMode(option.mode)"
+    >
+      <mat-icon>{{ option.icon }}</mat-icon>
+      <span>{{ option.label }}</span>
+    </button>
+  }
+</mat-menu>
+
+<mat-menu #accountMenu="matMenu" xPosition="before">
+  <button mat-menu-item type="button" disabled>
+    <mat-icon>person</mat-icon>
+    <span>Signed in as {{ email() }}</span>
+  </button>
+  <mat-divider />
+  <button mat-menu-item type="button" (click)="logOut()">
+    <mat-icon>logout</mat-icon>
+    <span>Log out</span>
+  </button>
+</mat-menu>

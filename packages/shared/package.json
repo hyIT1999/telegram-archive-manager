@@ -1,0 +1,22 @@
+{
+  "name": "@tam/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Platform-neutral contracts shared by web, api and worker: enums, zod schemas, DTOs, queue and event types.",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
+  }
+}

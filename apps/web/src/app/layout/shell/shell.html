@@ -1,0 +1,26 @@
+<button type="button" class="skip-link" (click)="skipToContent()">Skip to content</button>
+
+<app-header
+  [showMenuToggle]="layout.isHandset()"
+  [navOpen]="navOpen()"
+  (menuToggle)="toggleNav()"
+/>
+
+<mat-sidenav-container class="container">
+  <mat-sidenav
+    id="app-sidenav"
+    class="sidenav"
+    [mode]="layout.isHandset() ? 'over' : 'side'"
+    [(opened)]="navOpen"
+    [fixedInViewport]="true"
+    [fixedTopGap]="headerHeight"
+  >
+    <app-sidebar />
+  </mat-sidenav>
+
+  <mat-sidenav-content>
+    <main #main id="main-content" class="main" tabindex="-1">
+      <router-outlet />
+    </main>
+  </mat-sidenav-content>
+</mat-sidenav-container>

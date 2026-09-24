@@ -1,0 +1,131 @@
+@if (notFound()) {
+  <app-empty-state
+    class="surface-card"
+    icon="search_off"
+    title="Channel not found"
+    message="It is not in your archive. The link may be wrong, or the channel was removed."
+  >
+    <a matButton="filled" routerLink="/channels">
+      <mat-icon>arrow_back</mat-icon>
+      Back to channels
+    </a>
+  </app-empty-state>
+} @else if (channel.error()) {
+  <app-page-header eyebrow="Channel" title="Channel" />
+  <app-error-state
+    title="This channel could not be loaded"
+    [message]="errorMessage()"
+    (retry)="channel.reload()"
+  />
+} @else if (data(); as item) {
+  <app-page-header eyebrow="Channel" [title]="item.title" [subtitle]="handle()">
+    @if (item.isProtected || item.isForum) {
+      <div class="badges">
+        @if (item.isProtected) {
+          <span class="badge badge-protected">
+            <mat-icon aria-hidden="true">lock</mat-icon>
+            Protected: content protection is on, so it is not archived
+          </span>
+        }
+        @if (item.isForum) {
+          <span class="badge">
+            <mat-icon aria-hidden="true">topic</mat-icon>
+            Forum topics
+          </span>
+        }
+      </div>
+    }
+    <a pageActions matButton="outlined" routerLink="/channels">
+      <mat-icon>arrow_back</mat-icon>
+      All channels
+    </a>
+    @if (telegramLink(); as link) {
+      <a pageActions matButton="tonal" [href]="link" target="_blank" rel="noopener noreferrer">
+        <mat-icon>open_in_new</mat-icon>
+        Open in Telegram
+      </a>
+    }
+  </app-page-header>
+
+  <div class="stats">
+    <app-stat-card label="Messages" icon="chat" [value]="count(item.stats.messages)" />
+    <app-stat-card
+      label="Media files"
+      icon="perm_media"
+      tone="secondary"
+      [value]="count(item.stats.media)"
+    />
+    <app-stat-card
+      label="Downloaded"
+      icon="download_done"
+      tone="tertiary"
+      [value]="count(item.stats.downloadedMedia)"
+    />
+    <app-stat-card
+      label="Storage"
+      icon="hard_drive"
+      tone="tertiary"
+      [value]="size(item.stats.storageBytes)"
+    />
+  </div>
+
+  <div class="panels">
+    <section class="surface-card panel" aria-labelledby="channel-details-title">
+      <h2 id="channel-details-title" class="panel-title">Details</h2>
+      <dl class="details">
+        <div>
+          <dt>Telegram chat ID</dt>
+          <dd class="mono">{{ item.telegramChatId }}</dd>
+        </div>
+        <div>
+          <dt>Type</dt>
+          <dd>{{ typeLabel() }}</dd>
+        </div>
+        <div>
+          <dt>Members</dt>
+          <dd>{{ item.memberCount === null ? 'Unknown' : (item.memberCount | number) }}</dd>
+        </div>
+        <div>
+          <dt>Automatic sync</dt>
+          <dd>{{ item.syncEnabled ? 'On' : 'Off' }}</dd>
+        </div>
+        <div>
+          <dt>History</dt>
+          <dd>{{ item.backfillComplete ? 'Fully imported' : 'Not fully imported yet' }}</dd>
+        </div>
+        <div>
+          <dt>Newest archived message</dt>
+          <dd>{{ item.headMessageId === null ? 'None yet' : '#' + item.headMessageId }}</dd>
+        </div>
+        <div>
+          <dt>Last synced</dt>
+          <dd>{{ item.lastSyncedAt ? (item.lastSyncedAt | date: 'medium') : 'Never' }}</dd>
+        </div>
+        <div>
+          <dt>Added to archive</dt>
+          <dd>{{ item.createdAt | date: 'medium' }}</dd>
+        </div>
+        @if (item.migratedToChannelId) {
+          <div>
+            <dt>Upgraded to</dt>
+            <dd>
+              <a [routerLink]="['/channels', item.migratedToChannelId]">Open the supergroup</a>
+            </dd>
+          </div>
+        }
+      </dl>
+    </section>
+
+    <section class="surface-card panel" aria-label="Messages">
+      <app-empty-state
+        icon="chat"
+        note="Arrives in Phase 5"
+        title="Messages will appear here"
+        message="Browsing, filtering and opening this channel's messages arrives in Phase 5."
+      />
+    </section>
+  </div>
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading channel…" />
+  <app-skeleton class="stats-skeleton" variant="stat" [count]="4" label="Loading statistics…" />
+}

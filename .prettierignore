@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.angular
+package-lock.json
+packages/database/src/generated
+packages/database/prisma/migrations

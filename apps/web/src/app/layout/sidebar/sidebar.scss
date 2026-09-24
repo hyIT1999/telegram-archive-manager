@@ -1,0 +1,26 @@
+:host {
+  display: block;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 12px 32px;
+}
+
+.section-title {
+  margin: 16px 16px 6px;
+  font: var(--mat-sys-label-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--mat-sys-on-surface-variant);
+
+  &:first-child {
+    margin-top: 4px;
+  }
+}
+
+a[mat-list-item] {
+  border-radius: var(--mat-sys-corner-full);
+}

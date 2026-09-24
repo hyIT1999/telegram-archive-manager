@@ -1,0 +1,42 @@
+:host {
+  display: block;
+  min-height: 100dvh;
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: var(--mat-sys-corner-full);
+  background: var(--mat-sys-primary);
+  color: var(--mat-sys-on-primary);
+  font: var(--mat-sys-label-large);
+  cursor: pointer;
+  transform: translateY(-200%);
+
+  &:focus-visible {
+    transform: none;
+    outline: 2px solid var(--mat-sys-on-surface);
+    outline-offset: 2px;
+  }
+}
+
+// Grow with the page so the window (not an inner element) scrolls.
+.container {
+  min-height: calc(100dvh - 64px);
+  overflow: visible;
+}
+
+.main {
+  box-sizing: border-box;
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 32px clamp(16px, 4vw, 48px) 64px;
+
+  &:focus {
+    outline: none;
+  }
+}

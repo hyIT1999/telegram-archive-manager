@@ -1,0 +1,63 @@
+<main class="login">
+  <section class="card" aria-labelledby="login-title">
+    <span class="brand-mark" aria-hidden="true">
+      <mat-icon>auto_stories</mat-icon>
+    </span>
+    <p class="eyebrow">{{ appName }}</p>
+    <h1 id="login-title" class="title">Sign in</h1>
+    <p class="lead">Welcome back. Sign in to open your archive.</p>
+
+    @if (submitError(); as message) {
+      <div class="alert" role="alert">
+        <mat-icon aria-hidden="true">error</mat-icon>
+        <span>{{ message }}</span>
+      </div>
+    }
+
+    <form class="form" [formRoot]="loginForm">
+      <mat-form-field>
+        <mat-label>Email</mat-label>
+        <input matInput type="email" autocomplete="username" [formField]="loginForm.email" />
+        @if (loginForm.email().errors()[0]; as error) {
+          <mat-error>{{ error.message }}</mat-error>
+        }
+      </mat-form-field>
+
+      <mat-form-field>
+        <mat-label>Password</mat-label>
+        <input
+          matInput
+          autocomplete="current-password"
+          [type]="passwordHidden() ? 'password' : 'text'"
+          [formField]="loginForm.password"
+        />
+        <button
+          matIconButton
+          matSuffix
+          type="button"
+          [attr.aria-label]="passwordHidden() ? 'Show password' : 'Hide password'"
+          [attr.aria-pressed]="!passwordHidden()"
+          (click)="togglePasswordVisibility()"
+        >
+          <mat-icon>{{ passwordHidden() ? 'visibility' : 'visibility_off' }}</mat-icon>
+        </button>
+        @if (loginForm.password().errors()[0]; as error) {
+          <mat-error>{{ error.message }}</mat-error>
+        }
+      </mat-form-field>
+
+      <button
+        matButton="filled"
+        type="submit"
+        class="submit"
+        [showProgress]="loginForm().submitting()"
+        [disabled]="loginForm().submitting()"
+      >
+        Sign in
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="20" />
+      </button>
+    </form>
+
+    <p class="fine-print">An unofficial tool, not affiliated with Telegram.</p>
+  </section>
+</main>

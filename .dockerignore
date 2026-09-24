@@ -1,0 +1,21 @@
+# Build context = repository root. Keep it small and free of secrets.
+.git
+**/node_modules
+**/dist
+**/.angular
+**/coverage
+**/*.tsbuildinfo
+**/*.log
+packages/database/src/generated
+
+# Local secrets and runtime data — never baked into images
+.env
+.env.*
+!.env.example
+data
+storage
+**/*.part
+
+.vscode
+.idea
+docker-compose*.yml

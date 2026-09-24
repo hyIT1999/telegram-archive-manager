@@ -1,0 +1,9 @@
+# Normalize line endings: LF in the repository and working tree (shell scripts must stay LF
+# to run inside Linux containers / hosts, even when checked out on Windows).
+* text=auto eol=lf
+
+*.ico binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.woff2 binary

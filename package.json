@@ -1,0 +1,71 @@
+{
+  "name": "telegram-archive-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Unofficial Telegram Archive Manager — archive and browse the Telegram channels/groups your account can access.",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/database",
+    "packages/storage",
+    "packages/telegram",
+    "apps/api",
+    "apps/worker",
+    "apps/web"
+  ],
+  "engines": {
+    "node": "^24.15.0 || >=26.0.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": ">=11.0.0",
+      "onFail": "warn"
+    }
+  },
+  "scripts": {
+    "db:generate": "npm run generate -w @tam/database",
+    "db:migrate": "npm run migrate:dev -w @tam/database --",
+    "db:deploy": "npm run migrate:deploy -w @tam/database",
+    "db:check": "npm run migrate:check -w @tam/database",
+    "db:recreate": "npm run recreate -w @tam/database --",
+    "build:packages": "npm run db:generate && tsc -b packages/shared packages/database packages/storage packages/telegram",
+    "build": "npm run build:packages && npm run build -w @tam/api -w @tam/worker -w @tam/web",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
+    "test:integration": "npm run build:packages && npm run test:integration --workspaces --if-present",
+    "dev": "npm run build:packages && tsc -b apps/api apps/worker && concurrently -k -n tsc,api,worker,web -c gray,blue,magenta,green \"tsc -b -w --preserveWatchOutput apps/api apps/worker\" \"npm run dev:run -w @tam/api\" \"npm run dev:run -w @tam/worker\" \"npm run start -w @tam/web\"",
+    "user:create": "npm run user:create -w @tam/api --"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "~24.13.6",
+    "angular-eslint": "~22.5.0",
+    "concurrently": "^10.0.5",
+    "eslint": "~10.11.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "~8.70.1",
+    "vitest": "~4.1.11"
+  },
+  "overrides": {
+    "typescript": "$typescript",
+    "vitest": "$vitest",
+    "prisma": "7.10.0",
+    "@prisma/client": "7.10.0"
+  },
+  "allowScripts": {
+    "argon2@0.45.1": true,
+    "esbuild@0.28.2": true,
+    "lmdb@3.5.6": true,
+    "msgpackr-extract@3.0.4": true,
+    "@parcel/watcher@2.6.0": true,
+    "@prisma/engines@7.10.0": true,
+    "@swc/core@1.16.2": true,
+    "prisma@7.10.0": true
+  }
+}

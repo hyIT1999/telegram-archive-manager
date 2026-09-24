@@ -1,0 +1,29 @@
+:host {
+  display: block;
+}
+
+.channel-skeleton {
+  --skeleton-min-column: 300px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.more-error {
+  margin: 0;
+  color: var(--mat-sys-error);
+}

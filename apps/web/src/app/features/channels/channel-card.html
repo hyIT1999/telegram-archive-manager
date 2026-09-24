@@ -1,0 +1,56 @@
+@let item = channel();
+<article class="surface-card card">
+  <header class="card-header">
+    <span class="avatar" aria-hidden="true">{{ initials() }}</span>
+    <div class="titles">
+      <h2 class="title">
+        <a class="title-link" [routerLink]="['/channels', item.id]">{{ item.title }}</a>
+      </h2>
+      <p class="handle">{{ handle() }} · {{ typeLabel() }}</p>
+    </div>
+  </header>
+
+  @if (item.isProtected || item.isForum) {
+    <div class="badges">
+      @if (item.isProtected) {
+        <span class="badge badge-protected">
+          <mat-icon aria-hidden="true">lock</mat-icon>
+          Protected
+        </span>
+      }
+      @if (item.isForum) {
+        <span class="badge">
+          <mat-icon aria-hidden="true">topic</mat-icon>
+          Forum
+        </span>
+      }
+    </div>
+  }
+
+  <dl class="facts">
+    <div class="fact">
+      <dt>Messages</dt>
+      <dd>{{ item.stats.messages | number }}</dd>
+    </div>
+    <div class="fact">
+      <dt>Media</dt>
+      <dd>
+        {{ item.stats.media | number }}
+        <span class="fact-note">{{ item.stats.downloadedMedia | number }} downloaded</span>
+      </dd>
+    </div>
+    <div class="fact">
+      <dt>Storage</dt>
+      <dd>{{ item.stats.storageBytes | bytes }}</dd>
+    </div>
+  </dl>
+
+  <p class="sync">
+    <mat-icon aria-hidden="true">history</mat-icon>
+    @if (item.lastSyncedAt) {
+      Last synced {{ item.lastSyncedAt | date: 'medium' }}
+    } @else {
+      Never synced
+    }
+  </p>
+</article>

@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out-tsc/
+*.tsbuildinfo
+.angular/
+coverage/
+
+# Prisma generated client
+packages/database/src/generated/
+
+# Local environment & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.session
+*.pem
+
+# Local runtime data (media storage, temp downloads)
+data/
+storage/
+*.part
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
