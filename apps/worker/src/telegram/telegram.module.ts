@@ -48,5 +48,7 @@ import {
     TelegramRpcServer,
     TelegramLifecycle,
   ],
+  // Imports read history through the same connection and check the login state first.
+  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService],
 })
 export class TelegramModule {}

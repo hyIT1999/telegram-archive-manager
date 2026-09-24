@@ -32,6 +32,13 @@ export class ChatProtectedError extends TelegramError {
   }
 }
 
+/** The account can no longer read the chat: it left, was banned, or the chat was deleted. */
+export class ChatUnavailableError extends TelegramError {
+  constructor(message = 'This Telegram account can no longer read the chat') {
+    super(message, TelegramErrorCode.CHAT_UNAVAILABLE);
+  }
+}
+
 /** The session is missing, revoked or unregistered — the user has to log in again. */
 export class AuthRequiredError extends TelegramError {
   constructor(reason = 'The Telegram session is no longer valid; log in again') {

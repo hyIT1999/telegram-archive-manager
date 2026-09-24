@@ -1,0 +1,64 @@
+<h2 id="channel-import-title" class="panel-title">Import</h2>
+
+@if (channel().isProtected) {
+  <p class="hint">Content protection is on for this chat, so its messages are not archived.</p>
+} @else if (channel().migratedToChannelId; as supergroupId) {
+  <p class="hint">
+    This is the history of the group from before it became a supergroup. It is imported together
+    with the supergroup.
+  </p>
+  <a matButton="tonal" [routerLink]="['/channels', supergroupId]">Open the supergroup</a>
+} @else if (loadError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+  <div class="actions">
+    <button matButton="tonal" type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Try again
+    </button>
+  </div>
+} @else if (job() === undefined) {
+  <app-skeleton variant="line" [count]="2" label="Loading the latest import…" />
+} @else {
+  @if (job(); as latest) {
+    <app-import-progress [job]="latest" />
+    <div class="actions">
+      <a matButton="tonal" [routerLink]="['/imports', latest.id]">Open the import job</a>
+    </div>
+  } @else {
+    <p class="hint">Nothing of this chat is in the archive yet.</p>
+  }
+
+  @if (canStart()) {
+    <div class="start">
+      <h3 class="start-title">{{ job() ? 'Import again' : 'Import the history' }}</h3>
+      @if (job()) {
+        <p class="hint">
+          Reads the messages posted since the last import, and whatever older history is still
+          missing.
+        </p>
+      }
+      <app-import-mode-picker [(choice)]="choice" />
+      @if (startError(); as message) {
+        <app-notice tone="error">
+          {{ message }}
+          @if (blockingJobId(); as jobId) {
+            <a [routerLink]="['/imports', jobId]">Open that import</a>
+          }
+        </app-notice>
+      }
+      <div class="actions">
+        <button
+          matButton="filled"
+          type="button"
+          [disabled]="!request() || starting()"
+          [showProgress]="starting()"
+          (click)="start()"
+        >
+          <mat-icon>download</mat-icon>
+          Start import
+          <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+        </button>
+      </div>
+    </div>
+  }
+}

@@ -15,6 +15,25 @@ export const cursorQuerySchema = z.object({
 });
 export type CursorQuery = z.infer<typeof cursorQuerySchema>;
 
+/** Accepts `a,b,c` (query string) or an array and yields a de-duplicated array. */
+export function csvList<T extends z.ZodType>(item: T) {
+  return z.preprocess(
+    (value) => {
+      if (typeof value === 'string') {
+        return value
+          .split(',')
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0);
+      }
+      return value;
+    },
+    z
+      .array(item)
+      .max(50)
+      .transform((items) => [...new Set(items)]),
+  );
+}
+
 /** A date (YYYY-MM-DD) or an ISO date-time with offset. */
 export const isoDateOrDateTimeSchema = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
 

@@ -1,10 +1,24 @@
-import { type SentCode, User as MtUser, tl } from '@mtcute/core';
+import { type Chat as MtChat, type SentCode, User as MtUser, tl } from '@mtcute/core';
 import type { TelegramClient as MtTelegramClient } from '@mtcute/core/client.js';
 import { TelegramAuthState, TelegramErrorCode } from '@tam/shared';
-import { AuthRequiredError, LoginStepError, TelegramError } from '../errors.js';
+import {
+  AuthRequiredError,
+  ChatUnavailableError,
+  FloodWaitError,
+  LoginStepError,
+  TelegramError,
+} from '../errors.js';
 import type { SendCodeResult, SignInResult, TelegramLoginApi } from '../login-api.js';
 import type { TelegramClient, TelegramHistoryReader } from '../telegram-client.js';
-import type { AuthState, Chat, Message, TelegramUser } from '../types.js';
+import type {
+  AuthState,
+  Chat,
+  HistoryPage,
+  HistoryPageOptions,
+  LegacyGroup,
+  Message,
+  TelegramUser,
+} from '../types.js';
 import { toTelegramError, translateErrors } from './error-mapping.js';
 import { mapChat, mapMessage, mapUser } from './mappers.js';
 
@@ -99,29 +113,66 @@ export class MtcuteTelegramAdapter
     });
   }
 
+  /** Reads the full chat, which also names the basic group a supergroup was upgraded from. */
   async refreshChat(chatId: string): Promise<Chat> {
-    const chat = mapChat(await translateErrors(() => this.tg.getChat(toPeerId(chatId))));
+    const full = await translateErrors(() => this.tg.getFullChat(toPeerId(chatId)));
+    const chat = mapChat(full);
     if (!chat) {
-      throw new TelegramError(
-        `Chat ${chatId} is no longer an accessible channel or group`,
-        TelegramErrorCode.TELEGRAM_ERROR,
-      );
+      throw new ChatUnavailableError(`Chat ${chatId} is no longer a channel or group this account can read`);
     }
-    return chat;
+    const migratedFrom = full.migratedFrom;
+    return { ...chat, migratedFromChatId: migratedFrom ? String(-migratedFrom.chatId) : null };
+  }
+
+  async getLegacyGroup(chatId: string): Promise<LegacyGroup | null> {
+    let chat: MtChat;
+    try {
+      chat = await this.tg.getChat(toPeerId(chatId));
+    } catch (error) {
+      const translated = toTelegramError(error);
+      // Waits and a lost session concern every request; anything else means "not readable".
+      if (translated instanceof FloodWaitError || translated instanceof AuthRequiredError) {
+        throw translated;
+      }
+      return null;
+    }
+    // chatForbidden: the account was never in the old group, so its history is not readable.
+    if (chat.raw._ !== 'chat') {
+      return null;
+    }
+    return { id: String(chat.id), title: chat.title, isProtected: chat.hasContentProtection };
   }
 
   /** Newest → oldest, strictly older than `fromMessageId`; empty when history is exhausted. */
   async getChatHistory(chatId: string, fromMessageId?: string, limit = MAX_HISTORY_PAGE): Promise<Message[]> {
+    const page = await this.getHistoryPage(chatId, {
+      ...(fromMessageId === undefined ? {} : { beforeMessageId: fromMessageId }),
+      limit,
+    });
+    return page.messages;
+  }
+
+  async getHistoryPage(chatId: string, options: HistoryPageOptions = {}): Promise<HistoryPage> {
+    const before = options.beforeMessageId === undefined ? undefined : toMessageId(options.beforeMessageId);
+    const offset =
+      before !== undefined
+        ? { id: before, date: 0 }
+        : options.beforeDate
+          ? { id: 0, date: Math.floor(options.beforeDate.getTime() / 1000) }
+          : undefined;
     const messages = await translateErrors(() =>
       this.tg.getHistory(toPeerId(chatId), {
-        limit: clampLimit(limit),
-        ...(fromMessageId === undefined ? {} : { offset: { id: toMessageId(fromMessageId), date: 0 } }),
+        limit: clampLimit(options.limit ?? MAX_HISTORY_PAGE),
+        ...(offset ? { offset } : {}),
       }),
     );
-    return messages
-      .filter((message) => fromMessageId === undefined || message.id < toMessageId(fromMessageId))
-      .map((message) => mapMessage(message, chatId))
-      .sort((a, b) => Number(b.id) - Number(a.id));
+    return {
+      messages: messages
+        .filter((message) => before === undefined || message.id < before)
+        .map((message) => mapMessage(message, chatId))
+        .sort((a, b) => Number(b.id) - Number(a.id)),
+      total: messages.total,
+    };
   }
 
   /** Oldest → newest, strictly newer than `afterMessageId`. */

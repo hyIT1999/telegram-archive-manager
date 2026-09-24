@@ -21,8 +21,8 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 1 | Kiến trúc, monorepo, PostgreSQL, Redis, Prisma, NestJS API nền, worker khung, Angular shell, Docker | ✅ Hoàn thành |
 | 2 | Đăng nhập Telegram (mtcute), danh sách channel/group, chọn channel | ✅ Hoàn thành |
 | 2b | Chọn nơi lưu cho từng channel: thư mục trên máy hoặc Google Drive | ✅ Hoàn thành |
-| 3 | Import lịch sử message, import jobs, BullMQ | ⏳ Tiếp theo |
-| 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | Kế hoạch |
+| 3 | Import lịch sử message, import jobs (pause/resume/cancel), BullMQ, reconciler | ✅ Hoàn thành |
+| 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | ⏳ Tiếp theo |
 | 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | Kế hoạch |
 | 6 | Search, Tags, Favorites, Filters | Kế hoạch |
 | 7 | Tiến trình realtime (SSE), sync message mới | Kế hoạch |
@@ -32,12 +32,13 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 
 | Trang | Phase |
 |---|---|
-| Import Jobs: danh sách job, bước 5–7 của wizard `imports/new`, chi tiết `imports/:id` | 3 (realtime ở 7) |
 | All Messages, Message detail, Videos/Images/Documents/Audio | 5 |
 | Settings → Archive settings | 5 (phần Appearance đã dùng được) |
 | Search, Tags, Favorites | 6 |
 
-Đã dùng được từ Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu) và các mục **Settings → Telegram account**, **Settings → Storage locations**.
+Đã dùng được:
+- Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu), **Settings → Telegram account**, **Settings → Storage locations**.
+- Phase 3: bước 5–7 của wizard (chọn import toàn bộ hoặc từ một ngày, bắt đầu, theo dõi tiến trình), trang **Import Jobs** (`/imports`), chi tiết job `imports/:id` với Pause/Resume/Cancel, mục **Import** trên trang channel. Tiến trình được cập nhật bằng polling vài giây một lần; SSE realtime đến ở Phase 7.
 
 ## Kiến trúc tổng quan
 
@@ -61,6 +62,9 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
     - Pub/sub không ghi vào AOF, nên mã đăng nhập và mật khẩu 2FA không bao giờ nằm lại trong Redis.
     - Nếu không worker nào nhận yêu cầu, API trả `503` ngay.
     - Kênh pub/sub có prefix vì Redis không tách pub/sub theo số database. Nhờ vậy test chạy song song với dev stack, hay nhiều môi trường dùng chung một Redis, không trả lời nhầm yêu cầu của nhau.
+- **Import job:** API ghi job vào bảng `import_jobs` trước, rồi mới đẩy một *run* (`ij-<job id>-<số run>`) vào queue `telegram-import`.
+  - Nếu Redis không nhận kịp (quá 3 giây), request vẫn thành công. Reconciler của worker (chạy khi khởi động và mỗi phút) thêm lại run cho mọi job `PENDING`/`RUNNING` bị thiếu trong queue, và ghi nhận `FAILED` cho run mà BullMQ đã bỏ cuộc.
+  - Worker đọc lại trạng thái job trước mỗi trang và ghi mỗi trang bằng compare-and-set theo `status` + số run. Nhờ vậy Pause, Cancel hay một run mới hơn luôn thắng một run cũ, kể cả khi hai bên chạy cùng lúc.
 - **Binary media không bao giờ nằm trong PostgreSQL.** File nằm ở nơi lưu mà channel đã chọn, theo cấu trúc dễ đọc: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
@@ -129,6 +133,7 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `TELEGRAM_SESSION_DATABASE_URL` | worker | — | DB riêng cho session Telegram (`…/tam_tg`) |
 | `TELEGRAM_SESSION_KEY` | worker | — | 32 byte base64, dùng mã hoá auth key và trạng thái đăng nhập |
 | `WORKER_HEARTBEAT_INTERVAL_MS` | worker | `5000` | Chu kỳ heartbeat (1000–60000); key có TTL = 3 × chu kỳ |
+| `IMPORT_PAGE_DELAY_MS` | worker | `1000` | Nghỉ giữa hai trang lịch sử (100 message) khi import (0–60000), để tránh giới hạn tần suất của Telegram. Channel 10.000 message mất khoảng 2–3 phút |
 | `STORAGE_LOCAL_ROOT` | api, worker | — | Thư mục của nơi lưu có sẵn "This computer". **Dùng đường dẫn tuyệt đối**, vì api và worker chạy ở thư mục khác nhau |
 | `STORAGE_LOCAL_ROOTS` | api (worker từ Phase 4) | = `STORAGE_LOCAL_ROOT` | Các thư mục, ngăn cách bằng `;`, mà web được phép thêm làm nơi lưu (và thư mục con bên trong). Web không bao giờ ghi được ra ngoài các thư mục này |
 | `STORAGE_SECRET_KEY` | api (worker từ Phase 4) | — | 32 byte base64, dùng mã hoá token Google Drive lưu trong DB. Cần khi dùng Google Drive |
@@ -312,7 +317,7 @@ Lỗi có mã ổn định trong `code`:
 
 ## 9. Import channel
 
-Wizard **Import Jobs → New import** gồm 7 bước. Bước 1–4 đã dùng được:
+Wizard **Import Jobs → New import** gồm 7 bước:
 1. **Connect Telegram** (mục 8). Nếu đã đăng nhập, wizard tự chuyển sang bước 2.
 2. **Channels & groups:** danh sách channel, supergroup và group mà tài khoản đã tham gia, có ô tìm kiếm (không phân biệt dấu: "hoc" tìm ra "Học") và bộ lọc loại chat.
    - Danh sách được worker cache trong bảng `telegram_dialogs`: tự đọc sau khi đăng nhập, khi worker khởi động nếu cache cũ hơn 6 giờ, và khi bấm **Refresh**. Trong lúc worker đọc, trang tự cập nhật.
@@ -324,11 +329,51 @@ Wizard **Import Jobs → New import** gồm 7 bước. Bước 1–4 đã dùng 
 4. **Storage location:** chọn nơi lưu media của channel (xem "Nơi lưu" bên dưới), rồi bấm **Save location** (`PATCH /api/channels/:id` với `{storageLocationId}`).
    - Nơi lưu mặc định được chọn sẵn.
    - Thêm nơi lưu mới ngay tại đây: **Folder on this computer** hoặc **Google Drive**.
+5. **Import mode:**
+   - **The whole history:** mọi message, về tới message đầu tiên.
+   - **Since a date:** chỉ message gửi từ ngày được chọn trở đi (tính theo múi giờ của trình duyệt). Phần cũ hơn có thể import sau.
+6. **Start:** xem lại channel, chế độ và nơi lưu, rồi bấm **Start import** (`POST /api/channels/:id/import`).
+7. **Progress:** trạng thái, thanh tiến trình, số message đã đọc trên tổng dự kiến, số media tìm thấy và dung lượng, lý do đang chờ (nếu có), cùng các nút **Pause**, **Resume**, **Cancel import**. Trang tự đọc lại vài giây một lần khi job đang chạy.
 
-*(Bước 5–7 triển khai ở Phase 3–4.)* Luồng dự kiến:
-1. Chọn **Import all history** hoặc **Import from date**, rồi bấm Start.
-2. Lịch sử được đọc theo trang 100 message. Mỗi trang được ghi trong một transaction, cùng với cursor, nên crash hay restart đều tiếp tục đúng chỗ và **không tạo bản trùng**.
-3. Media được tải qua queue `media-download` vào nơi lưu của channel: resume từ file `.part`, retry với exponential backoff, kiểm tra SHA-256, không tải lại file trùng. Có thể Pause/Resume/Cancel.
+Có thể import lại bất cứ lúc nào từ mục **Import** trên trang channel. Lần import sau chỉ đọc message mới đăng và phần lịch sử cũ còn thiếu.
+
+### Import hoạt động thế nào
+
+- **Khoảng đã import:** mỗi channel giữ một khoảng liên tục `[backfill_cursor_id … head_message_id]`. Mọi message trong khoảng này đã được đọc (và lưu, trừ loại không bao giờ lưu). Mỗi lần chạy có hai bước:
+  1. **Forward:** đọc message mới hơn `head` từ cũ đến mới, và nâng `head` lên sau mỗi trang.
+  2. **Backfill:** đọc lịch sử cũ hơn `cursor` từ mới đến cũ. Chế độ *all* dừng khi hết lịch sử (`backfill_complete`). Chế độ *since a date* dừng ở message đầu tiên cũ hơn ngày đã chọn và để lịch sử "chưa đủ", nên lần import toàn bộ sau sẽ đi tiếp từ đó.
+- **Mỗi trang (tối đa 100 message) là một transaction** gồm: tiến độ job, khoảng của channel, message, media, và một download job cho mỗi file.
+  - Trang đầu tiên kiểm tra rằng run vẫn đang giữ job và khoảng của channel không đổi. Pause, cancel, hay một run khác chen vào đều làm cả trang rollback.
+  - Nhờ vậy crash, restart hay mất mạng giữa chừng đều tiếp tục đúng chỗ. Unique key `(channel, message id)` và `(message, file)` bảo đảm **không bao giờ có bản trùng**.
+  - Đã kiểm chứng bằng cách tắt cứng worker giữa lúc import 3.715 message: sau khi khởi động lại, job chạy tiếp và kết thúc với đúng 3.715 message, không trùng dòng nào.
+- **Không bao giờ lưu:** message có content protection, message có hẹn giờ tự xoá, và media tự huỷ (view-once/TTL).
+  - Message loại này vẫn được tính là "đã đọc", để tiến trình đạt 100%.
+  - Nếu chat bật content protection sau khi đã thêm vào archive, job dừng với trạng thái `FAILED` và sync của chat bị tắt.
+- **Supergroup nâng cấp từ group thường:** lịch sử trước khi nâng cấp nằm trong group cũ, với dãy id riêng. Import của supergroup đọc luôn group cũ vào một channel riêng, có `migratedToChannelId` trỏ về supergroup. Group cũ mà tài khoản chưa từng tham gia, hoặc có content protection, thì bỏ qua.
+- **Tổng dự kiến:**
+  - Chế độ *all* dùng số message Telegram báo, trừ đi phần archive đã có.
+  - Chế độ *since a date* ước tính theo khoảng cách id message. Ước tính này hơi cao, vì message đã xoá vẫn chiếm id.
+  - Khi job hoàn tất, tổng được thay bằng con số chính xác.
+- **Chờ mà không tốn lượt thử:** khi Telegram yêu cầu chờ (`FLOOD_WAIT`), worker chưa kết nối được Telegram, hoặc tài khoản Telegram bị đăng xuất, job được hẹn chạy lại. Lý do chờ hiện trên trang job. Lỗi khác được thử lại 5 lần (30 giây, 1, 2, 4 phút); sau lần cuối, job chuyển `FAILED` kèm lý do.
+- **Chỉ một job chưa kết thúc cho mỗi channel** (partial unique index):
+  - Gửi lại đúng yêu cầu import trả về chính job đó (`200`).
+  - Yêu cầu khác trả `409 IMPORT_ACTIVE`, kèm `details.jobId`.
+- **Trạng thái:**
+  - `PENDING` (Queued) → `RUNNING` (Importing) → `COMPLETED`, hoặc `FAILED`.
+  - **Pause:** `PENDING`/`RUNNING` → `PAUSED`. Worker dừng ở trang kế tiếp, mọi thứ đã đọc được giữ lại.
+  - **Resume:** `PAUSED` → `PENDING`, với số run mới.
+  - **Cancel:** mọi trạng thái chưa kết thúc → `CANCELLED`. Không resume được nữa; muốn tiếp tục thì tạo import mới, và nó đi tiếp từ chỗ archive đã có.
+- **Media (Phase 3):** file được ghi nhận cùng message (loại, tên, kích thước, kích thước ảnh/video, thời lượng) và có download job `PENDING`. **Tải file về nơi lưu là Phase 4**: resume từ `.part`, retry, SHA-256, không tải lại file trùng.
+  - Hãy xem dung lượng trên trang job trước khi Phase 4 bắt đầu tải. Channel nhiều video có thể lên tới hàng trăm GB.
+
+API import (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `POST /api/channels/:id/import` | `{mode:'ALL'}` hoặc `{mode:'FROM_DATE', fromDate}` (ngày hoặc ISO date-time có offset, không ở tương lai). `202` kèm job mới; `200` nếu cùng import đang chạy. Lỗi: `409 IMPORT_ACTIVE`, `409 TELEGRAM_NOT_READY`, `422 CHAT_PROTECTED`, `422 CHANNEL_MIGRATED` (group cũ: import supergroup) |
+| `GET /api/import-jobs` | Mới nhất trước; lọc `channelId`, `status` (ví dụ `RUNNING,PAUSED`); phân trang `cursor`/`limit` |
+| `GET /api/import-jobs/:id` | Một job, kèm channel và các bộ đếm |
+| `POST /api/import-jobs/:id/pause` / `resume` / `cancel` | Đổi trạng thái; `409 INVALID_JOB_STATE` nếu trạng thái hiện tại không cho phép (`details.status`) |
 
 ### Nơi lưu (storage locations)
 
@@ -387,6 +432,8 @@ Vì sao dùng mã thiết bị: cách này không cần redirect URI, nên dùng
 
 *(Triển khai ở Phase 7.)* Sau khi import xong, dùng **Sync** để chỉ lấy message mới (idempotent, chạy nhiều lần không tạo bản trùng). Có thể bật sync định kỳ cho từng channel (`syncEnabled`). Phần realtime dùng Telegram updates, cộng với job định kỳ làm lưới an toàn.
 
+Từ Phase 3 đã có cách lấy message mới bằng tay: trên trang channel, mục **Import → Import again → The whole history**. Lần chạy này chỉ đọc message đăng sau lần import trước, cùng phần lịch sử cũ còn thiếu, và không tạo bản trùng.
+
 ## 11. Production deployment
 
 Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
@@ -435,3 +482,11 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | "This Google account cannot open the folder …" | Khi kết nối lại, bạn đã chọn một tài khoản Google khác. Hãy đăng nhập đúng tài khoản ghi trên nơi lưu, hoặc thêm một nơi lưu Google Drive mới |
 | "Google Drive is full." | Hết dung lượng Google. Giải phóng dung lượng, hoặc chuyển channel sang nơi lưu khác |
 | Đổi `STORAGE_SECRET_KEY` xong, nơi lưu Google báo lỗi giải mã | Token cũ được mã hoá bằng key cũ. Chọn **Reconnect Google account** cho từng nơi lưu Google Drive |
+| Import đứng ở **Queued** | Worker chưa chạy, hoặc đang bận một import khác (import chạy lần lượt từng job). Nếu Redis từng mất kết nối lúc bấm Start, reconciler của worker sẽ đưa job vào queue trong vòng một phút |
+| "Waiting for the worker to connect to Telegram" | Worker chưa giữ kết nối Telegram (đang khởi động, `STANDBY`, hoặc lỗi mạng). Job tự chạy tiếp khi kết nối xong, không mất lượt thử |
+| "Waiting for Telegram: log in again under Settings → Telegram" | Session Telegram bị đăng xuất hoặc thu hồi. Đăng nhập lại; job tự chạy tiếp |
+| "Telegram asked to wait N s before reading more" | `FLOOD_WAIT` của Telegram. Job tự chờ đúng thời gian đó. Nếu gặp thường xuyên, tăng `IMPORT_PAGE_DELAY_MS` |
+| Job `FAILED`: "Content protection was turned on for this chat…" | Chat vừa bật content protection nên không được archive nữa. Các message đã lưu trước đó vẫn còn |
+| Job `FAILED`: "This Telegram account can no longer read the chat" | Tài khoản đã rời chat, bị ban, hoặc chat bị xoá. Kiểm tra trong app Telegram |
+| `409 IMPORT_ACTIVE` khi bấm Start | Channel đã có import chưa kết thúc với chế độ khác. Mở job đó (link trong thông báo), đợi nó xong hoặc Cancel rồi import lại |
+| Dev: sau `npm run db:migrate`, API/worker báo `Unknown argument …` | `tsc -b -w` trong `npm run dev` không build lại Prisma client vừa generate. Dừng `npm run dev`, chạy `npm run build:packages`, rồi chạy lại `npm run dev` |

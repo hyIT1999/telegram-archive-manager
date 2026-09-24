@@ -74,6 +74,35 @@ export interface Message {
   meta: Record<string, unknown>;
 }
 
+export interface HistoryPageOptions {
+  /** Only messages strictly older than this id (exclusive cursor). */
+  beforeMessageId?: string;
+  /** Only messages sent before this moment; ignored when `beforeMessageId` is set. */
+  beforeDate?: Date;
+  /** At most this many messages (capped at 100). */
+  limit?: number;
+}
+
+/** One page of history plus Telegram's count of the chat's messages (for import progress). */
+export interface HistoryPage {
+  /** Newest → oldest. Empty when the start of the history was reached. */
+  messages: Message[];
+  /** Messages in the whole chat. Only meaningful for pages read without a cursor. */
+  total: number;
+}
+
+/**
+ * The basic group a supergroup was upgraded from. Its messages stay there, with their own ids,
+ * so the archive keeps them in a separate channel row.
+ */
+export interface LegacyGroup {
+  /** Marked id (-id). */
+  id: string;
+  title: string;
+  /** Content protection of the old group; such history is never archived. */
+  isProtected: boolean;
+}
+
 export interface TelegramUser {
   id: string;
   username: string | null;

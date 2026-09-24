@@ -29,6 +29,12 @@ export function createFakeTelegramApi() {
     checkPassword: vi.fn<TelegramApi['checkPassword']>(async () => TEST_USER),
     logOut: vi.fn<TelegramApi['logOut']>(async () => undefined),
     getChats: vi.fn<TelegramApi['getChats']>(async () => []),
+    // History: scripted by FakeChats (fake-chats.ts) in the import tests.
+    getHistoryPage: vi.fn<TelegramApi['getHistoryPage']>(async () => ({ messages: [], total: 0 })),
+    getNewerMessages: vi.fn<TelegramApi['getNewerMessages']>(async () => []),
+    getMessages: vi.fn<TelegramApi['getMessages']>(async () => []),
+    refreshChat: vi.fn<TelegramApi['refreshChat']>(async (chatId) => chat(chatId)),
+    getLegacyGroup: vi.fn<TelegramApi['getLegacyGroup']>(async () => null),
   } satisfies TelegramApi;
   const provider: TelegramApiProvider = { api };
   return { api, provider };
@@ -57,9 +63,9 @@ export function testPrisma(): PrismaService {
   return new PrismaService({ url: inject('databaseUrl'), poolMax: 4, applicationName: 'tam-worker-tests' });
 }
 
-/** Empties the tables the Telegram module writes. */
+/** Empties the tables the Telegram module and the importer write. */
 export async function resetTelegramTables(prisma: PrismaService): Promise<void> {
-  await prisma.telegramDialog.deleteMany();
-  await prisma.channel.deleteMany();
-  await prisma.telegramAccount.deleteMany();
+  await prisma.$executeRaw`
+    TRUNCATE TABLE telegram_dialogs, telegram_accounts, channels, messages, media, import_jobs,
+      download_jobs CASCADE`;
 }

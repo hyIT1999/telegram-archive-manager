@@ -419,6 +419,8 @@ model ImportJob {
   totalBytes          BigInt         @default(0) @map("total_bytes")
   downloadedBytes     BigInt         @default(0) @map("downloaded_bytes")
   currentFile         String?        @map("current_file")
+  /// What an unfinished job waits for, for people (e.g. a Telegram rate limit); null otherwise.
+  statusDetail        String?        @map("status_detail")
   error               String?
   startedAt           DateTime?      @map("started_at") @db.Timestamptz(3)
   messagesCompletedAt DateTime?      @map("messages_completed_at") @db.Timestamptz(3)

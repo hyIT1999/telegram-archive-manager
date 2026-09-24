@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  IMPORT_RUN_ATTEMPTS,
   appEventSchema,
   cursorQuerySchema,
+  importJobListQuerySchema,
   importRequestSchema,
+  importRunJobOptions,
   loginRequestSchema,
   messageListQuerySchema,
   newPasswordSchema,
@@ -59,6 +62,41 @@ describe('importRequestSchema', () => {
   it('requires fromDate for FROM_DATE', () => {
     expect(importRequestSchema.safeParse({ mode: 'FROM_DATE' }).success).toBe(false);
     expect(importRequestSchema.safeParse({ mode: 'SOMETHING' }).success).toBe(false);
+  });
+
+  it('accepts a local midnight with offset but no date in the future', () => {
+    expect(
+      importRequestSchema.safeParse({ mode: 'FROM_DATE', fromDate: '2026-09-01T00:00:00+07:00' })
+        .success,
+    ).toBe(true);
+    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
+    const result = importRequestSchema.safeParse({ mode: 'FROM_DATE', fromDate: nextWeek });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toBe('Pick a date that is not in the future');
+  });
+});
+
+describe('importJobListQuerySchema', () => {
+  it('filters by channel and a comma separated list of statuses', () => {
+    const channelId = '0199a0b1-0000-7000-8000-000000000001';
+    expect(importJobListQuerySchema.parse({ channelId, status: 'RUNNING,PAUSED,RUNNING' })).toEqual(
+      {
+        channelId,
+        status: ['RUNNING', 'PAUSED'],
+        limit: 50,
+      },
+    );
+    expect(importJobListQuerySchema.safeParse({ status: 'STUCK' }).success).toBe(false);
+  });
+});
+
+describe('importRunJobOptions', () => {
+  it('gives every run its own deterministic BullMQ id and retries with backoff', () => {
+    const options = importRunJobOptions('0199a0b1-0000-7000-8000-000000000001', 3);
+    expect(options.jobId).toBe('ij-0199a0b1-0000-7000-8000-000000000001-3');
+    expect(options.attempts).toBe(IMPORT_RUN_ATTEMPTS);
+    expect(options.backoff).toEqual({ type: 'exponential', delay: 30_000 });
+    expect(options.removeOnComplete).toBe(true);
   });
 });
 

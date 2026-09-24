@@ -7,6 +7,7 @@ import {
   flushError,
   makeChannel,
   makeDialog,
+  makeImportJob,
   makeDialogList,
   makeReadyStatus,
   makeStorageCheck,
@@ -17,8 +18,10 @@ import {
 import { nextRequest } from '../../../testing/http';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { NotifyService } from '../../core/services/notify-service';
-import type { TelegramDialogDto } from '../../shared/models';
+import type { ChannelDto, TelegramDialogDto } from '../../shared/models';
 import { STORAGE_ENDPOINTS } from '../storage/storage-api';
+import { IMPORT_POLLING } from './import-job-watch';
+import { IMPORT_ENDPOINTS } from './imports-api';
 import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { TELEGRAM_POLLING } from '../telegram/telegram-session';
 import { ImportWizardPage } from './import-wizard-page';
@@ -37,6 +40,7 @@ describe('ImportWizardPage', () => {
         provideHttpClientTesting(),
         { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
         { provide: TELEGRAM_POLLING, useValue: { statusMs: 60_000, chatsMs: 60_000 } },
+        { provide: IMPORT_POLLING, useValue: { jobMs: 60_000, listMs: 60_000 } },
         { provide: NotifyService, useValue: { success: vi.fn(), info: vi.fn(), error: vi.fn() } },
         { provide: ConfirmService, useValue: { ask: vi.fn() } },
       ],
@@ -94,7 +98,6 @@ describe('ImportWizardPage', () => {
     ]);
     expect(steps[0].getAttribute('aria-current')).toBe('step');
     expect(steps.slice(1).every((step) => step.disabled)).toBe(true);
-    expect(page().querySelectorAll('.step-note').length).toBe(3);
     http.expectNone(TELEGRAM_ENDPOINTS.chats);
   });
 
@@ -233,8 +236,9 @@ describe('ImportWizardPage', () => {
         'My Drive › Unofficial Telegram Archive › Lessons (-1001234)',
       ),
     );
-    expect(page().querySelector(`a[href="/channels/${CHANNEL_ID}"]`)).not.toBeNull();
+    expect(button('Continue')?.disabled).toBe(false);
     expect(stepButtons()[3].closest('.step')?.classList).toContain('done');
+    expect(stepButtons()[4].disabled).toBe(false);
     expect(button('Save location')).toBeUndefined();
   });
 
@@ -262,5 +266,148 @@ describe('ImportWizardPage', () => {
       expect(page().querySelector('app-notice[role="alert"]')?.textContent).toContain('Storage location not found'),
     );
     expect(button('Save location')?.disabled).toBe(false);
+  });
+  const text = (selector: string) =>
+    page().querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+
+  /** Steps 1–4 for a chat whose channel already has its storage location. */
+  async function throughStorage(): Promise<ChannelDto> {
+    await signedInWith([makeDialog({ title: 'Lessons', type: 'CHANNEL' })]);
+    await chooseAndContinue('Lessons');
+    button('Add to archive')?.click();
+    const location = makeStorageLocation({
+      name: 'This computer',
+      builtIn: true,
+      isDefault: true,
+      displayPath: 'C:\\Archive',
+    });
+    const channel = makeChannel({
+      id: CHANNEL_ID,
+      title: 'Lessons',
+      telegramChatId: '-1001234',
+      storageLocation: {
+        id: location.id,
+        kind: 'LOCAL',
+        name: location.name,
+        displayPath: location.displayPath,
+      },
+      storageFolder: 'Lessons (-1001234)',
+    });
+    (await nextRequest(http, '/api/channels')).flush(channel, { status: 201, statusText: 'Created' });
+    await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
+    button('Choose where to save')?.click();
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(makeStorageList([location]));
+    (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${location.id}/check`)).flush(
+      makeStorageCheck(location),
+    );
+    await vi.waitFor(() => expect(button('Continue')?.disabled).toBe(false));
+    return channel;
+  }
+
+  async function toStart(): Promise<void> {
+    await throughStorage();
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Import mode'));
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Start'));
+  }
+
+  it('chooses what to import, starts it and follows the progress', async () => {
+    await throughStorage();
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Import mode'));
+
+    const radios = () =>
+      Array.from(
+        page().querySelectorAll<HTMLInputElement>('app-import-mode-picker input[type="radio"]'),
+      );
+    expect(radios().map((radio) => radio.checked)).toEqual([true, false]);
+    radios()[1]?.click();
+    await fixture.whenStable();
+    // "Since a date" needs the day first.
+    expect(button('Continue')?.disabled).toBe(true);
+    const day = page().querySelector<HTMLInputElement>('app-import-mode-picker input[type="date"]');
+    expect(day?.max).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    if (!day) {
+      throw new Error('The day field is missing');
+    }
+    day.value = '2026-09-01';
+    day.dispatchEvent(new Event('input'));
+    await fixture.whenStable();
+    expect(button('Continue')?.disabled).toBe(false);
+
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Start'));
+    expect(text('.summary')).toContain('Sent on or after September 1, 2026');
+    expect(text('.summary')).toContain('C:\\Archive › Lessons (-1001234)');
+
+    button('Start import')?.click();
+    const start = await nextRequest(http, IMPORT_ENDPOINTS.start(CHANNEL_ID));
+    expect(start.request.method).toBe('POST');
+    expect(start.request.body).toEqual({
+      mode: 'FROM_DATE',
+      fromDate: new Date(2026, 8, 1).toISOString(),
+    });
+    const job = makeImportJob({
+      channelId: CHANNEL_ID,
+      status: 'PENDING',
+      mode: 'FROM_DATE',
+      fromDate: new Date(2026, 8, 1).toISOString(),
+      processedMessages: 0,
+      totalMessages: null,
+      totalMedia: 0,
+      startedAt: null,
+    });
+    start.flush(job, { status: 202, statusText: 'Accepted' });
+
+    await vi.waitFor(() => expect(heading()).toBe('Progress'));
+    expect(text('app-import-progress .status')).toBe('schedule Queued');
+    expect(page().querySelector(`a[href="/imports/${job.id}"]`)).not.toBeNull();
+    expect(page().querySelector(`a[href="/channels/${CHANNEL_ID}"]`)).not.toBeNull();
+
+    // The step reads the job from the server from now on.
+    (await nextRequest(http, IMPORT_ENDPOINTS.job(job.id))).flush({
+      ...job,
+      status: 'COMPLETED',
+      phase: 'DONE',
+      processedMessages: 87,
+      totalMessages: 87,
+      startedAt: '2026-09-24T09:00:05.000Z',
+      completedAt: '2026-09-24T09:01:00.000Z',
+    });
+    await vi.waitFor(() => expect(text('app-import-progress .status')).toContain('Completed'));
+    expect(stepButtons()[6]?.closest('.step')?.classList).toContain('done');
+  });
+
+  it('shows an import of the channel that was already under way', async () => {
+    await toStart();
+    button('Start import')?.click();
+    const job = makeImportJob({ channelId: CHANNEL_ID });
+    (await nextRequest(http, IMPORT_ENDPOINTS.start(CHANNEL_ID))).flush(job);
+    (await nextRequest(http, IMPORT_ENDPOINTS.job(job.id))).flush(job);
+
+    await vi.waitFor(() => expect(heading()).toBe('Progress'));
+    expect(page().querySelector('app-notice')?.textContent).toContain('already under way');
+  });
+
+  it('points to the unfinished import that blocks a different one', async () => {
+    await toStart();
+    button('Start import')?.click();
+    flushError(
+      await nextRequest(http, IMPORT_ENDPOINTS.start(CHANNEL_ID)),
+      409,
+      'This channel already has an unfinished import with other settings.',
+      'IMPORT_ACTIVE',
+      { jobId: 'blocking-job' },
+    );
+
+    await vi.waitFor(() =>
+      expect(page().querySelector('app-notice[role="alert"]')?.textContent).toContain(
+        'unfinished import',
+      ),
+    );
+    expect(page().querySelector('a[href="/imports/blocking-job"]')).not.toBeNull();
+    expect(heading()).toBe('Start');
+    expect(button('Start import')?.disabled).toBe(false);
   });
 });

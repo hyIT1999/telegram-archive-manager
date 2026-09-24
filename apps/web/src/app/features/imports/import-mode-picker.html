@@ -1,0 +1,56 @@
+<div class="options" role="radiogroup" aria-label="What to import">
+  <label class="option" [class.selected]="choice().mode === 'ALL'">
+    <input
+      type="radio"
+      name="import-mode"
+      class="radio"
+      value="ALL"
+      [checked]="choice().mode === 'ALL'"
+      (change)="setMode('ALL')"
+    />
+    <span class="text">
+      <span class="name">The whole history</span>
+      <span class="description">
+        Every message, back to the first one. Messages already in the archive are not read again, so
+        importing again later only reads what is new or still missing.
+      </span>
+    </span>
+  </label>
+
+  <label class="option" [class.selected]="choice().mode === 'FROM_DATE'">
+    <input
+      type="radio"
+      name="import-mode"
+      class="radio"
+      value="FROM_DATE"
+      [checked]="choice().mode === 'FROM_DATE'"
+      (change)="setMode('FROM_DATE')"
+    />
+    <span class="text">
+      <span class="name">Since a date</span>
+      <span class="description">
+        Only the messages sent on or after a day you pick. You can still import the older ones
+        later.
+      </span>
+    </span>
+  </label>
+</div>
+
+@if (choice().mode === 'FROM_DATE') {
+  <mat-form-field class="day">
+    <mat-label>First day</mat-label>
+    <input
+      matInput
+      type="date"
+      [max]="today"
+      [value]="choice().fromDay"
+      [attr.aria-invalid]="problem() ? 'true' : null"
+      (input)="setDay($event)"
+      (change)="setDay($event)"
+    />
+    <mat-hint>Messages sent on or after this day, in your time zone.</mat-hint>
+  </mat-form-field>
+  @if (problem(); as message) {
+    <p class="problem" role="alert">{{ message }}</p>
+  }
+}

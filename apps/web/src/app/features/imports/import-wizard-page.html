@@ -1,7 +1,7 @@
 <app-page-header
   eyebrow="Manage"
   title="New import"
-  subtitle="Connect Telegram, then pick a channel or group this account can access and add it to the archive."
+  subtitle="Pick a channel or group this Telegram account can access, choose where its media goes and what to import, then follow the import."
 >
   <a pageActions matButton="outlined" routerLink="/imports">
     <mat-icon>arrow_back</mat-icon>
@@ -12,12 +12,7 @@
 <nav aria-label="Import steps">
   <ol class="steps">
     @for (item of steps; track item.label; let index = $index) {
-      <li
-        class="step"
-        [class.current]="index === step()"
-        [class.done]="done()[index]"
-        [class.later]="item.arrives !== undefined"
-      >
+      <li class="step" [class.current]="index === step()" [class.done]="done()[index]">
         <button
           type="button"
           class="step-button"
@@ -34,9 +29,6 @@
           </span>
           <span class="step-text">
             <span class="step-label">{{ item.label }}</span>
-            @if (item.arrives) {
-              <span class="step-note">{{ item.arrives }}</span>
-            }
             @if (done()[index]) {
               <span class="sr-only">(done)</span>
             }
@@ -155,17 +147,17 @@
         @if (storageSaved() && item.storageLocation; as location) {
           <app-notice tone="success" title="Storage location saved">
             Media of {{ item.title }} goes to {{ location.displayPath }} › {{ item.storageFolder }}.
-            Importing the history arrives in Phase 3 and downloading media in Phase 4.
+            Next, choose what to import.
           </app-notice>
         }
 
         <div class="panel-actions">
           <button matButton type="button" (click)="open(2)">Back</button>
           @if (storageSaved()) {
-            <a matButton="filled" [routerLink]="['/channels', item.id]">
-              Open the channel
+            <button matButton="filled" type="button" (click)="open(4)">
+              Continue
               <mat-icon iconPositionEnd>arrow_forward</mat-icon>
-            </a>
+            </button>
           } @else {
             <button
               matButton="filled"
@@ -178,6 +170,108 @@
               <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
             </button>
           }
+        </div>
+      }
+    }
+
+    @case (4) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Import mode</h2>
+      @if (channel(); as item) {
+        <p class="panel-hint">Which messages of <strong>{{ item.title }}</strong> to import.</p>
+        <app-import-mode-picker [(choice)]="importChoice" />
+        <div class="panel-actions">
+          <button matButton type="button" (click)="open(3)">Back</button>
+          <button matButton="filled" type="button" [disabled]="!importRequest()" (click)="open(5)">
+            Continue
+            <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+          </button>
+        </div>
+      }
+    }
+
+    @case (5) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Start</h2>
+      @if (channel(); as item) {
+        <dl class="summary">
+          <div>
+            <dt>Channel</dt>
+            <dd>{{ item.title }}</dd>
+          </div>
+          <div>
+            <dt>Messages</dt>
+            <dd>
+              @if (importChoice().mode === 'ALL') {
+                The whole history
+              } @else {
+                Sent on or after {{ importChoice().fromDay | date: 'longDate' }}
+              }
+            </dd>
+          </div>
+          @if (item.storageLocation; as location) {
+            <div>
+              <dt>Media saved to</dt>
+              <dd>{{ location.displayPath }} › {{ item.storageFolder }}</dd>
+            </div>
+          }
+        </dl>
+        <app-notice tone="info" title="What happens">
+          The worker reads the history page by page into the archive, and can be paused, resumed
+          or cancelled at any time; whatever it read stays saved. Media files are recorded with
+          their messages; downloading them to the storage location arrives in Phase 4.
+        </app-notice>
+
+        @if (startError(); as message) {
+          <app-notice tone="error">
+            {{ message }}
+            @if (blockingJobId(); as jobId) {
+              <a [routerLink]="['/imports', jobId]">Open that import</a>
+            }
+          </app-notice>
+        }
+
+        <div class="panel-actions">
+          <button matButton type="button" (click)="open(4)">Back</button>
+          @if (started()) {
+            <button matButton="filled" type="button" (click)="open(6)">
+              See progress
+              <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+            </button>
+          } @else {
+            <button
+              matButton="filled"
+              type="button"
+              [disabled]="!importRequest() || starting()"
+              [showProgress]="starting()"
+              (click)="startImport()"
+            >
+              <mat-icon>download</mat-icon>
+              Start import
+              <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+            </button>
+          }
+        </div>
+      }
+    }
+
+    @case (6) {
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Progress</h2>
+      @if (job(); as current) {
+        @if (started()?.created === false) {
+          <app-notice tone="info">This import was already under way; here is where it stands.</app-notice>
+        }
+        <app-import-progress
+          actions
+          [job]="current"
+          [busy]="watch.busy()"
+          [actionError]="watch.actionError()"
+          (action)="watch.request($event)"
+        />
+        <div class="panel-actions">
+          <a matButton [routerLink]="['/imports', current.id]">Open the import job</a>
+          <a matButton="filled" [routerLink]="['/channels', current.channelId]">
+            Open the channel
+            <mat-icon iconPositionEnd>arrow_forward</mat-icon>
+          </a>
         </div>
       }
     }

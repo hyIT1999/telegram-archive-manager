@@ -3,6 +3,9 @@ import type {
   Chat,
   DownloadOptions,
   DownloadedFile,
+  HistoryPage,
+  HistoryPageOptions,
+  LegacyGroup,
   Message,
   UpdateHandler,
 } from './types.js';
@@ -44,10 +47,15 @@ export interface TelegramAuthFlow {
   logout(): Promise<void>;
 }
 
-/** Extra history access needed for sync and for refreshing expired file references. */
+/** History access for imports and sync, and for refreshing expired file references. */
 export interface TelegramHistoryReader {
+  /** Like getChatHistory, with Telegram's message count of the chat and a date cursor. */
+  getHistoryPage(chatId: string, options?: HistoryPageOptions): Promise<HistoryPage>;
   /** Messages with id > afterMessageId, oldest → newest, at most `limit` (≤ 100). */
   getNewerMessages(chatId: string, afterMessageId: string, limit?: number): Promise<Message[]>;
   getMessages(chatId: string, messageIds: string[]): Promise<Message[]>;
+  /** The chat as Telegram has it now, including the basic group it was upgraded from. */
   refreshChat(chatId: string): Promise<Chat>;
+  /** The old basic group of an upgraded supergroup; null when this account cannot read it. */
+  getLegacyGroup(chatId: string): Promise<LegacyGroup | null>;
 }

@@ -10,6 +10,7 @@ import { createValidationPipe } from './common/validation/validation.pipe.js';
 import { configModuleOptions } from './config/config-module.js';
 import type { Env } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
+import { ImportsModule } from './imports/imports.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { StatsModule } from './stats/stats.module.js';
 import { StorageModule } from './storage/storage.module.js';
@@ -36,6 +37,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     AuthModule,
     HealthModule,
     ChannelsModule,
+    ImportsModule,
     StatsModule,
     StorageModule,
     TelegramModule,

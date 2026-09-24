@@ -46,10 +46,23 @@ export const TelegramErrorCode = {
   DIALOG_NOT_FOUND: 'DIALOG_NOT_FOUND',
   /** Content protection is on; the chat is never archived. */
   CHAT_PROTECTED: 'CHAT_PROTECTED',
+  /** The account can no longer read the chat (it left, was banned, or the chat is gone). */
+  CHAT_UNAVAILABLE: 'CHAT_UNAVAILABLE',
   /** Any other Telegram failure. */
   TELEGRAM_ERROR: 'TELEGRAM_ERROR',
 } as const;
 export type TelegramErrorCode = (typeof TelegramErrorCode)[keyof typeof TelegramErrorCode];
+
+/** Outcomes of import requests (POST /api/channels/:id/import and /api/import-jobs/…). */
+export const ImportErrorCode = {
+  /** The channel already has an import running with other settings; details.jobId names it. */
+  IMPORT_ACTIVE: 'IMPORT_ACTIVE',
+  /** The job cannot pause, resume or cancel from its current status. */
+  INVALID_JOB_STATE: 'INVALID_JOB_STATE',
+  /** The channel is the old basic group of an upgraded supergroup; import the supergroup. */
+  CHANNEL_MIGRATED: 'CHANNEL_MIGRATED',
+} as const;
+export type ImportErrorCode = (typeof ImportErrorCode)[keyof typeof ImportErrorCode];
 
 /** Outcomes of storage location requests (folders on the server, Google Drive). */
 export const StorageErrorCode = {

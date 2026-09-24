@@ -6,6 +6,7 @@ import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { channelHandle, chatTypeLabel, telegramUrl } from '../../features/channels/channel-labels';
 import { ChannelsApi } from '../../features/channels/channels-api';
+import { ChannelImportPanel } from '../../features/imports/channel-import-panel';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
@@ -17,6 +18,7 @@ import { BytesPipe } from '../../shared/pipes/bytes-pipe';
 @Component({
   selector: 'app-channel-detail-page',
   imports: [
+    ChannelImportPanel,
     DatePipe,
     DecimalPipe,
     EmptyState,

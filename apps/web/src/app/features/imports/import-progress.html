@@ -1,0 +1,112 @@
+@let item = job();
+<div class="head">
+  <span class="status" [attr.data-status]="item.status">
+    <mat-icon aria-hidden="true">{{ statusIcon() }}</mat-icon>
+    {{ statusLabel() }}
+  </span>
+  <span class="mode">{{ modeText() }}</span>
+</div>
+
+<div class="bar">
+  <mat-progress-bar
+    [mode]="barMode()"
+    [value]="percent() ?? 0"
+    [attr.aria-label]="'Import of ' + item.channel.title"
+  />
+  <p class="bar-text">
+    @if (percent(); as value) {
+      {{ value }} % ·
+    }
+    {{ messagesText() }}
+  </p>
+</div>
+
+<dl class="numbers">
+  <div>
+    <dt>Media files found</dt>
+    <dd>{{ mediaText() }}</dd>
+  </div>
+  <div>
+    <dt>Started</dt>
+    <dd>{{ item.startedAt ? (item.startedAt | date: 'medium') : 'Not yet' }}</dd>
+  </div>
+  @if (item.completedAt) {
+    <div>
+      <dt>{{ item.status === 'COMPLETED' ? 'Finished' : 'Stopped' }}</dt>
+      <dd>{{ item.completedAt | date: 'medium' }}</dd>
+    </div>
+  }
+</dl>
+
+@if (unfinished() && item.statusDetail) {
+  <app-notice tone="info" icon="hourglass_top">{{ item.statusDetail }}</app-notice>
+}
+@switch (item.status) {
+  @case ('PENDING') {
+    @if (!item.statusDetail) {
+      <p class="hint">Queued: the worker starts it as soon as it is free.</p>
+    }
+  }
+  @case ('PAUSED') {
+    <p class="hint">Paused. Everything read so far is saved; resuming continues from there.</p>
+  }
+  @case ('FAILED') {
+    <app-notice tone="error" title="The import stopped">{{ item.error }}</app-notice>
+  }
+  @case ('CANCELLED') {
+    <p class="hint">Cancelled. The messages read before stay in the archive.</p>
+  }
+  @case ('COMPLETED') {
+    @if (item.totalMedia > 0) {
+      <p class="hint">
+        Messages are in the archive. Downloading the media files to the channel's storage location
+        arrives in Phase 4.
+      </p>
+    }
+  }
+}
+@if (actionError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+}
+
+@if (actions() && unfinished()) {
+  <div class="actions">
+    @if (canPause()) {
+      <button
+        matButton="outlined"
+        type="button"
+        [disabled]="busy() !== null"
+        [showProgress]="busy() === 'pause'"
+        (click)="emit('pause')"
+      >
+        <mat-icon>pause</mat-icon>
+        Pause
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    }
+    @if (canResume()) {
+      <button
+        matButton="filled"
+        type="button"
+        [disabled]="busy() !== null"
+        [showProgress]="busy() === 'resume'"
+        (click)="emit('resume')"
+      >
+        <mat-icon>play_arrow</mat-icon>
+        Resume
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    }
+    <button
+      matButton
+      type="button"
+      class="cancel"
+      [disabled]="busy() !== null"
+      [showProgress]="busy() === 'cancel'"
+      (click)="emit('cancel')"
+    >
+      Cancel import
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+    </button>
+  </div>
+}

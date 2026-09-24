@@ -1,7 +1,8 @@
-import { MtArgumentError, MtUnsupportedError, tl } from '@mtcute/core';
+import { MtArgumentError, MtPeerNotFoundError, MtUnsupportedError, tl } from '@mtcute/core';
 import { describe, expect, it } from 'vitest';
 import {
   AuthRequiredError,
+  ChatUnavailableError,
   FileReferenceExpiredError,
   FloodWaitError,
   LoginStepError,
@@ -26,6 +27,17 @@ describe('toTelegramError', () => {
     for (const text of ['AUTH_KEY_UNREGISTERED', 'SESSION_REVOKED', 'USER_DEACTIVATED']) {
       expect(toTelegramError(rpc(401, text))).toBeInstanceOf(AuthRequiredError);
     }
+  });
+
+  it('recognizes chats the account can no longer read', () => {
+    for (const text of ['CHANNEL_PRIVATE', 'CHANNEL_INVALID', 'CHAT_FORBIDDEN', 'PEER_ID_INVALID']) {
+      const error = toTelegramError(rpc(400, text));
+      expect(error, text).toBeInstanceOf(ChatUnavailableError);
+      expect((error as ChatUnavailableError).code, text).toBe('CHAT_UNAVAILABLE');
+    }
+    const unknownPeer = toTelegramError(new MtPeerNotFoundError('Peer -100123 is not found in local cache'));
+    expect(unknownPeer).toBeInstanceOf(ChatUnavailableError);
+    expect(unknownPeer.message).toMatch(/refresh the chat list/);
   });
 
   it('maps login failures to stable codes', () => {

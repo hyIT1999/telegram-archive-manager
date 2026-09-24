@@ -2,11 +2,10 @@ import { hostname } from 'node:os';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { SecretBox } from '@tam/crypto';
-import { REDIS_KEYS, TelegramErrorCode } from '@tam/shared';
+import { REDIS_KEYS } from '@tam/shared';
 import {
   MtcuteTelegramAdapter,
   type SessionStorage,
-  TelegramError,
   createMtcuteClient,
   createSessionStorage,
 } from '@tam/telegram';
@@ -21,6 +20,7 @@ import {
   TELEGRAM_SETTINGS,
   type TelegramApi,
   type TelegramApiProvider,
+  TelegramUnavailableError,
 } from './telegram.tokens.js';
 
 export const LEASE_TTL_MS = 30_000;
@@ -51,7 +51,7 @@ export class TelegramConnection implements TelegramApiProvider {
 
   get api(): TelegramApi {
     if (!this.adapter) {
-      throw new TelegramError('The worker is not connected to Telegram', TelegramErrorCode.TELEGRAM_ERROR);
+      throw new TelegramUnavailableError();
     }
     return this.adapter;
   }

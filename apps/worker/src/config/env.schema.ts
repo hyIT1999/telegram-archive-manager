@@ -56,6 +56,9 @@ export const workerEnvSchema = z
     BULLMQ_PREFIX: z.string().regex(/^\S+$/, 'must not contain whitespace').default('tam'),
     WORKER_HEARTBEAT_INTERVAL_MS: wholeNumber(1_000, 60_000).default(5_000),
 
+    /** Pause between two pages of history (100 messages), to stay clear of Telegram's limits. */
+    IMPORT_PAGE_DELAY_MS: wholeNumber(0, 60_000).default(1_000),
+
     STORAGE_LOCAL_ROOT: z.string().default('./data/storage'),
     MIN_FREE_DISK_MB: wholeNumber(0, 10_000_000).default(2_048),
 

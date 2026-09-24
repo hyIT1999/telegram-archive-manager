@@ -101,6 +101,9 @@ describe('app routes', () => {
     for (const request of http.match('/api/storage/locations')) {
       request.flush(makeStorageList([]));
     }
+    for (const request of http.match((candidate) => candidate.url === '/api/import-jobs')) {
+      request.flush(makePage([]));
+    }
   }
 
   async function navigateSignedIn(harness: RouterTestingHarness, url: string): Promise<void> {

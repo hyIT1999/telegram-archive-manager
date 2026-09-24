@@ -1,0 +1,54 @@
+:host {
+  display: grid;
+  gap: 24px;
+}
+
+app-page-header {
+  margin-bottom: 0;
+}
+
+.panel {
+  padding: 24px;
+}
+
+.panel-title {
+  margin-bottom: 16px;
+  font: var(--mat-sys-title-large);
+}
+
+.details {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+
+  div {
+    display: grid;
+    grid-template-columns: minmax(140px, 30%) 1fr;
+    gap: 12px;
+  }
+
+  dt {
+    color: var(--mat-sys-on-surface-variant);
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.9em;
+}
+
+@media (max-width: 599.98px) {
+  .panel {
+    padding: 16px;
+  }
+
+  .details div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

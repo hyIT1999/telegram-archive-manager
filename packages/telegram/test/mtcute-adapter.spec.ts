@@ -335,3 +335,102 @@ describe('MtcuteTelegramAdapter — history', () => {
     });
   });
 });
+
+describe('MtcuteTelegramAdapter — imports', () => {
+  it('reports the message count and reads pages below an id or a date', async () => {
+    const { stub, adapter } = setup();
+    await stub.registerPeers(channel);
+    const requests: tl.messages.RawGetHistoryRequest[] = [];
+    stub.respondWith('messages.getHistory', (request) => {
+      requests.push(request);
+      return createStub('messages.channelMessages', {
+        messages: [message(7), message(9), message(8)],
+        chats: [channel],
+        users: [],
+        count: 1_234,
+      });
+    });
+
+    await stub.with(async () => {
+      const newest = await adapter.getHistoryPage(MARKED_CHANNEL_ID, { limit: 3 });
+      expect(newest.total).toBe(1_234);
+      expect(newest.messages.map((item) => item.id)).toEqual(['9', '8', '7']);
+      expect(requests[0]).toMatchObject({ offsetId: 0, offsetDate: 0, limit: 3 });
+
+      const before = new Date('2026-09-01T00:00:00Z');
+      await adapter.getHistoryPage(MARKED_CHANNEL_ID, { beforeDate: before, limit: 1 });
+      expect(requests[1]).toMatchObject({ offsetId: 0, offsetDate: before.getTime() / 1000, limit: 1 });
+
+      // The id cursor wins over the date, and stays exclusive.
+      const older = await adapter.getHistoryPage(MARKED_CHANNEL_ID, { beforeMessageId: '9', beforeDate: before });
+      expect(requests[2]).toMatchObject({ offsetId: 9, offsetDate: 0, limit: 100 });
+      expect(older.messages.map((item) => item.id)).toEqual(['8', '7']);
+    });
+  });
+
+  it('reads the full chat, including the basic group it was upgraded from', async () => {
+    const { stub, adapter } = setup();
+    const supergroup = createStub('channel', {
+      id: 400,
+      title: 'Study group',
+      megagroup: true,
+      accessHash: Long.fromNumber(1),
+    });
+    await stub.registerPeers(supergroup);
+    stub.respondWith('channels.getFullChannel', () =>
+      createStub('messages.chatFull', {
+        fullChat: createStub('channelFull', {
+          id: 400,
+          participantsCount: 321,
+          migratedFromChatId: Long.fromNumber(200),
+          migratedFromMaxId: 57,
+        }),
+        chats: [supergroup],
+        users: [],
+      }),
+    );
+
+    await stub.with(async () => {
+      await expect(adapter.refreshChat(String(-1_000_000_000_000 - 400))).resolves.toMatchObject({
+        type: 'SUPERGROUP',
+        title: 'Study group',
+        memberCount: 321,
+        isProtected: false,
+        migratedFromChatId: '-200',
+      });
+    });
+  });
+
+  it('turns an unreadable chat into ChatUnavailableError', async () => {
+    const { stub, adapter } = setup();
+    await stub.registerPeers(channel);
+    stub.respondWith('channels.getFullChannel', () => {
+      throw rpcError(406, 'CHANNEL_PRIVATE');
+    });
+    await stub.with(async () => {
+      await expect(adapter.refreshChat(MARKED_CHANNEL_ID)).rejects.toMatchObject({ code: 'CHAT_UNAVAILABLE' });
+    });
+  });
+
+  it('describes the old basic group, or null when this account cannot read it', async () => {
+    const { stub, adapter } = setup();
+    stub.respondWith('messages.getChats', (request) =>
+      createStub('messages.chats', {
+        chats: request.id.map((id) =>
+          Number(id) === 200
+            ? createStub('chat', { id: 200, title: 'Study group (before upgrade)', deactivated: true, noforwards: true })
+            : createStub('chatForbidden', { id: Number(id), title: 'Hidden' }),
+        ),
+      }),
+    );
+
+    await stub.with(async () => {
+      await expect(adapter.getLegacyGroup('-200')).resolves.toEqual({
+        id: '-200',
+        title: 'Study group (before upgrade)',
+        isProtected: true,
+      });
+      await expect(adapter.getLegacyGroup('-300')).resolves.toBeNull();
+    });
+  });
+});

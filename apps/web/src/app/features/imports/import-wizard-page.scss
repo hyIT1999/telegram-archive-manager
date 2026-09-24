@@ -77,10 +77,6 @@ app-page-header {
   color: var(--mat-sys-on-secondary-container);
 }
 
-.later .step-button {
-  border-style: dashed;
-}
-
 .step-text {
   display: grid;
   min-width: 0;
@@ -88,11 +84,6 @@ app-page-header {
 
 .step-label {
   font: var(--mat-sys-label-large);
-}
-
-.step-note {
-  font: var(--mat-sys-label-small);
-  color: var(--mat-sys-tertiary);
 }
 
 .panel {
@@ -156,8 +147,34 @@ app-page-header {
   color: var(--mat-sys-on-surface-variant);
 }
 
+.summary {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+
+  div {
+    display: grid;
+    grid-template-columns: minmax(120px, 30%) 1fr;
+    gap: 12px;
+  }
+
+  dt {
+    color: var(--mat-sys-on-surface-variant);
+  }
+
+  dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
 @media (max-width: 599.98px) {
   .panel {
     padding: 16px;
+  }
+
+  .summary div {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

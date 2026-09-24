@@ -35,6 +35,7 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'info',
       BULLMQ_PREFIX: 'tam',
       WORKER_HEARTBEAT_INTERVAL_MS: 5000,
+      IMPORT_PAGE_DELAY_MS: 1000,
       STORAGE_LOCAL_ROOT: './data/storage',
       MIN_FREE_DISK_MB: 2048,
     });
@@ -48,6 +49,7 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'debug',
       BULLMQ_PREFIX: 'tam-prod',
       WORKER_HEARTBEAT_INTERVAL_MS: '2500',
+      IMPORT_PAGE_DELAY_MS: '0',
       STORAGE_LOCAL_ROOT: '/data/media',
       MIN_FREE_DISK_MB: '0',
     });
@@ -56,6 +58,7 @@ describe('validateWorkerEnv', () => {
       LOG_LEVEL: 'debug',
       BULLMQ_PREFIX: 'tam-prod',
       WORKER_HEARTBEAT_INTERVAL_MS: 2500,
+      IMPORT_PAGE_DELAY_MS: 0,
       STORAGE_LOCAL_ROOT: '/data/media',
       MIN_FREE_DISK_MB: 0,
     });
@@ -95,6 +98,8 @@ describe('validateWorkerEnv', () => {
     ['WORKER_HEARTBEAT_INTERVAL_MS', '5s'],
     ['WORKER_HEARTBEAT_INTERVAL_MS', '1500.5'],
     ['MIN_FREE_DISK_MB', '-1'],
+    ['IMPORT_PAGE_DELAY_MS', '60001'],
+    ['IMPORT_PAGE_DELAY_MS', '1s'],
   ])('rejects %s=%s', (key, value) => {
     const problems = problemsOf({ ...required, [key]: value });
     expect(problems).toHaveLength(1);

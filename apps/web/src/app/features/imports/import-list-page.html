@@ -1,0 +1,84 @@
+<app-page-header
+  eyebrow="Manage"
+  title="Import Jobs"
+  subtitle="Imports of Telegram history into the archive, newest first."
+>
+  <a pageActions matButton="filled" routerLink="/imports/new">
+    <mat-icon>add</mat-icon>
+    New import
+  </a>
+</app-page-header>
+
+@if (hasError()) {
+  <app-error-state
+    title="Import jobs could not be loaded"
+    [message]="errorMessage()"
+    (retry)="retry()"
+  />
+} @else if (!loaded()) {
+  <app-skeleton variant="line" [count]="4" label="Loading import jobs…" />
+} @else if (jobs().length === 0) {
+  <app-empty-state
+    class="surface-card"
+    icon="download"
+    title="No imports yet"
+    message="Start one with New import: pick a channel or group, where its media goes and what to import."
+  >
+    <a matButton="filled" routerLink="/imports/new">
+      <mat-icon>add</mat-icon>
+      New import
+    </a>
+  </app-empty-state>
+} @else {
+  <ul class="jobs surface-card" aria-label="Import jobs">
+    @for (job of jobs(); track job.id) {
+      <li>
+        <a class="job" [routerLink]="['/imports', job.id]">
+          <span class="status" [attr.data-status]="job.status">
+            <mat-icon aria-hidden="true">{{ statusIcons[job.status] }}</mat-icon>
+            {{ statusLabels[job.status] }}
+          </span>
+          <span class="main">
+            <span class="title">{{ job.channel.title }}</span>
+            <span class="meta">
+              {{
+                job.mode === 'ALL'
+                  ? 'Whole history'
+                  : 'Since ' + (job.fromDate | date: 'mediumDate')
+              }}
+              · started {{ job.createdAt | date: 'medium' }}
+            </span>
+            @if (isMoving(job)) {
+              <mat-progress-bar
+                class="bar"
+                [mode]="percent(job) === null ? 'indeterminate' : 'determinate'"
+                [value]="percent(job) ?? 0"
+                [attr.aria-label]="'Progress of ' + job.channel.title"
+              />
+            }
+          </span>
+          <span class="count">{{ summary(job) }}</span>
+          <mat-icon class="chevron" aria-hidden="true">chevron_right</mat-icon>
+        </a>
+      </li>
+    }
+  </ul>
+
+  @if (nextCursor()) {
+    <div class="more">
+      @if (loadMoreError(); as message) {
+        <p class="more-error" role="alert">{{ message }}</p>
+      }
+      <button
+        matButton="tonal"
+        type="button"
+        [showProgress]="loadingMore()"
+        [disabled]="loadingMore()"
+        (click)="loadMore()"
+      >
+        Load more
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  }
+}

@@ -64,6 +64,16 @@ export function retryAfterSeconds(error: unknown): number | null {
   return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
+/** A string entry of the error's `details` object, e.g. the `jobId` of a 409 IMPORT_ACTIVE. */
+export function detailString(error: unknown, key: string): string | null {
+  const details = readDetails(error);
+  const value =
+    typeof details === 'object' && details !== null && !Array.isArray(details)
+      ? (details as Record<string, unknown>)[key]
+      : undefined;
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
 /** The first field message of a 400 VALIDATION_FAILED answer (`details: [{ path, message }]`). */
 export function validationMessage(error: unknown): string | null {
   const details = readDetails(error);

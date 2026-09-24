@@ -1,4 +1,10 @@
-import type { Chat, TelegramLoginApi } from '@tam/telegram';
+import { ApiErrorCode } from '@tam/shared';
+import {
+  type Chat,
+  TelegramError,
+  type TelegramHistoryReader,
+  type TelegramLoginApi,
+} from '@tam/telegram';
 
 /** TelegramSettings, derived from the environment. */
 export const TELEGRAM_SETTINGS = Symbol('TELEGRAM_SETTINGS');
@@ -9,12 +15,19 @@ export const TELEGRAM_REDIS = Symbol('TELEGRAM_REDIS');
 /** Gives services the live Telegram API (TelegramConnection in production, fakes in tests). */
 export const TELEGRAM_API_PROVIDER = Symbol('TELEGRAM_API_PROVIDER');
 
-/** The adapter operations the worker uses in Phase 2. */
-export interface TelegramApi extends TelegramLoginApi {
+/** The adapter operations the worker uses: login, the chat list and history. */
+export interface TelegramApi extends TelegramLoginApi, TelegramHistoryReader {
   getChats(): Promise<Chat[]>;
 }
 
 export interface TelegramApiProvider {
-  /** Throws when there is no live connection. */
+  /** Throws TelegramUnavailableError when there is no live connection. */
   readonly api: TelegramApi;
+}
+
+/** This worker holds no live Telegram connection (not configured, on standby, reconnecting). */
+export class TelegramUnavailableError extends TelegramError {
+  constructor(message = 'The worker is not connected to Telegram') {
+    super(message, ApiErrorCode.TELEGRAM_UNAVAILABLE);
+  }
 }

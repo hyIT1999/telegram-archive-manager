@@ -1,8 +1,9 @@
-import { MtArgumentError, MtUnsupportedError, tl } from '@mtcute/core';
+import { MtArgumentError, MtPeerNotFoundError, MtUnsupportedError, tl } from '@mtcute/core';
 import { TelegramErrorCode } from '@tam/shared';
 import {
   AuthRequiredError,
   ChatProtectedError,
+  ChatUnavailableError,
   FileReferenceExpiredError,
   FloodWaitError,
   LoginStepError,
@@ -18,6 +19,16 @@ const SESSION_GONE = new Set([
   'SESSION_EXPIRED',
   'USER_DEACTIVATED',
   'USER_DEACTIVATED_BAN',
+]);
+
+/** Telegram answers meaning this account cannot read the chat (any more). */
+const CHAT_GONE = new Set([
+  'CHANNEL_PRIVATE',
+  'CHANNEL_INVALID',
+  'CHANNEL_PUBLIC_GROUP_NA',
+  'CHAT_FORBIDDEN',
+  'CHAT_ID_INVALID',
+  'PEER_ID_INVALID',
 ]);
 
 const LOGIN_ERRORS: Readonly<Record<string, [TelegramErrorCode, string]>> = {
@@ -45,6 +56,11 @@ export function toTelegramError(error: unknown): Error {
   }
   if (tl.RpcError.is(error)) {
     return fromRpcError(error);
+  }
+  if (error instanceof MtPeerNotFoundError) {
+    return new ChatUnavailableError(
+      'Telegram does not know this chat for this account; refresh the chat list and try again',
+    );
   }
   if (error instanceof MtArgumentError && /payment is required/i.test(error.message)) {
     return new LoginStepError(
@@ -75,6 +91,9 @@ function fromRpcError(error: tl.RpcError): TelegramError {
   }
   if (text === 'CHAT_FORWARDS_RESTRICTED') {
     return new ChatProtectedError('unknown');
+  }
+  if (CHAT_GONE.has(text)) {
+    return new ChatUnavailableError();
   }
   const login = LOGIN_ERRORS[text];
   if (login) {

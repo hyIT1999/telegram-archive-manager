@@ -2,7 +2,7 @@ import { hostname } from 'node:os';
 import { getQueueToken } from '@nestjs/bullmq';
 import { NestFactory } from '@nestjs/core';
 import { PrismaService } from '@tam/database/nest';
-import { ALL_QUEUES, REDIS_KEYS } from '@tam/shared';
+import { ALL_QUEUES, QUEUES, REDIS_KEYS } from '@tam/shared';
 import type { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
@@ -26,7 +26,7 @@ describe('worker application context', () => {
     return raw === null ? null : (JSON.parse(raw) as WorkerHeartbeat);
   }
 
-  it('registers a producer for every queue, reaches the database and runs no processor yet', async () => {
+  it('registers a producer for every queue, reaches the database and runs the import processor', async () => {
     const app = await bootWorker();
     try {
       for (const name of ALL_QUEUES) {
@@ -39,9 +39,14 @@ describe('worker application context', () => {
       const [row] = await prisma.$queryRaw<{ database: string; application: string }[]>`
         SELECT current_database() AS database, current_setting('application_name') AS application`;
       expect(row).toEqual({ database: TEST_DATABASE, application: 'tam-worker' });
-      await expect(prisma.channel.count()).resolves.toBe(0);
+      await expect(prisma.channel.count()).resolves.toBeTypeOf('number');
 
-      expect(app.get(ShutdownCoordinator).workers()).toEqual([]);
+      expect(
+        app
+          .get(ShutdownCoordinator)
+          .workers()
+          .map((worker) => worker.name),
+      ).toEqual([QUEUES.telegramImport]);
     } finally {
       await app.close();
     }

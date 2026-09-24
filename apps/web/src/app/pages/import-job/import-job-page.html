@@ -1,0 +1,77 @@
+@if (notFound()) {
+  <app-empty-state
+    class="surface-card"
+    icon="search_off"
+    title="Import job not found"
+    message="The link may be wrong, or the job belongs to another archive."
+  >
+    <a matButton="filled" routerLink="/imports">
+      <mat-icon>arrow_back</mat-icon>
+      Back to Import Jobs
+    </a>
+  </app-empty-state>
+} @else if (watch.error()) {
+  <app-page-header eyebrow="Import job" title="Import job" />
+  <app-error-state
+    title="This import job could not be loaded"
+    [message]="errorMessage()"
+    (retry)="watch.reload()"
+  />
+} @else if (watch.job(); as job) {
+  <app-page-header eyebrow="Import job" [title]="job.channel.title" [subtitle]="subtitle()">
+    <a pageActions matButton="outlined" routerLink="/imports">
+      <mat-icon>arrow_back</mat-icon>
+      Import Jobs
+    </a>
+    <a pageActions matButton="tonal" [routerLink]="['/channels', job.channelId]">
+      <mat-icon>forum</mat-icon>
+      Open the channel
+    </a>
+  </app-page-header>
+
+  <section class="surface-card panel" aria-label="Progress">
+    <app-import-progress
+      actions
+      [job]="job"
+      [busy]="watch.busy()"
+      [actionError]="watch.actionError()"
+      (action)="watch.request($event)"
+    />
+  </section>
+
+  <section class="surface-card panel" aria-labelledby="job-details-title">
+    <h2 id="job-details-title" class="panel-title">Details</h2>
+    <dl class="details">
+      <div>
+        <dt>What</dt>
+        <dd>
+          @if (job.mode === 'ALL') {
+            The whole history
+          } @else {
+            Messages sent since {{ job.fromDate | date: 'medium' }}
+          }
+        </dd>
+      </div>
+      <div>
+        <dt>Created</dt>
+        <dd>{{ job.createdAt | date: 'medium' }}</dd>
+      </div>
+      <div>
+        <dt>Last update</dt>
+        <dd>{{ job.updatedAt | date: 'medium' }}</dd>
+      </div>
+      @if (job.messagesCompletedAt) {
+        <div>
+          <dt>History read</dt>
+          <dd>{{ job.messagesCompletedAt | date: 'medium' }}</dd>
+        </div>
+      }
+      <div>
+        <dt>Job ID</dt>
+        <dd class="mono">{{ job.id }}</dd>
+      </div>
+    </dl>
+  </section>
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading import job…" />
+}

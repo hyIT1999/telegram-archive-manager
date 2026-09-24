@@ -3,6 +3,7 @@ import type {
   ApiErrorBody,
   AuthUserDto,
   ChannelDto,
+  ImportJobDto,
   Page,
   StatsDto,
   StorageCheckDto,
@@ -81,6 +82,48 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
 
 export function makePage<T>(items: T[], nextCursor: string | null = null): Page<T> {
   return { items, nextCursor };
+}
+
+let jobSequence = 0;
+
+/** A running import of the whole history, 120 of about 500 messages read. */
+export function makeImportJob(overrides: Partial<ImportJobDto> = {}): ImportJobDto {
+  jobSequence += 1;
+  const channelId = overrides.channelId ?? `0199a0b1-0000-7000-8000-c${String(jobSequence).padStart(11, '0')}`;
+  return {
+    id: `0199a0b1-0000-7000-8000-a${String(jobSequence).padStart(11, '0')}`,
+    channelId,
+    channel: {
+      id: channelId,
+      telegramChatId: `-100${3_000_000_000 + jobSequence}`,
+      title: `Lessons ${jobSequence}`,
+      username: `lessons_${jobSequence}`,
+      type: 'CHANNEL',
+    },
+    parentImportJobId: null,
+    type: 'IMPORT',
+    mode: 'ALL',
+    fromDate: null,
+    status: 'RUNNING',
+    phase: 'HISTORY',
+    totalMessages: 500,
+    processedMessages: 120,
+    totalMedia: 12,
+    downloadedFiles: 0,
+    failedFiles: 0,
+    skippedFiles: 0,
+    totalBytes: 48 * 1024 ** 2,
+    downloadedBytes: 0,
+    currentFile: null,
+    statusDetail: null,
+    error: null,
+    startedAt: '2026-09-24T09:00:05.000Z',
+    messagesCompletedAt: null,
+    completedAt: null,
+    createdAt: '2026-09-24T09:00:00.000Z',
+    updatedAt: '2026-09-24T09:01:00.000Z',
+    ...overrides,
+  };
 }
 
 let locationSequence = 0;
