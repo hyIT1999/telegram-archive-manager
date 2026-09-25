@@ -6,6 +6,7 @@ import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { channelHandle, chatTypeLabel, telegramUrl } from '../../features/channels/channel-labels';
 import { ChannelsApi } from '../../features/channels/channels-api';
+import { ChannelDownloadsPanel } from '../../features/downloads/channel-downloads-panel';
 import { ChannelImportPanel } from '../../features/imports/channel-import-panel';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
@@ -18,6 +19,7 @@ import { BytesPipe } from '../../shared/pipes/bytes-pipe';
 @Component({
   selector: 'app-channel-detail-page',
   imports: [
+    ChannelDownloadsPanel,
     ChannelImportPanel,
     DatePipe,
     DecimalPipe,
@@ -64,6 +66,11 @@ export class ChannelDetailPage {
     const channel = this.data();
     return channel ? chatTypeLabel(channel.type) : '';
   });
+
+  /** The switch of the downloads panel changed the channel. */
+  protected updated(channel: ChannelDto): void {
+    this.channel.set(channel);
+  }
 
   protected count(value: number): string {
     return formatNumber(value, this.locale, '1.0-0');

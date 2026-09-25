@@ -30,6 +30,12 @@
         {{ state.text }}
       </span>
     }
+    @if (waitingUntil(location); as until) {
+      <span class="status" data-state="waiting">
+        <mat-icon aria-hidden="true">schedule</mat-icon>
+        Downloads to it wait until {{ until | date: 'shortTime' }}
+      </span>
+    }
   </span>
 </ng-template>
 

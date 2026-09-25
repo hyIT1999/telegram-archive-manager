@@ -35,6 +35,11 @@ export function createFakeTelegramApi() {
     getMessages: vi.fn<TelegramApi['getMessages']>(async () => []),
     refreshChat: vi.fn<TelegramApi['refreshChat']>(async (chatId) => chat(chatId)),
     getLegacyGroup: vi.fn<TelegramApi['getLegacyGroup']>(async () => null),
+    // Media: scripted by FakeFiles (fake-files.ts) in the download tests.
+    downloadFile: vi.fn<TelegramApi['downloadFile']>(async () => {
+      throw new Error('No fake file was set up');
+    }),
+    getThumbnails: vi.fn<TelegramApi['getThumbnails']>(async () => new Map()),
   } satisfies TelegramApi;
   const provider: TelegramApiProvider = { api };
   return { api, provider };
@@ -63,9 +68,9 @@ export function testPrisma(): PrismaService {
   return new PrismaService({ url: inject('databaseUrl'), poolMax: 4, applicationName: 'tam-worker-tests' });
 }
 
-/** Empties the tables the Telegram module and the importer write. */
+/** Empties the tables the Telegram module, the importer and the downloader write. */
 export async function resetTelegramTables(prisma: PrismaService): Promise<void> {
   await prisma.$executeRaw`
     TRUNCATE TABLE telegram_dialogs, telegram_accounts, channels, messages, media, import_jobs,
-      download_jobs CASCADE`;
+      download_jobs, storage_locations, app_settings CASCADE`;
 }

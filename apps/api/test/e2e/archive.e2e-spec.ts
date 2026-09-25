@@ -193,6 +193,8 @@ describe('channels and stats (e2e)', () => {
         migratedToChannelId: null,
         storageLocation: null,
         storageFolder: null,
+        downloadMedia: true,
+        downloadNote: null,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: expect.any(String),
         stats: { messages: 3, media: 6, downloadedMedia: 2, storageBytes: 1_250 },

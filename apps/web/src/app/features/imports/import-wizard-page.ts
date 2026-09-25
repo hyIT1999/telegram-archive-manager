@@ -15,6 +15,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressSpinner } from '@angular/material/progress-spinner';
+import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
 import { RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { Notice } from '../../shared/components/notice/notice';
@@ -67,6 +68,7 @@ const PROGRESS = 6;
     MatButton,
     MatIcon,
     MatProgressSpinner,
+    MatSlideToggle,
     Notice,
     PageHeader,
     RouterLink,
@@ -151,6 +153,8 @@ export class ImportWizardPage {
     return saved !== undefined && saved === this.storageChoice();
   });
   protected readonly savingStorage = signal(false);
+  protected readonly savingDownloads = signal(false);
+  protected readonly downloadsError = signal<string | null>(null);
   protected readonly storageError = linkedSignal<string | null, string | null>({
     source: this.storageChoice,
     computation: () => null,
@@ -261,6 +265,29 @@ export class ImportWizardPage {
       .subscribe({
         next: (updated) => this.channel.set(updated),
         error: (error: unknown) => this.storageError.set(toApiError(error).message),
+      });
+  }
+
+  /** Switches the channel's automatic media downloads (saved at once). */
+  protected setDownloadMedia(change: MatSlideToggleChange): void {
+    const channel = this.channel();
+    if (!channel || this.savingDownloads()) {
+      return;
+    }
+    this.savingDownloads.set(true);
+    this.downloadsError.set(null);
+    this.channelsApi
+      .update(channel.id, { downloadMedia: change.checked })
+      .pipe(
+        finalize(() => this.savingDownloads.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated) => this.channel.set(updated),
+        error: (error: unknown) => {
+          this.downloadsError.set(toApiError(error).message);
+          change.source.checked = !change.checked;
+        },
       });
   }
 

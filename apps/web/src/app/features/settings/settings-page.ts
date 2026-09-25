@@ -7,11 +7,13 @@ import { PageHeader } from '../../shared/components/page-header/page-header';
 import { StorageLocationList } from '../storage/storage-location-list';
 import { TelegramConnect } from '../telegram/telegram-connect';
 import { TelegramSession } from '../telegram/telegram-session';
+import { DownloadSettingsPanel } from './download-settings';
 
 @Component({
   selector: 'app-settings-page',
   providers: [TelegramSession],
   imports: [
+    DownloadSettingsPanel,
     EmptyState,
     MatButtonToggle,
     MatButtonToggleGroup,
@@ -45,6 +47,15 @@ import { TelegramSession } from '../telegram/telegram-session';
       <app-storage-location-list />
     </section>
 
+    <section class="surface-card panel" aria-labelledby="downloads-title">
+      <h2 id="downloads-title" class="panel-title">Media downloads</h2>
+      <p class="panel-hint">
+        What downloads on its own, and how much at once. Each channel switches its automatic
+        downloads on or off on its page.
+      </p>
+      <app-download-settings />
+    </section>
+
     <section class="surface-card panel" aria-labelledby="appearance-title">
       <h2 id="appearance-title" class="panel-title">Appearance</h2>
       <p class="panel-hint">Saved in this browser.</p>
@@ -63,12 +74,12 @@ import { TelegramSession } from '../telegram/telegram-session';
       </mat-button-toggle-group>
     </section>
 
-    <section class="surface-card" aria-label="Archive settings">
+    <section class="surface-card" aria-label="Sync settings">
       <app-empty-state
-        icon="tune"
-        note="Arrives in Phase 5"
-        title="Archive settings are on their way"
-        message="Automatic downloads, size and disk-space limits and the sync schedule become configurable here in Phase 5."
+        icon="sync"
+        note="Arrives in Phase 7"
+        title="The sync schedule is on its way"
+        message="How often channels are checked for new messages becomes configurable here in Phase 7."
       />
     </section>
   `,

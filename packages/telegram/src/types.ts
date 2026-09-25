@@ -126,6 +126,23 @@ export interface DownloadOptions {
   offset?: number;
   onProgress?: (downloadedBytes: number, totalBytes: number | null) => void;
   signal?: AbortSignal;
+  /**
+   * Give up with TelegramTimeoutError when no data arrives for this long (Telegram keeps asking
+   * to wait, or the connection stalled). The part downloaded so far stays in `destPath`.
+   */
+  stallTimeoutMs?: number;
+}
+
+/** A file whose thumbnail is wanted, as the archive knows it. */
+export interface ThumbnailRequest {
+  messageId: string;
+  fileUniqueId: string;
+}
+
+export interface ThumbnailOptions {
+  signal?: AbortSignal;
+  /** Give up on one thumbnail after this long (it then has no preview). */
+  timeoutMs?: number;
 }
 
 export interface DownloadedFile {

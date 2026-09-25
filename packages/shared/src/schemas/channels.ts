@@ -32,6 +32,10 @@ export interface ChannelDto {
   storageLocation: ChannelStorageLocationDto | null;
   /** The channel's folder inside its location, e.g. "Physics (-1001234567890)". */
   storageFolder: string | null;
+  /** Media files download automatically (within the download settings). */
+  downloadMedia: boolean;
+  /** Why automatic downloads stopped by themselves, e.g. the chat can no longer be read. */
+  downloadNote: string | null;
   createdAt: string;
   updatedAt: string;
   stats: ChannelStatsDto;
@@ -44,9 +48,15 @@ export interface ChannelStorageLocationDto {
   displayPath: string;
 }
 
-/** PATCH /api/channels/:id */
-export const updateChannelRequestSchema = z.object({
-  /** Where new media of the channel is saved. */
-  storageLocationId: z.uuid(),
-});
+/** PATCH /api/channels/:id — change one or both settings. */
+export const updateChannelRequestSchema = z
+  .object({
+    /** Where new media of the channel is saved. */
+    storageLocationId: z.uuid().optional(),
+    /** Download the channel's media automatically. */
+    downloadMedia: z.boolean().optional(),
+  })
+  .refine((value) => value.storageLocationId !== undefined || value.downloadMedia !== undefined, {
+    message: 'Nothing to change',
+  });
 export type UpdateChannelRequest = z.infer<typeof updateChannelRequestSchema>;

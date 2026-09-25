@@ -1,4 +1,4 @@
-import { MtArgumentError, MtPeerNotFoundError, MtUnsupportedError, tl } from '@mtcute/core';
+import { MtArgumentError, MtPeerNotFoundError, MtTimeoutError, MtUnsupportedError, tl } from '@mtcute/core';
 import { describe, expect, it } from 'vitest';
 import {
   AuthRequiredError,
@@ -7,6 +7,7 @@ import {
   FloodWaitError,
   LoginStepError,
   TelegramError,
+  TelegramTimeoutError,
   toTelegramError,
 } from '../src/index.js';
 
@@ -27,6 +28,12 @@ describe('toTelegramError', () => {
     for (const text of ['AUTH_KEY_UNREGISTERED', 'SESSION_REVOKED', 'USER_DEACTIVATED']) {
       expect(toTelegramError(rpc(401, text))).toBeInstanceOf(AuthRequiredError);
     }
+  });
+
+  it('recognizes stalled downloads and references that need fetching again', () => {
+    expect(toTelegramError(new MtTimeoutError(120_000))).toBeInstanceOf(TelegramTimeoutError);
+    expect(toTelegramError(new MtUnsupportedError('File ref expired!'))).toBeInstanceOf(FileReferenceExpiredError);
+    expect(toTelegramError(rpc(420, 'FLOOD_PREMIUM_WAIT_7'))).toMatchObject({ seconds: 7 });
   });
 
   it('recognizes chats the account can no longer read', () => {

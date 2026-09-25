@@ -16,9 +16,11 @@ export interface StorageLocationDto {
   isDefault: boolean;
   /** Follows STORAGE_LOCAL_ROOT on the server; cannot be removed. */
   builtIn: boolean;
-  /** Outcome of the last check; null when it worked (or never ran). */
+  /** Outcome of the last check, or why downloads to it wait; null when it worked (or never ran). */
   lastError: string | null;
   lastCheckedAt: string | null;
+  /** Downloads to this location wait until then (full, rate limited, access lost); see lastError. */
+  unavailableUntil: string | null;
   /** Channels that save their media here. */
   channelCount: number;
   createdAt: string;

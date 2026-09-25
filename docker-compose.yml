@@ -3,7 +3,7 @@
 #   docker compose up -d --build
 # Services receive only the variables they need (no shared env_file): Telegram credentials reach
 # the worker alone. Windows Server 2019 cannot run these Linux containers; validate on Linux with
-# scripts/compose-smoke.sh. S3-compatible storage (RustFS profile) arrives in Phase 4.
+# scripts/compose-smoke.sh. S3-compatible storage (RustFS profile) is planned for a later phase.
 
 name: tam
 
@@ -117,6 +117,8 @@ services:
       STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
       GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
       GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      # Shown in Settings; the worker enforces it. Thumbnails live in /data/storage/.tam-thumbnails.
+      MIN_FREE_DISK_MB: ${MIN_FREE_DISK_MB:-2048}
     volumes:
       - media:/data/storage
     expose:
@@ -151,8 +153,14 @@ services:
       TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
       TELEGRAM_SESSION_DATABASE_URL: postgresql://tam:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/tam_tg
       TELEGRAM_SESSION_KEY: ${TELEGRAM_SESSION_KEY:-}
+      # Media downloads (README §9): the worker writes to every storage location, so it needs the
+      # same folders, key and Google client as the api. Files for Google Drive wait in
+      # /data/storage/.tam-tmp before the upload.
       STORAGE_LOCAL_ROOT: /data/storage
       MIN_FREE_DISK_MB: ${MIN_FREE_DISK_MB:-2048}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
     volumes:
       - media:/data/storage
     depends_on:

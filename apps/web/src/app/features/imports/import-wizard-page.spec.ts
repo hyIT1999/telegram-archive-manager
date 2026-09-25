@@ -304,12 +304,13 @@ describe('ImportWizardPage', () => {
     return channel;
   }
 
-  async function toStart(): Promise<void> {
-    await throughStorage();
+  async function toStart(): Promise<ChannelDto> {
+    const channel = await throughStorage();
     button('Continue')?.click();
     await vi.waitFor(() => expect(heading()).toBe('Import mode'));
     button('Continue')?.click();
     await vi.waitFor(() => expect(heading()).toBe('Start'));
+    return channel;
   }
 
   it('chooses what to import, starts it and follows the progress', async () => {
@@ -377,6 +378,20 @@ describe('ImportWizardPage', () => {
     });
     await vi.waitFor(() => expect(text('app-import-progress .status')).toContain('Completed'));
     expect(stepButtons()[6]?.closest('.step')?.classList).toContain('done');
+  });
+
+  it('switches the automatic media downloads of the channel before starting', async () => {
+    const channel = await toStart();
+    const toggle = page().querySelector<HTMLButtonElement>('.downloads-switch mat-slide-toggle button');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(text('.downloads-switch')).toContain('smallest first');
+
+    toggle?.click();
+    const update = await nextRequest(http, `/api/channels/${CHANNEL_ID}`);
+    expect(update.request.method).toBe('PATCH');
+    expect(update.request.body).toEqual({ downloadMedia: false });
+    update.flush({ ...channel, downloadMedia: false });
+    await vi.waitFor(() => expect(text('.downloads-switch')).toContain('Files are only recorded'));
   });
 
   it('shows an import of the channel that was already under way', async () => {

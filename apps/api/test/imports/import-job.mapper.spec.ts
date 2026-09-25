@@ -23,6 +23,8 @@ const channel: Channel = {
   migratedToChannelId: null,
   storageLocationId: null,
   storageFolder: null,
+  downloadMedia: true,
+  downloadNote: null,
   createdAt: created,
   updatedAt: created,
 };

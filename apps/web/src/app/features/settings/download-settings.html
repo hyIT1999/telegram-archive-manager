@@ -1,0 +1,98 @@
+@if (loadError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+  <div class="actions">
+    <button matButton="tonal" type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Try again
+    </button>
+  </div>
+} @else if (saved(); as current) {
+  <div class="pause">
+    <mat-slide-toggle
+      [checked]="current.downloads.paused"
+      [disabled]="pausing()"
+      (change)="togglePaused($event)"
+    >
+      Pause all downloads
+    </mat-slide-toggle>
+    <p class="hint">
+      Stops every download at once, files asked for one by one included. Partial files are kept, so
+      downloads go on where they stopped.
+    </p>
+  </div>
+
+  @if (draft(); as form) {
+    <fieldset class="types">
+      <legend>Download automatically</legend>
+      <div class="type-list">
+        @for (option of typeOptions; track option.type) {
+          <mat-checkbox
+            [checked]="form.mediaTypes.includes(option.type)"
+            (change)="toggleType(option.type, $event.checked)"
+          >
+            {{ option.label }}
+          </mat-checkbox>
+        }
+      </div>
+      <p class="hint">Other types wait until you ask for them, file by file.</p>
+    </fieldset>
+
+    <div class="fields">
+      <mat-form-field>
+        <mat-label>Largest file to download automatically (MB)</mat-label>
+        <input
+          matInput
+          type="number"
+          min="1"
+          max="4096"
+          inputmode="numeric"
+          placeholder="No limit"
+          [value]="form.maxFileSizeMb"
+          (input)="setMaxSize($event)"
+        />
+        <mat-hint>Empty: no limit. Larger files wait until you ask for them.</mat-hint>
+      </mat-form-field>
+
+      <mat-form-field>
+        <mat-label>Files at a time</mat-label>
+        <mat-select [value]="form.concurrency" (valueChange)="setConcurrency($event)">
+          @for (count of concurrencyOptions; track count) {
+            <mat-option [value]="count">{{ count }}</mat-option>
+          }
+        </mat-select>
+        <mat-hint>One Telegram account shares its speed among them.</mat-hint>
+      </mat-form-field>
+    </div>
+
+    @if (sizeProblem(); as problem) {
+      <app-notice tone="error">{{ problem }}</app-notice>
+    }
+    <p class="hint">
+      Folders on the server always keep {{ current.disk.minFreeDiskMb * mib | bytes }} free
+      (MIN_FREE_DISK_MB in the server's .env): downloads to a fuller disk wait.
+    </p>
+
+    @if (error(); as message) {
+      <app-notice tone="error">{{ message }}</app-notice>
+    }
+    @if (savedNotice()) {
+      <app-notice tone="success"
+        >Saved. Files waiting to download follow the new settings.</app-notice
+      >
+    }
+    <div class="actions">
+      <button
+        matButton="filled"
+        type="button"
+        [disabled]="!changed() || sizeProblem() !== null || saving()"
+        [showProgress]="saving()"
+        (click)="save()"
+      >
+        Save changes
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  }
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading download settings…" />
+}

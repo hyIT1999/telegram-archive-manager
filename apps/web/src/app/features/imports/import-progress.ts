@@ -82,6 +82,24 @@ export class ImportProgress {
     return `${read} read so far`;
   });
 
+  /** How far the files this import found have downloaded (they download after the import). */
+  protected readonly downloadsText = computed(() => {
+    const job = this.job();
+    if (job.totalMedia === 0) {
+      return null;
+    }
+    const parts = [
+      `${this.count(job.downloadedFiles)} of ${this.count(job.totalMedia)} files · ${this.bytes.transform(job.downloadedBytes)} of ${this.bytes.transform(job.totalBytes)}`,
+    ];
+    if (job.failedFiles > 0) {
+      parts.push(`${this.count(job.failedFiles)} failed`);
+    }
+    if (job.skippedFiles > 0) {
+      parts.push(`${this.count(job.skippedFiles)} skipped`);
+    }
+    return parts.join(' · ');
+  });
+
   protected readonly mediaText = computed(() => {
     const job = this.job();
     if (job.totalMedia === 0) {

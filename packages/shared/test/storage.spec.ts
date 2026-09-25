@@ -53,10 +53,13 @@ describe('storage location contracts', () => {
     expect(updateStorageLocationRequestSchema.parse({ name: ' Photos ' })).toEqual({ name: 'Photos' });
   });
 
-  it('assigns a channel to a location by id', () => {
+  it('assigns a channel to a location by id and switches its downloads', () => {
     expect(updateChannelRequestSchema.safeParse({ storageLocationId: 'x' }).success).toBe(false);
     expect(
       updateChannelRequestSchema.parse({ storageLocationId: '0199a0b1-0000-7000-8000-000000000001' }),
     ).toEqual({ storageLocationId: '0199a0b1-0000-7000-8000-000000000001' });
+    expect(updateChannelRequestSchema.parse({ downloadMedia: false })).toEqual({ downloadMedia: false });
+    expect(updateChannelRequestSchema.safeParse({ downloadMedia: 'no' }).success).toBe(false);
+    expect(updateChannelRequestSchema.safeParse({}).success).toBe(false);
   });
 });

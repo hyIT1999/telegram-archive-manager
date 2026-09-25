@@ -26,6 +26,12 @@
     <dt>Media files found</dt>
     <dd>{{ mediaText() }}</dd>
   </div>
+  @if (downloadsText(); as downloads) {
+    <div>
+      <dt>Downloaded</dt>
+      <dd>{{ downloads }}</dd>
+    </div>
+  }
   <div>
     <dt>Started</dt>
     <dd>{{ item.startedAt ? (item.startedAt | date: 'medium') : 'Not yet' }}</dd>
@@ -57,10 +63,10 @@
     <p class="hint">Cancelled. The messages read before stay in the archive.</p>
   }
   @case ('COMPLETED') {
-    @if (item.totalMedia > 0) {
+    @if (item.totalMedia > item.downloadedFiles + item.failedFiles + item.skippedFiles) {
       <p class="hint">
-        Messages are in the archive. Downloading the media files to the channel's storage location
-        arrives in Phase 4.
+        Messages are in the archive. Media files download on their own schedule; the channel page
+        shows how far they are.
       </p>
     }
   }

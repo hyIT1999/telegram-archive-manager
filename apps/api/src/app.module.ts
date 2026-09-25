@@ -11,7 +11,9 @@ import { configModuleOptions } from './config/config-module.js';
 import type { Env } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { ImportsModule } from './imports/imports.module.js';
+import { MediaModule } from './media/media.module.js';
 import { RedisModule } from './redis/redis.module.js';
+import { SettingsModule } from './settings/settings.module.js';
 import { StatsModule } from './stats/stats.module.js';
 import { StorageModule } from './storage/storage.module.js';
 import { TelegramModule } from './telegram/telegram.module.js';
@@ -38,6 +40,8 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     HealthModule,
     ChannelsModule,
     ImportsModule,
+    MediaModule,
+    SettingsModule,
     StatsModule,
     StorageModule,
     TelegramModule,

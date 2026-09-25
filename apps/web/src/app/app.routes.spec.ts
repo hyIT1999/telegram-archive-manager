@@ -15,6 +15,7 @@ import { RouterTestingHarness } from '@angular/router/testing';
 import { MEDIA_CATEGORIES } from '@tam/shared';
 import {
   makePage,
+  makeSettings,
   makeStats,
   makeStorageList,
   makeTelegramStatus,
@@ -103,6 +104,9 @@ describe('app routes', () => {
     }
     for (const request of http.match((candidate) => candidate.url === '/api/import-jobs')) {
       request.flush(makePage([]));
+    }
+    for (const request of http.match('/api/settings')) {
+      request.flush(makeSettings());
     }
   }
 

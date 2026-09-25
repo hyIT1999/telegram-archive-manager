@@ -118,6 +118,10 @@ const envObjectSchema = z.object({
     .transform(splitPaths)
     .pipe(z.array(absolutePath).min(1, 'must list at least one folder'))
     .optional(),
+  /** Downloads to folders on the server keep this much disk space free (the worker enforces it). */
+  MIN_FREE_DISK_MB: z.coerce.number().int().min(0).max(10_000_000).default(2_048),
+  /** Telegram previews the worker keeps (default: <STORAGE_LOCAL_ROOT>/.tam-thumbnails). */
+  THUMBNAIL_DIR: absolutePath.optional(),
   /** Encrypts cloud storage credentials (Google refresh tokens) at rest. */
   STORAGE_SECRET_KEY: z
     .string()

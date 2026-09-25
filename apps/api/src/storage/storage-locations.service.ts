@@ -168,7 +168,8 @@ export class StorageLocationsService implements OnApplicationBootstrap {
     }
     const updated = await this.prisma.storageLocation.update({
       where: { id },
-      data: { lastError: problem, lastCheckedAt: new Date() },
+      // A location that works again takes downloads at once, whatever made them wait.
+      data: { lastError: problem, lastCheckedAt: new Date(), ...(problem === null ? { unavailableUntil: null } : {}) },
       include: WITH_CHANNEL_COUNT,
     });
     return { location: toDto(updated), ok: problem === null, space };

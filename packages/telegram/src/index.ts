@@ -7,5 +7,11 @@ export { EncryptedAuthKeysRepository } from './mtcute/encrypted-auth-keys.js';
 export { createSessionStorage, type SessionStorage, type SessionStorageOptions } from './mtcute/session-storage.js';
 export { toTelegramError, translateErrors } from './mtcute/error-mapping.js';
 export { mapChat, mapMedia, mapMessage, mapUser, messageTypeOf } from './mtcute/mappers.js';
-export { MAX_HISTORY_PAGE, MtcuteTelegramAdapter } from './mtcute/mtcute-adapter.js';
+export {
+  DEFAULT_STALL_TIMEOUT_MS,
+  DEFAULT_THUMBNAIL_TIMEOUT_MS,
+  DOWNLOAD_RESUME_ALIGNMENT,
+  MAX_HISTORY_PAGE,
+  MtcuteTelegramAdapter,
+} from './mtcute/mtcute-adapter.js';
 export { DEVICE_MODEL, createMtcuteClient, type MtcuteClientOptions } from './mtcute/create-client.js';

@@ -36,9 +36,31 @@ describe('validateWorkerEnv', () => {
       BULLMQ_PREFIX: 'tam',
       WORKER_HEARTBEAT_INTERVAL_MS: 5000,
       IMPORT_PAGE_DELAY_MS: 1000,
-      STORAGE_LOCAL_ROOT: './data/storage',
       MIN_FREE_DISK_MB: 2048,
     });
+  });
+
+  it('accepts the storage settings it shares with the api', () => {
+    const env = validateWorkerEnv({
+      ...required,
+      STORAGE_LOCAL_ROOT: '/data/media',
+      DOWNLOAD_STAGING_DIR: '/data/staging',
+      THUMBNAIL_DIR: '/data/thumbnails',
+      STORAGE_SECRET_KEY: Buffer.alloc(32, 7).toString('base64'),
+      GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com',
+      GOOGLE_OAUTH_CLIENT_SECRET: 'GOCSPX-secret',
+    });
+    expect(env).toMatchObject({
+      STORAGE_LOCAL_ROOT: '/data/media',
+      DOWNLOAD_STAGING_DIR: '/data/staging',
+      THUMBNAIL_DIR: '/data/thumbnails',
+      GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com',
+    });
+    expect(
+      problemsOf({ ...required, GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com' }),
+    ).toEqual([
+      'GOOGLE_OAUTH_CLIENT_ID: GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    ]);
   });
 
   it('parses numbers and enums, and drops unrelated variables', () => {
@@ -100,6 +122,10 @@ describe('validateWorkerEnv', () => {
     ['MIN_FREE_DISK_MB', '-1'],
     ['IMPORT_PAGE_DELAY_MS', '60001'],
     ['IMPORT_PAGE_DELAY_MS', '1s'],
+    ['STORAGE_LOCAL_ROOT', 'data/storage'],
+    ['DOWNLOAD_STAGING_DIR', './staging'],
+    ['THUMBNAIL_DIR', 'thumbnails'],
+    ['STORAGE_SECRET_KEY', 'too-short'],
   ])('rejects %s=%s', (key, value) => {
     const problems = problemsOf({ ...required, [key]: value });
     expect(problems).toHaveLength(1);

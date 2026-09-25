@@ -8,6 +8,7 @@ import type { WorkerEnv } from './config/env.schema.js';
 import { DatabaseStartupCheck } from './database/database-startup-check.js';
 import { HeartbeatService } from './heartbeat/heartbeat.service.js';
 import { ImportsModule } from './imports/imports.module.js';
+import { MediaModule } from './media/media.module.js';
 import { bullRootOptions } from './queues/bull-options.js';
 import { QueueErrorLogger } from './queues/queue-error-logger.js';
 import { QueuesModule } from './queues/queues.module.js';
@@ -34,6 +35,8 @@ import { TelegramModule } from './telegram/telegram.module.js';
     TelegramModule,
     // History imports (telegram-import queue).
     ImportsModule,
+    // Media downloads (media-download queue) and thumbnails.
+    MediaModule,
   ],
   // HeartbeatService and ShutdownCoordinator must stay here, in the root module: Nest runs
   // onModuleDestroy for the root module first and for global modules (PrismaModule) last.

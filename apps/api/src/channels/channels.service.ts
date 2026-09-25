@@ -12,6 +12,7 @@ import {
 import { channelFolderName } from '@tam/storage';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor } from '../common/pagination/cursor.js';
+import { stopRunningDownloads } from '../downloads/download-rules.js';
 import {
   CHANNEL_INCLUDE,
   type ChannelWithStorage,
@@ -57,32 +58,47 @@ export class ChannelsService {
   }
 
   /**
-   * Chooses where the channel's media is saved. The channel's folder name is fixed the first
-   * time, so a later rename in Telegram does not split its files over two folders.
+   * Chooses where the channel's media is saved, and whether it downloads automatically.
+   *
+   * The channel's folder name is fixed the first time a location is chosen, so a later rename in
+   * Telegram does not split its files over two folders. The old basic group of an upgraded
+   * supergroup follows the switch; switching off stops running downloads nobody asked for (they
+   * keep their partial files and go on when switched on again).
    */
   async update(id: string, request: UpdateChannelRequest): Promise<ChannelDto> {
-    const channel = await this.prisma.channel.findUnique({ where: { id } });
-    if (!channel) {
-      throw channelNotFound();
-    }
-    const location = await this.prisma.storageLocation.findUnique({
-      where: { id: request.storageLocationId },
-      select: { id: true },
-    });
-    if (!location) {
-      throw new NotFoundException({
-        message: 'Storage location not found',
-        code: ApiErrorCode.NOT_FOUND,
-      });
-    }
-    const updated = await this.prisma.channel.update({
-      where: { id },
-      data: {
-        storageLocationId: location.id,
-        storageFolder:
-          channel.storageFolder ?? channelFolderName(channel.title, channel.telegramChatId.toString()),
-      },
-      include: CHANNEL_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const channel = await tx.channel.findUnique({ where: { id } });
+      if (!channel) {
+        throw channelNotFound();
+      }
+      const data: Prisma.ChannelUncheckedUpdateInput = {};
+      if (request.storageLocationId !== undefined) {
+        const location = await tx.storageLocation.findUnique({
+          where: { id: request.storageLocationId },
+          select: { id: true },
+        });
+        if (!location) {
+          throw new NotFoundException({
+            message: 'Storage location not found',
+            code: ApiErrorCode.NOT_FOUND,
+          });
+        }
+        data.storageLocationId = location.id;
+        data.storageFolder =
+          channel.storageFolder ?? channelFolderName(channel.title, channel.telegramChatId.toString());
+      }
+      if (request.downloadMedia !== undefined) {
+        const oldGroups = await tx.channel.findMany({ where: { migratedToChannelId: id }, select: { id: true } });
+        const ids = [id, ...oldGroups.map((group) => group.id)];
+        await tx.channel.updateMany({
+          where: { id: { in: ids } },
+          data: { downloadMedia: request.downloadMedia, ...(request.downloadMedia ? { downloadNote: null } : {}) },
+        });
+        if (!request.downloadMedia) {
+          await stopRunningDownloads(tx, ids);
+        }
+      }
+      return tx.channel.update({ where: { id }, data, include: CHANNEL_INCLUDE });
     });
     return this.withStats(updated);
   }

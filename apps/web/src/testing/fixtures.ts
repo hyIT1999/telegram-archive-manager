@@ -2,9 +2,11 @@ import type { TestRequest } from '@angular/common/http/testing';
 import type {
   ApiErrorBody,
   AuthUserDto,
+  ChannelDownloadsDto,
   ChannelDto,
   ImportJobDto,
   Page,
+  SettingsDto,
   StatsDto,
   StorageCheckDto,
   StorageLocationDto,
@@ -73,6 +75,8 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
     migratedToChannelId: null,
     storageLocation: null,
     storageFolder: null,
+    downloadMedia: true,
+    downloadNote: null,
     createdAt: '2026-09-01T10:00:00.000Z',
     updatedAt: '2026-09-23T21:15:00.000Z',
     stats: { messages: 4_812, media: 640, downloadedMedia: 600, storageBytes: 3 * 1024 ** 3 },
@@ -140,9 +144,48 @@ export function makeStorageLocation(overrides: Partial<StorageLocationDto> = {})
     builtIn: false,
     lastError: null,
     lastCheckedAt: '2026-09-24T08:00:00.000Z',
+    unavailableUntil: null,
     channelCount: 0,
     createdAt: '2026-09-24T08:00:00.000Z',
     ...overrides,
+  };
+}
+
+/** Downloads of a channel: some done, one running, room to spare in its location. */
+export function makeChannelDownloads(overrides: Partial<ChannelDownloadsDto> = {}): ChannelDownloadsDto {
+  return {
+    channelId: '0199a0b1-0000-7000-8000-000000000001',
+    downloadMedia: true,
+    downloadNote: null,
+    paused: false,
+    files: { pending: 5, active: 1, downloaded: 4, failed: 0, skipped: 0, cancelled: 0 },
+    bytes: { total: 10 * 1024 ** 3, downloaded: 4 * 1024 ** 3, remaining: 6 * 1024 ** 3 },
+    active: [],
+    location: {
+      id: '0199a0b1-0000-7000-8000-500000000001',
+      kind: 'LOCAL',
+      name: 'This computer',
+      displayPath: 'D:\\Archive',
+      freeBytes: 120 * 1024 ** 3,
+      unavailableUntil: null,
+      lastError: null,
+    },
+    fits: true,
+    ...overrides,
+  };
+}
+
+/** The download settings as the server starts: everything, two at a time. */
+export function makeSettings(overrides: Partial<SettingsDto['downloads']> = {}): SettingsDto {
+  return {
+    downloads: {
+      paused: false,
+      mediaTypes: ['PHOTO', 'VIDEO', 'DOCUMENT', 'AUDIO', 'VOICE', 'ANIMATION', 'VIDEO_NOTE', 'STICKER'],
+      maxFileSizeMb: null,
+      concurrency: 2,
+      ...overrides,
+    },
+    disk: { minFreeDiskMb: 2048 },
   };
 }
 

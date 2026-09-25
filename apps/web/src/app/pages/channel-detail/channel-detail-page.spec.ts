@@ -5,11 +5,18 @@ import { TestBed } from '@angular/core/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { Router, provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
-import { flushError, makeChannel, makeImportJob, makePage } from '../../../testing/fixtures';
+import {
+  flushError,
+  makeChannel,
+  makeChannelDownloads,
+  makeImportJob,
+  makePage,
+} from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
+import { DOWNLOAD_ENDPOINTS, DOWNLOAD_POLLING } from '../../features/downloads/downloads-api';
 import { IMPORT_POLLING } from '../../features/imports/import-job-watch';
 import { IMPORT_ENDPOINTS } from '../../features/imports/imports-api';
-import type { ImportJobDto } from '../../shared/models';
+import type { ChannelDownloadsDto, ChannelDto, ImportJobDto } from '../../shared/models';
 import { ChannelDetailPage } from './channel-detail-page';
 
 /** Stands in for the import job page the channel page links to. */
@@ -33,6 +40,7 @@ describe('ChannelDetailPage', () => {
         provideHttpClientTesting(),
         { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
         { provide: IMPORT_POLLING, useValue: { jobMs: 60_000, listMs: 60_000 } },
+        { provide: DOWNLOAD_POLLING, useValue: { activeMs: 60_000, idleMs: 60_000 } },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -92,6 +100,7 @@ describe('ChannelDetailPage', () => {
     TestBed.tick();
     http.expectOne(`/api/channels/${channel.id}`).flush(channel);
     (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+    (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(makeChannelDownloads());
     await harness.fixture.whenStable();
 
     expect(page.querySelector('h1')?.textContent).toContain(channel.title);
@@ -105,6 +114,9 @@ describe('ChannelDetailPage', () => {
       expect(list.request.params.get('channelId')).toBe(channel.id);
       expect(list.request.params.get('limit')).toBe('1');
       list.flush(makePage(jobs));
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
       await harness.fixture.whenStable();
       return { channel, harness, page: harness.routeNativeElement as HTMLElement };
     }
@@ -166,6 +178,9 @@ describe('ChannelDetailPage', () => {
       });
       const harness = await open(channel.id);
       http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
       await harness.fixture.whenStable();
 
       const panel = (harness.routeNativeElement as HTMLElement).querySelector(
@@ -174,6 +189,108 @@ describe('ChannelDetailPage', () => {
       expect(panel?.textContent).toContain('imported together with the supergroup');
       expect(panel?.querySelector(`a[href="/channels/${supergroupId}"]`)).not.toBeNull();
       http.expectNone(IMPORT_ENDPOINTS.jobs);
+    });
+  });
+
+  describe('downloads panel', () => {
+    async function openWithDownloads(
+      downloads: Partial<ChannelDownloadsDto>,
+      overrides: Partial<ChannelDto> = {},
+    ) {
+      const channel = makeChannel({ isProtected: false, ...overrides });
+      const harness = await open(channel.id);
+      http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id, ...downloads }),
+      );
+      await harness.fixture.whenStable();
+      const page = harness.routeNativeElement as HTMLElement;
+      return {
+        channel,
+        harness,
+        panel: page.querySelector('app-channel-downloads-panel') as HTMLElement,
+      };
+    }
+
+    it('shows how far the files are, where they go and what downloads now', async () => {
+      const { panel } = await openWithDownloads({
+        active: [
+          {
+            mediaId: '0199a0b1-0000-7000-8000-d00000000001',
+            name: '12 - lesson.mp4',
+            type: 'VIDEO',
+            size: 200 * 1024 ** 2,
+            downloadedBytes: 50 * 1024 ** 2,
+            progress: 25,
+            stage: 'FETCHING',
+            requested: false,
+            updatedAt: '2026-09-25T10:00:00.000Z',
+          },
+        ],
+      });
+      expect(panel.querySelector('h2')?.textContent).toContain('Media downloads');
+      expect(panel.textContent).toContain('4 of 10 files');
+      expect(panel.textContent).toContain('This computer');
+      expect(panel.textContent).toContain('120 GiB free');
+      expect(panel.textContent).toContain('12 - lesson.mp4');
+      expect(panel.textContent).toMatch(/Downloading from Telegram\s+·\s+50 MiB of 200 MiB/);
+      expect(panel.querySelector('mat-slide-toggle button')?.getAttribute('aria-checked')).toBe(
+        'true',
+      );
+    });
+
+    it('warns when the location has no room, or waits', async () => {
+      const { panel } = await openWithDownloads({
+        fits: false,
+        bytes: { total: 756 * 1024 ** 3, downloaded: 0, remaining: 756 * 1024 ** 3 },
+        location: {
+          id: '0199a0b1-0000-7000-8000-500000000001',
+          kind: 'LOCAL',
+          name: 'This computer',
+          displayPath: 'C:\\MYDATA\\tam-storage',
+          freeBytes: 5.8 * 1024 ** 3,
+          unavailableUntil: '2099-01-01T10:00:00.000Z',
+          lastError: 'Not enough free space in "This computer".',
+        },
+      });
+      expect(panel.textContent).toContain('Not enough room');
+      expect(panel.textContent).toContain('the remaining files need 756 GiB');
+      expect(panel.textContent).toContain('This location waits');
+      expect(panel.textContent).toContain('Not enough free space in "This computer".');
+    });
+
+    it('switches automatic downloads of the channel', async () => {
+      const { channel, harness, panel } = await openWithDownloads({});
+      panel.querySelector<HTMLButtonElement>('mat-slide-toggle button')?.click();
+      TestBed.tick();
+      await harness.fixture.whenStable();
+      const update = await nextRequest(http, `/api/channels/${channel.id}`);
+      expect(update.request.method).toBe('PATCH');
+      expect(update.request.body).toEqual({ downloadMedia: false });
+      update.flush({ ...channel, downloadMedia: false });
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id, downloadMedia: false }),
+      );
+      await harness.fixture.whenStable();
+      expect(panel.textContent).toContain('Nothing downloads on its own');
+    });
+
+    it('puts failed files back in line', async () => {
+      const { channel, harness, panel } = await openWithDownloads({
+        files: { pending: 0, active: 0, downloaded: 3, failed: 2, skipped: 0, cancelled: 0 },
+      });
+      const retry = Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+        button.textContent?.includes('Retry 2 failed'),
+      );
+      retry?.click();
+      const request = await nextRequest(http, DOWNLOAD_ENDPOINTS.retry(channel.id));
+      request.flush({ queued: 2 });
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
+      await harness.fixture.whenStable();
+      expect(panel.textContent).toContain('2 failed files are back in line.');
     });
   });
 });

@@ -87,6 +87,15 @@ export const StorageErrorCode = {
 } as const;
 export type StorageErrorCode = (typeof StorageErrorCode)[keyof typeof StorageErrorCode];
 
+/** Outcomes of media requests (GET /api/media/:id/content, POST …/download, …/cancel). */
+export const DownloadErrorCode = {
+  /** The file cannot be cancelled from its current status. */
+  INVALID_DOWNLOAD_STATE: 'INVALID_DOWNLOAD_STATE',
+  /** The file is not downloaded yet, so there is nothing to show. */
+  MEDIA_NOT_DOWNLOADED: 'MEDIA_NOT_DOWNLOADED',
+} as const;
+export type DownloadErrorCode = (typeof DownloadErrorCode)[keyof typeof DownloadErrorCode];
+
 /** One entry of ApiErrorBody.details for a 400 VALIDATION_FAILED response. */
 export interface ValidationIssue {
   /** Dotted path of the offending field, e.g. `email` or `items.0.id`; empty for the whole value. */

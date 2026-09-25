@@ -4,17 +4,19 @@ import { TestBed } from '@angular/core/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import {
   makeReadyStatus,
+  makeSettings,
   makeStorageCheck,
   makeStorageList,
   makeStorageLocation,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
 import { STORAGE_ENDPOINTS } from '../storage/storage-api';
+import { SETTINGS_ENDPOINT } from './settings-api';
 import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { SettingsPage } from './settings-page';
 
 describe('SettingsPage', () => {
-  it('shows the Telegram account and the storage locations next to the appearance settings', async () => {
+  it('shows the Telegram account, storage locations and download settings next to the appearance', async () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -29,6 +31,7 @@ describe('SettingsPage', () => {
     const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
     http.expectOne(TELEGRAM_ENDPOINTS.status).flush(makeReadyStatus());
     http.expectOne(STORAGE_ENDPOINTS.locations).flush(makeStorageList([computer]));
+    http.expectOne(SETTINGS_ENDPOINT).flush(makeSettings());
     (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${computer.id}/check`)).flush(
       makeStorageCheck(computer),
     );
@@ -39,9 +42,13 @@ describe('SettingsPage', () => {
     expect(headings).toEqual([
       'Telegram account',
       'Storage locations',
+      'Media downloads',
       'Appearance',
-      'Archive settings are on their way',
+      'The sync schedule is on its way',
     ]);
+    expect(page.querySelector('app-download-settings')?.textContent).toContain(
+      'Pause all downloads',
+    );
     expect(page.querySelector('app-telegram-connect .account-name')?.textContent).toContain(
       'An Archivist',
     );

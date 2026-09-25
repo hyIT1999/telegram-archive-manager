@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -79,6 +79,26 @@ describe('LocalStorageDriver', () => {
     expect(space.totalBytes).toBeGreaterThan(0);
     expect(space.freeBytes).toBeGreaterThan(0);
     expect(space.freeBytes).toBeLessThanOrEqual(space.totalBytes as number);
+  });
+
+  it('stages unfinished downloads in a hidden folder of the same disk', async () => {
+    expect(driver.stagingDir()).toBe(path.join(root, '.tam-tmp'));
+    await mkdir(driver.stagingDir(), { recursive: true });
+    const part = path.join(driver.stagingDir(), 'media.part');
+    await writeFile(part, 'staged');
+
+    await driver.putFile(key, part);
+    expect(await text(await driver.openReadStream(key))).toBe('staged');
+    await expect(stat(part)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('stores nothing once the caller gave up', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      driver.putFile(key, await source('too late'), { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await driver.stat(key)).toBeNull();
   });
 
   it('explains when the folder cannot be used', async () => {

@@ -13,10 +13,8 @@ import {
   LocalPathNotAllowedError,
   StorageError,
   StorageNotFoundError,
+  StorageUnavailableError,
 } from '@tam/storage';
-
-/** The server lacks what a storage location needs (Google client, STORAGE_SECRET_KEY). */
-export class StorageUnavailableError extends StorageError {}
 
 /** Turns storage failures into API errors; anything else is rethrown untouched. */
 export function toStorageHttpException(error: unknown): unknown {

@@ -40,6 +40,11 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     return null;
   }
 
+  /** Drive files are uploaded from wherever the caller staged them. */
+  stagingDir(): null {
+    return null;
+  }
+
   async putFile(key: string, sourcePath: string, options: PutOptions = {}): Promise<StoredObjectInfo> {
     const { size } = await stat(sourcePath);
     let file: DriveFile;
@@ -79,7 +84,9 @@ export class GoogleDriveStorageDriver implements StorageDriver {
 
   async stat(key: string): Promise<StoredObjectInfo | null> {
     const file = await this.find(key);
-    return file ? { key, size: Number(file.size ?? 0), contentType: file.mimeType || null } : null;
+    return file
+      ? { key, size: Number(file.size ?? 0), contentType: file.mimeType || null, sha256: file.sha256Checksum ?? null }
+      : null;
   }
 
   async openReadStream(key: string, range?: ByteRange): Promise<Readable> {
@@ -136,11 +143,14 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     const { folders, name } = this.split(key);
     const parentId = await this.folder(folders);
     const existing = await this.drive.findChild(parentId, name, 'file');
-    return this.drive.upload(existing ? { fileId: existing.id } : { parentId, name }, {
-      path: sourcePath,
-      size,
-      contentType: options.contentType ?? DEFAULT_CONTENT_TYPE,
-    });
+    return this.drive.upload(
+      existing ? { fileId: existing.id } : { parentId, name },
+      { path: sourcePath, size, contentType: options.contentType ?? DEFAULT_CONTENT_TYPE },
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+      },
+    );
   }
 
   private split(key: string): { folders: string[]; name: string } {

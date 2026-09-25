@@ -1,7 +1,15 @@
 import { Injectable } from '@nestjs/common';
-import type { Prisma } from '@tam/database';
+import { type Prisma, refreshMediaCounters } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
-import { JobStatus } from '@tam/shared';
+import {
+  DOWNLOAD_SETTINGS_KEY,
+  DownloadJobStatus,
+  DownloadSkipReason,
+  DownloadStatus,
+  JobStatus,
+  isAutoDownloaded,
+  readDownloadSettings,
+} from '@tam/shared';
 import type { Message } from '@tam/telegram';
 import {
   editableColumns,
@@ -111,6 +119,10 @@ async function storeMessages(
   });
   const byTelegramId = new Map(rows.map((row) => [row.telegramMessageId, row]));
 
+  // Files outside the automatic download settings are recorded as skipped (downloadable on request).
+  const settings = readDownloadSettings(
+    (await tx.appSetting.findUnique({ where: { key: DOWNLOAD_SETTINGS_KEY } }))?.value,
+  );
   const media: Prisma.MediaCreateManyInput[] = [];
   for (const message of kept) {
     const row = byTelegramId.get(Number(message.id));
@@ -120,48 +132,34 @@ async function storeMessages(
     if (isNewerEdit(message.editDate, row.editDate)) {
       await tx.message.update({ where: { id: row.id }, data: editableColumns(message) });
     }
-    media.push(...message.media.filter(isArchivableMedia).map((item) => toMediaRow(row.id, item)));
+    media.push(
+      ...message.media.filter(isArchivableMedia).map((item) => ({
+        ...toMediaRow(row.id, item),
+        downloadStatus: isAutoDownloaded(settings, item)
+          ? DownloadStatus.PENDING
+          : DownloadStatus.SKIPPED,
+      })),
+    );
   }
   if (media.length > 0) {
     await tx.media.createMany({ data: media, skipDuplicates: true });
     const stored = await tx.media.findMany({
       where: { messageId: { in: rows.map((row) => row.id) } },
-      select: { id: true },
+      select: { id: true, downloadStatus: true },
     });
     await tx.downloadJob.createMany({
-      data: stored.map((item) => ({ mediaId: item.id, importJobId })),
+      data: stored.map((item) =>
+        item.downloadStatus === DownloadStatus.SKIPPED
+          ? {
+              mediaId: item.id,
+              importJobId,
+              status: DownloadJobStatus.SKIPPED,
+              reason: DownloadSkipReason.POLICY,
+            }
+          : { mediaId: item.id, importJobId },
+      ),
       skipDuplicates: true,
     });
   }
   return { added, skipped };
-}
-
-/**
- * Recomputes the job's media counters from its download jobs. They are never incremented, so a
- * repeated page or a retried download can never count twice.
- */
-export async function refreshMediaCounters(
-  tx: Prisma.TransactionClient,
-  importJobId: string,
-): Promise<void> {
-  await tx.$executeRaw`
-    UPDATE import_jobs AS j
-    SET total_media = c.total,
-        downloaded_files = c.downloaded,
-        failed_files = c.failed,
-        skipped_files = c.skipped,
-        total_bytes = c.total_bytes,
-        downloaded_bytes = c.downloaded_bytes
-    FROM (
-      SELECT count(*)::int AS total,
-             count(*) FILTER (WHERE d.status = 'COMPLETED')::int AS downloaded,
-             count(*) FILTER (WHERE d.status = 'FAILED')::int AS failed,
-             count(*) FILTER (WHERE d.status = 'SKIPPED')::int AS skipped,
-             coalesce(sum(m.size), 0)::bigint AS total_bytes,
-             coalesce(sum(m.size) FILTER (WHERE d.status = 'COMPLETED'), 0)::bigint AS downloaded_bytes
-      FROM download_jobs d
-      JOIN media m ON m.id = d.media_id
-      WHERE d.import_job_id = ${importJobId}::uuid
-    ) AS c
-    WHERE j.id = ${importJobId}::uuid`;
 }

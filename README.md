@@ -22,8 +22,8 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 2 | Đăng nhập Telegram (mtcute), danh sách channel/group, chọn channel | ✅ Hoàn thành |
 | 2b | Chọn nơi lưu cho từng channel: thư mục trên máy hoặc Google Drive | ✅ Hoàn thành |
 | 3 | Import lịch sử message, import jobs (pause/resume/cancel), BullMQ, reconciler | ✅ Hoàn thành |
-| 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | ⏳ Tiếp theo |
-| 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | Kế hoạch |
+| 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | ✅ Hoàn thành |
+| 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | ⏳ Tiếp theo |
 | 6 | Search, Tags, Favorites, Filters | Kế hoạch |
 | 7 | Tiến trình realtime (SSE), sync message mới | Kế hoạch |
 | 8 | Test bổ sung, bảo mật, hiệu năng, Docker production | Kế hoạch |
@@ -33,12 +33,13 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 | Trang | Phase |
 |---|---|
 | All Messages, Message detail, Videos/Images/Documents/Audio | 5 |
-| Settings → Archive settings | 5 (phần Appearance đã dùng được) |
 | Search, Tags, Favorites | 6 |
+| Settings → lịch sync | 7 |
 
 Đã dùng được:
 - Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu), **Settings → Telegram account**, **Settings → Storage locations**.
 - Phase 3: bước 5–7 của wizard (chọn import toàn bộ hoặc từ một ngày, bắt đầu, theo dõi tiến trình), trang **Import Jobs** (`/imports`), chi tiết job `imports/:id` với Pause/Resume/Cancel, mục **Import** trên trang channel. Tiến trình được cập nhật bằng polling vài giây một lần; SSE realtime đến ở Phase 7.
+- Phase 4: mục **Media downloads** trên trang channel (công tắc tải tự động, tiến độ, file đang tải, **Retry failed**), **Settings → Media downloads**, công tắc tải ở bước Start của wizard, số file đã tải trên trang import job, và API xem/tải file `/api/media/*` (trình xem media trên web đến ở Phase 5).
 
 ## Kiến trúc tổng quan
 
@@ -49,8 +50,8 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
                                              Redis 7 ── BullMQ (prefix tam), pub/sub (RPC Telegram, events), heartbeat, lease
                                                      │
                                   Worker (apps/worker) — process DUY NHẤT giữ kết nối Telegram
-                                  queues: telegram-import, media-download,
-                                          thumbnail-generation, metadata-processing
+                                  queues: telegram-import, media-download
+                                  + scheduler tải, reconciler, thumbnail từ Telegram
                                                      │
                             Nơi lưu (chọn theo từng channel): thư mục trên máy | Google Drive
 ```
@@ -65,6 +66,7 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
 - **Import job:** API ghi job vào bảng `import_jobs` trước, rồi mới đẩy một *run* (`ij-<job id>-<số run>`) vào queue `telegram-import`.
   - Nếu Redis không nhận kịp (quá 3 giây), request vẫn thành công. Reconciler của worker (chạy khi khởi động và mỗi phút) thêm lại run cho mọi job `PENDING`/`RUNNING` bị thiếu trong queue, và ghi nhận `FAILED` cho run mà BullMQ đã bỏ cuộc.
   - Worker đọc lại trạng thái job trước mỗi trang và ghi mỗi trang bằng compare-and-set theo `status` + số run. Nhờ vậy Pause, Cancel hay một run mới hơn luôn thắng một run cũ, kể cả khi hai bên chạy cùng lúc.
+- **Tải media:** scheduler trong worker lấy file đang chờ từ `download_jobs` (file được yêu cầu trước, rồi file nhỏ trước) và mỗi lần chỉ đưa vào queue `media-download` số file được phép tải cùng lúc, nên Redis luôn nhỏ dù archive lớn tới đâu. Lượt thử, lỗi và thời điểm thử lại đều nằm trong PostgreSQL; mỗi job BullMQ chỉ là một lượt thử.
 - **Binary media không bao giờ nằm trong PostgreSQL.** File nằm ở nơi lưu mà channel đã chọn, theo cấu trúc dễ đọc: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
@@ -135,10 +137,12 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `WORKER_HEARTBEAT_INTERVAL_MS` | worker | `5000` | Chu kỳ heartbeat (1000–60000); key có TTL = 3 × chu kỳ |
 | `IMPORT_PAGE_DELAY_MS` | worker | `1000` | Nghỉ giữa hai trang lịch sử (100 message) khi import (0–60000), để tránh giới hạn tần suất của Telegram. Channel 10.000 message mất khoảng 2–3 phút |
 | `STORAGE_LOCAL_ROOT` | api, worker | — | Thư mục của nơi lưu có sẵn "This computer". **Dùng đường dẫn tuyệt đối**, vì api và worker chạy ở thư mục khác nhau |
-| `STORAGE_LOCAL_ROOTS` | api (worker từ Phase 4) | = `STORAGE_LOCAL_ROOT` | Các thư mục, ngăn cách bằng `;`, mà web được phép thêm làm nơi lưu (và thư mục con bên trong). Web không bao giờ ghi được ra ngoài các thư mục này |
-| `STORAGE_SECRET_KEY` | api (worker từ Phase 4) | — | 32 byte base64, dùng mã hoá token Google Drive lưu trong DB. Cần khi dùng Google Drive |
-| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | api (worker từ Phase 4) | — | OAuth client loại "TVs and Limited Input devices" để kết nối Google Drive (mục 9). Phải đặt cả hai cùng lúc |
-| `MIN_FREE_DISK_MB` | worker | `2048` | Dừng tải khi dung lượng trống thấp hơn ngưỡng này (Phase 4) |
+| `STORAGE_LOCAL_ROOTS` | api | = `STORAGE_LOCAL_ROOT` | Các thư mục, ngăn cách bằng `;`, mà web được phép thêm làm nơi lưu (và thư mục con bên trong). Web không bao giờ ghi được ra ngoài các thư mục này |
+| `STORAGE_SECRET_KEY` | api, worker | — | 32 byte base64, dùng mã hoá token Google Drive lưu trong DB. Cần khi dùng Google Drive; api và worker phải dùng **cùng một key** |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | api, worker | — | OAuth client loại "TVs and Limited Input devices" để kết nối Google Drive (mục 9). Phải đặt cả hai cùng lúc; worker cần để upload |
+| `MIN_FREE_DISK_MB` | api, worker | `2048` | Tải vào thư mục trên máy luôn giữ trống ít nhất chừng này; thiếu chỗ thì việc tải chờ (không báo lỗi). Api chỉ hiển thị giá trị này |
+| `DOWNLOAD_STAGING_DIR` | worker | `<STORAGE_LOCAL_ROOT>/.tam-tmp` | Nơi file chờ trước khi upload lên Google Drive; cần chỗ cho file lớn nhất (1–4 GB) |
+| `THUMBNAIL_DIR` | api, worker | `<STORAGE_LOCAL_ROOT>/.tam-thumbnails` | Ảnh xem trước nhỏ lấy từ Telegram (vài chục KB mỗi file). Api và worker phải cùng một thư mục |
 | `S3_*` | — | — | Dự kiến cho storage S3-compatible, chưa dùng |
 | `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | docker compose | — | Nên dùng chuỗi **hex** (`openssl rand -hex 24`), vì chúng nằm trong URL |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | docker compose (`bootstrap`) | — | Admin web đầu tiên; mật khẩu tối thiểu 12 ký tự |
@@ -332,7 +336,7 @@ Wizard **Import Jobs → New import** gồm 7 bước:
 5. **Import mode:**
    - **The whole history:** mọi message, về tới message đầu tiên.
    - **Since a date:** chỉ message gửi từ ngày được chọn trở đi (tính theo múi giờ của trình duyệt). Phần cũ hơn có thể import sau.
-6. **Start:** xem lại channel, chế độ và nơi lưu, rồi bấm **Start import** (`POST /api/channels/:id/import`).
+6. **Start:** xem lại channel, chế độ và nơi lưu, bật/tắt **Download media automatically** (mục "Tải media" bên dưới), rồi bấm **Start import** (`POST /api/channels/:id/import`).
 7. **Progress:** trạng thái, thanh tiến trình, số message đã đọc trên tổng dự kiến, số media tìm thấy và dung lượng, lý do đang chờ (nếu có), cùng các nút **Pause**, **Resume**, **Cancel import**. Trang tự đọc lại vài giây một lần khi job đang chạy.
 
 Có thể import lại bất cứ lúc nào từ mục **Import** trên trang channel. Lần import sau chỉ đọc message mới đăng và phần lịch sử cũ còn thiếu.
@@ -363,8 +367,47 @@ Có thể import lại bất cứ lúc nào từ mục **Import** trên trang ch
   - **Pause:** `PENDING`/`RUNNING` → `PAUSED`. Worker dừng ở trang kế tiếp, mọi thứ đã đọc được giữ lại.
   - **Resume:** `PAUSED` → `PENDING`, với số run mới.
   - **Cancel:** mọi trạng thái chưa kết thúc → `CANCELLED`. Không resume được nữa; muốn tiếp tục thì tạo import mới, và nó đi tiếp từ chỗ archive đã có.
-- **Media (Phase 3):** file được ghi nhận cùng message (loại, tên, kích thước, kích thước ảnh/video, thời lượng) và có download job `PENDING`. **Tải file về nơi lưu là Phase 4**: resume từ `.part`, retry, SHA-256, không tải lại file trùng.
-  - Hãy xem dung lượng trên trang job trước khi Phase 4 bắt đầu tải. Channel nhiều video có thể lên tới hàng trăm GB.
+- **Media:** file được ghi nhận cùng message (loại, tên, kích thước, kích thước ảnh/video, thời lượng), mỗi file một download job. File nằm ngoài cài đặt tải tự động được ghi nhận là *Skipped (settings)*. Việc tải chạy riêng, sau import (mục "Tải media" bên dưới), nên import kết thúc ngay khi đọc xong lịch sử và có thể import lại trong lúc file vẫn đang tải.
+
+### Tải media
+
+Media của mỗi channel được tải về nơi lưu của channel đó, độc lập với import: import kết thúc khi đọc xong lịch sử, còn file tải dần sau đó.
+
+- **Ba lớp điều khiển:**
+  - **Công tắc của channel:** **Download media automatically** trong mục **Media downloads** trên trang channel, hoặc ở bước Start của wizard. Channel mới được bật sẵn. **Các channel có từ trước Phase 4 bắt đầu ở trạng thái tắt**, để việc nâng cấp không tự tải cả archive.
+  - **Settings → Media downloads:**
+    - **Pause all downloads** dừng mọi việc tải ngay lập tức. File đang tải dở được giữ lại, bỏ pause là tải tiếp.
+    - Chọn loại media tự tải, cỡ file lớn nhất được tự tải (để trống là không giới hạn), và số file tải cùng lúc (1–4, mặc định 2).
+    - Đổi loại hoặc cỡ có hiệu lực ngay với file đang chờ: file không còn khớp chuyển sang *Skipped (settings)*, file khớp lại thì trở về hàng đợi.
+  - **Tải theo yêu cầu:** `POST /api/media/:id/download` tải một file ngay, bất kể công tắc và Settings. File được yêu cầu luôn đi trước.
+- **Thứ tự:** file được yêu cầu trước, sau đó **file nhỏ trước**. Với channel nhiều video, tài liệu và video ngắn xong trước, video dài xong sau.
+- **Resume:** file tải vào `<nơi lưu>/.tam-tmp/<media id>.part`. Đây là thư mục ẩn trên cùng ổ, nên lưu xong chỉ là đổi tên, không tốn thêm chỗ.
+  - Worker dừng hay crash giữa chừng thì lần sau tải tiếp từ MiB cuối cùng đã có.
+  - Tải xong, file được kiểm tra kích thước và tính SHA-256 rồi mới lưu vào đường dẫn dễ đọc.
+  - Đã kiểm chứng với group thật: tắt cứng worker khi video 91 MiB tải được 49%; sau khi khởi động lại, file tải tiếp từ 51 MiB và SHA-256 trong DB khớp với file trên đĩa. Pause giữa chừng rồi bỏ pause cũng tải tiếp từ phần đã có. Tốc độ đo được khoảng 8–10 MB/s.
+- **Chờ mà không tốn lượt thử:** khi Telegram yêu cầu chờ (`FLOOD_WAIT`), khi worker mất kết nối Telegram hoặc tài khoản bị đăng xuất, và khi nơi lưu hết chỗ hoặc bị giới hạn. Lỗi khác được thử lại tối đa 8 lần, thời gian chờ tăng dần từ 30 giây tới 1 giờ. Sau lần cuối file chuyển *Failed*, và trang channel có nút **Retry failed**.
+- **Chỗ trống:**
+  - Thư mục trên máy luôn giữ trống ít nhất `MIN_FREE_DISK_MB`. Không đủ chỗ cho file tiếp theo thì nơi lưu tạm ngưng 10 phút rồi thử lại; lý do hiện trên trang channel và ở Settings, và không file nào bị đánh dấu lỗi. Trang channel cũng báo trước khi nơi lưu không đủ chỗ cho phần còn lại.
+  - Với Google Drive, quota được kiểm tra trước mỗi file. File chờ trong `DOWNLOAD_STAGING_DIR` trước khi upload, nên thư mục này cần chỗ cho file lớn nhất.
+  - Google Drive chỉ cho upload khoảng **750 GB mỗi ngày**. Khi bị giới hạn, nơi lưu tạm ngưng 15 phút, rồi 1 giờ, 3 giờ, 6 giờ, và tải tiếp khi Google cho phép.
+- **File trùng:** cùng một file Telegram ở hai message chỉ tải một lần; lần sau được sao chép (hardlink trên ổ đĩa, bản sao trên Drive).
+- **Bị xoá hoặc bị khoá:** message bị xoá hoặc bị đổi file trên Telegram thì file chuyển *Skipped*. Chat bật content protection thì mọi file còn chờ của chat bị bỏ qua và công tắc tắt.
+- **Thumbnail:** worker lấy ảnh xem trước nhỏ (320 px) của mọi file từ Telegram, kể cả file chưa tải, và lưu trong `THUMBNAIL_DIR`. Nhờ vậy duyệt được cả channel trước khi tải hàng trăm GB.
+- **Ước tính thời gian:** dung lượng còn lại ÷ tốc độ tải. Tài khoản Telegram không Premium bị Telegram giới hạn tốc độ tải, và các file tải cùng lúc dùng chung giới hạn đó. Khi đang tải, trang channel hiện tốc độ và thời gian còn lại. Ví dụ: 756 GiB ở 5 MB/s mất khoảng 2 ngày.
+
+API tải media (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `GET /api/settings`, `PATCH /api/settings` | Cài đặt tải: `{downloads: {paused, mediaTypes, maxFileSizeMb, concurrency}}`. PATCH chỉ đổi các trường gửi lên và áp dụng ngay cho file đang chờ |
+| `GET /api/channels/:id/downloads` | Số file và byte theo trạng thái, file đang tải, nơi lưu (chỗ trống, tạm ngưng tới khi nào), `fits` |
+| `PATCH /api/channels/:id` | `{downloadMedia}` bật/tắt tải tự động (áp dụng cả group cũ của supergroup); `{storageLocationId}` đổi nơi lưu |
+| `POST /api/channels/:id/downloads/retry` | Đưa mọi file lỗi của channel trở lại hàng đợi |
+| `GET /api/media/:id` | Thông tin một file (không có đường dẫn trên server) |
+| `GET /api/media/:id/content` | Nội dung file đã tải, hỗ trợ `Range` (`206`/`416`). Chỉ ảnh, video/audio trình duyệt phát được và PDF được mở ngay; loại khác luôn tải xuống. `?download=1` để tải xuống. `409 MEDIA_NOT_DOWNLOADED` nếu chưa tải |
+| `GET /api/media/:id/thumbnail` | Ảnh xem trước (`404` nếu không có) |
+| `POST /api/media/:id/download` | Tải ngay: `202` khi vào hàng đợi, `200` nếu đã tải hoặc đang tải, `422 CHAT_PROTECTED` |
+| `POST /api/media/:id/cancel` | Huỷ file đang chờ hoặc đang tải (`409 INVALID_DOWNLOAD_STATE`) |
 
 API import (đều cần đăng nhập web):
 
@@ -489,4 +532,11 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | Job `FAILED`: "Content protection was turned on for this chat…" | Chat vừa bật content protection nên không được archive nữa. Các message đã lưu trước đó vẫn còn |
 | Job `FAILED`: "This Telegram account can no longer read the chat" | Tài khoản đã rời chat, bị ban, hoặc chat bị xoá. Kiểm tra trong app Telegram |
 | `409 IMPORT_ACTIVE` khi bấm Start | Channel đã có import chưa kết thúc với chế độ khác. Mở job đó (link trong thông báo), đợi nó xong hoặc Cancel rồi import lại |
+| Nâng cấp lên Phase 4 xong mà không file nào được tải | Channel có từ trước bắt đầu với công tắc tải **tắt**. Bật **Download media automatically** trên trang channel khi nơi lưu đủ chỗ |
+| Tải chờ: *Not enough free space in …* | Nơi lưu (hoặc thư mục tạm cho Google Drive) không đủ chỗ cho file tiếp theo mà vẫn giữ `MIN_FREE_DISK_MB`. Giải phóng chỗ, hoặc chọn nơi lưu lớn hơn cho channel. Worker tự thử lại sau 10 phút; bấm **Check** trên nơi lưu để thử ngay |
+| *Google Drive is limiting uploads (it may be its 750 GB-a-day upload cap)* | Google giới hạn upload (khoảng 750 GB mỗi ngày cho một tài khoản). Nơi lưu tạm ngưng rồi tự tải tiếp, không cần làm gì |
+| *The worker is not set up for Google Drive* | Worker cũng cần `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` và `STORAGE_SECRET_KEY` (giống api). Điền vào `.env` rồi restart worker, sau đó bấm **Check** trên nơi lưu |
+| File *Failed* sau 8 lần thử | Lý do ghi trên file. Bấm **Retry failed** trên trang channel để thử lại từ đầu |
+| Tải chậm | Tài khoản không Premium bị Telegram giới hạn tốc độ tải. Tăng *Files at a time* ít tác dụng, vì các file dùng chung giới hạn đó |
+| Không có thumbnail | Worker thiếu `THUMBNAIL_DIR` hoặc `STORAGE_LOCAL_ROOT` (log worker có cảnh báo). Api và worker phải dùng cùng thư mục |
 | Dev: sau `npm run db:migrate`, API/worker báo `Unknown argument …` | `tsc -b -w` trong `npm run dev` không build lại Prisma client vừa generate. Dừng `npm run dev`, chạy `npm run build:packages`, rồi chạy lại `npm run dev` |

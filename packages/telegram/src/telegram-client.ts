@@ -7,6 +7,8 @@ import type {
   HistoryPageOptions,
   LegacyGroup,
   Message,
+  ThumbnailOptions,
+  ThumbnailRequest,
   UpdateHandler,
 } from './types.js';
 
@@ -58,4 +60,24 @@ export interface TelegramHistoryReader {
   refreshChat(chatId: string): Promise<Chat>;
   /** The old basic group of an upgraded supergroup; null when this account cannot read it. */
   getLegacyGroup(chatId: string): Promise<LegacyGroup | null>;
+}
+
+/** Media downloads of the archive. */
+export interface TelegramMediaReader {
+  /**
+   * Downloads a file into `options.destPath`, resuming after `options.offset` bytes (rounded down
+   * to a multiple of 1 MiB; the rest is fetched again). The message is read again first, so the
+   * file reference is always fresh. Throws MediaUnavailableError when the message was deleted or
+   * now carries another file, and ChatProtectedError when content protection was turned on.
+   */
+  downloadFile(fileId: string, options?: DownloadOptions): Promise<DownloadedFile>;
+  /**
+   * Small previews (320 px box, else 100 px) of files of one chat, by file_unique_id: the image
+   * bytes, or null when the file has no preview (or its message is gone). At most 100 files.
+   */
+  getThumbnails(
+    chatId: string,
+    files: readonly ThumbnailRequest[],
+    options?: ThumbnailOptions,
+  ): Promise<Map<string, Uint8Array | null>>;
 }

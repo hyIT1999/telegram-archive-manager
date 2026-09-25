@@ -192,6 +192,15 @@ export class TelegramAuthService {
     return this.exclusive(() => this.markLoggedOut('The Telegram session was revoked; log in again'));
   }
 
+  /** Whether the account is logged in; reads only (for loops that run every few seconds). */
+  async isReady(): Promise<boolean> {
+    const account = await this.prisma.telegramAccount.findUnique({
+      where: { accountKey: ACCOUNT_KEY },
+      select: { authState: true },
+    });
+    return account?.authState === TelegramAuthState.READY;
+  }
+
   async requireReady(): Promise<void> {
     const account = await this.account();
     if (account.authState !== TelegramAuthState.READY) {

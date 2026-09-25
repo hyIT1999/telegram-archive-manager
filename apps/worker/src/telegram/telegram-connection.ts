@@ -13,6 +13,7 @@ import type { Redis } from 'ioredis';
 import { errorMessage } from '../common/error-message.js';
 import type { WorkerEnv } from '../config/env.schema.js';
 import { RedisLease } from './redis-lease.js';
+import { TelegramCooldown } from './telegram-cooldown.js';
 import { APP_VERSION, type TelegramSettings, mtcuteLogLevel } from './telegram-settings.js';
 import {
   SECRET_BOX,
@@ -47,6 +48,7 @@ export class TelegramConnection implements TelegramApiProvider {
     @Inject(SECRET_BOX) private readonly box: SecretBox | null,
     @Inject(TELEGRAM_REDIS) private readonly redis: Redis,
     private readonly config: ConfigService<WorkerEnv, true>,
+    private readonly cooldown: TelegramCooldown,
   ) {}
 
   get api(): TelegramApi {
@@ -86,8 +88,10 @@ export class TelegramConnection implements TelegramApiProvider {
       storage: this.session.storage,
       appVersion: APP_VERSION,
       logLevel: mtcuteLogLevel(this.config.get('LOG_LEVEL', { infer: true })),
-      onFloodWait: (method, seconds) =>
-        this.logger.warn(`Telegram rate limit on ${method}: waiting ${seconds} s`),
+      onFloodWait: (method, seconds) => {
+        this.cooldown.note(seconds);
+        this.logger.warn(`Telegram rate limit on ${method}: waiting ${seconds} s`);
+      },
     });
     await this.client.connect();
     this.adapter = new MtcuteTelegramAdapter(this.client);

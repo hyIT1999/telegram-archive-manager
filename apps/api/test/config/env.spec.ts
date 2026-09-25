@@ -46,6 +46,7 @@ describe('envSchema', () => {
       SESSION_ABSOLUTE_TTL_DAYS: 30,
       CSRF_TRUSTED_ORIGINS: [],
       TELEGRAM_RPC_TIMEOUT_MS: 30_000,
+      MIN_FREE_DISK_MB: 2048,
       TRUST_PROXY: ['loopback'],
     });
   });

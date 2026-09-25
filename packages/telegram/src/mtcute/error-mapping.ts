@@ -1,4 +1,4 @@
-import { MtArgumentError, MtPeerNotFoundError, MtUnsupportedError, tl } from '@mtcute/core';
+import { MtArgumentError, MtPeerNotFoundError, MtTimeoutError, MtUnsupportedError, tl } from '@mtcute/core';
 import { TelegramErrorCode } from '@tam/shared';
 import {
   AuthRequiredError,
@@ -8,6 +8,7 @@ import {
   FloodWaitError,
   LoginStepError,
   TelegramError,
+  TelegramTimeoutError,
 } from '../errors.js';
 
 /** Telegram answers meaning the stored session is gone. */
@@ -67,6 +68,13 @@ export function toTelegramError(error: unknown): Error {
       TelegramErrorCode.PAYMENT_REQUIRED,
       'Telegram requires this number to log in with an official Telegram app first',
     );
+  }
+  if (error instanceof MtTimeoutError) {
+    return new TelegramTimeoutError();
+  }
+  // FILEREF_UPGRADE_NEEDED during a download: the reference must be fetched again.
+  if (error instanceof MtUnsupportedError && /file ref expired/i.test(error.message)) {
+    return new FileReferenceExpiredError();
   }
   if (error instanceof MtUnsupportedError && /sign.?up/i.test(error.message)) {
     return new LoginStepError(

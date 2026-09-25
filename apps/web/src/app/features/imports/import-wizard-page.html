@@ -214,10 +214,29 @@
             </div>
           }
         </dl>
+        <div class="downloads-switch">
+          <mat-slide-toggle
+            [checked]="item.downloadMedia"
+            [disabled]="savingDownloads()"
+            (change)="setDownloadMedia($event)"
+          >
+            Download media automatically
+          </mat-slide-toggle>
+          <p class="panel-hint">
+            @if (item.downloadMedia) {
+              Files download to the storage location as they are found, smallest first.
+            } @else {
+              Files are only recorded; download them later from the channel page, all or one by one.
+            }
+          </p>
+        </div>
+        @if (downloadsError(); as message) {
+          <app-notice tone="error">{{ message }}</app-notice>
+        }
         <app-notice tone="info" title="What happens">
           The worker reads the history page by page into the archive, and can be paused, resumed
           or cancelled at any time; whatever it read stays saved. Media files are recorded with
-          their messages; downloading them to the storage location arrives in Phase 4.
+          their messages and downloaded on their own schedule, so the import finishes first.
         </app-notice>
 
         @if (startError(); as message) {

@@ -25,6 +25,28 @@ export class FileReferenceExpiredError extends TelegramError {
   }
 }
 
+/** Why a file can no longer be downloaded. */
+export type MediaUnavailableReason = 'MESSAGE_DELETED' | 'MEDIA_REPLACED';
+
+/** The file's message was deleted on Telegram, or it now carries a different file. */
+export class MediaUnavailableError extends TelegramError {
+  constructor(readonly reason: MediaUnavailableReason) {
+    super(
+      reason === 'MESSAGE_DELETED'
+        ? 'The message was deleted on Telegram'
+        : 'The message on Telegram now carries a different file',
+      'MEDIA_UNAVAILABLE',
+    );
+  }
+}
+
+/** No data arrived for too long: Telegram kept asking to wait, or the connection stalled. */
+export class TelegramTimeoutError extends TelegramError {
+  constructor(message = 'Telegram sent no data for too long') {
+    super(message, 'TELEGRAM_TIMEOUT');
+  }
+}
+
 /** The chat has content protection enabled; it must not be archived. */
 export class ChatProtectedError extends TelegramError {
   constructor(readonly chatId: string) {

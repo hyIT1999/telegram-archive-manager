@@ -26,7 +26,7 @@ describe('worker application context', () => {
     return raw === null ? null : (JSON.parse(raw) as WorkerHeartbeat);
   }
 
-  it('registers a producer for every queue, reaches the database and runs the import processor', async () => {
+  it('registers a producer for every queue, reaches the database and runs the processors', async () => {
     const app = await bootWorker();
     try {
       for (const name of ALL_QUEUES) {
@@ -46,7 +46,7 @@ describe('worker application context', () => {
           .get(ShutdownCoordinator)
           .workers()
           .map((worker) => worker.name),
-      ).toEqual([QUEUES.telegramImport]);
+      ).toEqual([QUEUES.telegramImport, QUEUES.mediaDownload]);
     } finally {
       await app.close();
     }

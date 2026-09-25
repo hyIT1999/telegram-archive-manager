@@ -4,6 +4,7 @@ import {
   TelegramError,
   type TelegramHistoryReader,
   type TelegramLoginApi,
+  type TelegramMediaReader,
 } from '@tam/telegram';
 
 /** TelegramSettings, derived from the environment. */
@@ -15,8 +16,8 @@ export const TELEGRAM_REDIS = Symbol('TELEGRAM_REDIS');
 /** Gives services the live Telegram API (TelegramConnection in production, fakes in tests). */
 export const TELEGRAM_API_PROVIDER = Symbol('TELEGRAM_API_PROVIDER');
 
-/** The adapter operations the worker uses: login, the chat list and history. */
-export interface TelegramApi extends TelegramLoginApi, TelegramHistoryReader {
+/** The adapter operations the worker uses: login, the chat list, history and media files. */
+export interface TelegramApi extends TelegramLoginApi, TelegramHistoryReader, TelegramMediaReader {
   getChats(): Promise<Chat[]>;
 }
 

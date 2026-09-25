@@ -60,9 +60,11 @@ export class ChannelImportPanel {
   protected readonly importable = computed(
     () => !this.channel().isProtected && this.channel().migratedToChannelId === null,
   );
+  /** Changes only with the channel itself, not with a newer copy of it (e.g. after a switch). */
+  private readonly channelId = computed(() => this.channel().id);
   private readonly latest = rxResource({
-    params: () => (this.importable() ? { channelId: this.channel().id } : undefined),
-    stream: ({ params }) => this.api.list({ channelId: params.channelId, limit: 1 }),
+    params: () => (this.importable() ? this.channelId() : undefined),
+    stream: ({ params }) => this.api.list({ channelId: params, limit: 1 }),
   });
   /** The channel's latest job; null when it was never imported, undefined while loading. */
   protected readonly job = computed<ImportJobDto | null | undefined>(() =>

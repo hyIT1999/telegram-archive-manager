@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,17 +7,25 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import {
   DRIVE_FOLDER_MIME_TYPE,
   GoogleAccessTokens,
+  GoogleApiError,
   GoogleAuthRevokedError,
   GoogleDriveApi,
   GoogleDriveStorageDriver,
   GoogleOAuthClient,
   StorageIntegrityError,
   StorageNotFoundError,
+  classifyStorageFailure,
   ensureTopFolder,
 } from '../src/index.js';
 import { FakeGoogle } from '../src/testing/index.js';
 
 const TOP = 'Unofficial Telegram Archive';
+
+/** A PUT that carries bytes of a resumable upload (not a "how much do you have" query). */
+function isDataChunk(input: string | URL | Request, init?: RequestInit): boolean {
+  const range = (init?.headers as Record<string, string> | undefined)?.['content-range'] ?? '';
+  return String(input).includes('upload_id=') && init?.method === 'PUT' && /^bytes \d+-/.test(range);
+}
 const KEY = 'Physics (-100123)/2026-09/7 - notes.pdf';
 
 describe('GoogleDriveStorageDriver', () => {
@@ -81,7 +89,7 @@ describe('GoogleDriveStorageDriver', () => {
 
     const stored = google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf');
     expect(stored?.content.toString()).toBe('lecture notes');
-    expect(await driver.stat(KEY)).toEqual({ key: KEY, size: 13, contentType: 'application/pdf' });
+    expect(await driver.stat(KEY)).toMatchObject({ key: KEY, size: 13, contentType: 'application/pdf' });
     expect(await text(await driver.openReadStream(KEY))).toBe('lecture notes');
     expect(await text(await driver.openReadStream(KEY, { start: 8, end: 12 }))).toBe('notes');
     expect(driver.localPath()).toBeNull();
@@ -189,5 +197,109 @@ describe('GoogleDriveStorageDriver', () => {
           )
         : fetch(input, init);
     await expect(driver.putFile(KEY, await source('x'))).rejects.toThrow('Google Drive is full.');
+  });
+
+  it('refreshes the access token when Google rejects a chunk', async () => {
+    const content = randomBytes(700 * 1024);
+    let rejected = 0;
+    fetchFn = async (input, init) => {
+      if (rejected === 0 && isDataChunk(input, init)) {
+        rejected += 1;
+        google.expireAccessTokens();
+        return new Response(null, { status: 401 });
+      }
+      return fetch(input, init);
+    };
+    await driver.putFile(KEY, await source(content));
+    expect(rejected).toBe(1);
+    expect(google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content)).toBe(true);
+  });
+
+  it('waits as long as Google asks when chunks are rate limited, and keeps the reason', async () => {
+    const waits: number[] = [];
+    const oauth = new GoogleOAuthClient(
+      { clientId: google.clientId, clientSecret: google.clientSecret },
+      google.endpoints,
+    );
+    const api = new GoogleDriveApi(new GoogleAccessTokens(oauth, google.issueRefreshToken()), {
+      endpoints: google.endpoints,
+      fetch: (input, init) => fetchFn(input, init),
+      sleep: (milliseconds) => {
+        waits.push(milliseconds);
+        return Promise.resolve();
+      },
+      chunkBytes: 256 * 1024,
+      multipartMaxBytes: 300 * 1024,
+      maxAttempts: 3,
+    });
+    const limitedDriver = new GoogleDriveStorageDriver(api, rootId);
+    let limited = 2;
+    fetchFn = async (input, init) => {
+      if (limited > 0 && isDataChunk(input, init)) {
+        limited -= 1;
+        return Response.json(
+          { error: { code: 403, message: 'User rate limit exceeded.', errors: [{ reason: 'userRateLimitExceeded' }] } },
+          { status: 403, headers: { 'retry-after': '7' } },
+        );
+      }
+      return fetch(input, init);
+    };
+    const content = randomBytes(600 * 1024);
+    await limitedDriver.putFile(KEY, await source(content));
+    expect(waits).toEqual([7_000, 7_000]);
+    expect(google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content)).toBe(true);
+
+    limited = Number.POSITIVE_INFINITY;
+    const failure = await limitedDriver.putFile(KEY, await source(content)).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(GoogleApiError);
+    expect(failure).toMatchObject({ status: 403, reason: 'userRateLimitExceeded' });
+    expect(classifyStorageFailure(failure)).toBe('rate-limited');
+  });
+
+  it('reports a grant revoked in the middle of an upload', async () => {
+    let revoked = false;
+    fetchFn = async (input, init) => {
+      if (!revoked && isDataChunk(input, init)) {
+        revoked = true;
+        google.revokeAll();
+      }
+      return fetch(input, init);
+    };
+    await expect(driver.putFile(KEY, await source(randomBytes(700 * 1024)))).rejects.toBeInstanceOf(
+      GoogleAuthRevokedError,
+    );
+  });
+
+  it('reports upload progress and stops when asked', async () => {
+    const content = randomBytes(1024 * 1024);
+    const progress: number[] = [];
+    await driver.putFile(KEY, await source(content), { onProgress: (bytes) => progress.push(bytes) });
+    expect(progress.length).toBeGreaterThan(2);
+    expect(progress.at(-1)).toBe(content.length);
+    expect(progress).toEqual([...progress].sort((a, b) => a - b));
+
+    const other = 'Physics (-100123)/2026-09/8 - more.pdf';
+    const controller = new AbortController();
+    await expect(
+      driver.putFile(other, await source(content), {
+        signal: controller.signal,
+        onProgress: (bytes) => {
+          if (bytes > 0) {
+            controller.abort();
+          }
+        },
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await driver.stat(other)).toBeNull();
+  });
+
+  it('tells the checksum Google computed and stages nothing itself', async () => {
+    const content = Buffer.from('checked bytes');
+    await driver.putFile(KEY, await source(content));
+    expect(await driver.stat(KEY)).toMatchObject({
+      size: content.length,
+      sha256: createHash('sha256').update(content).digest('hex'),
+    });
+    expect(driver.stagingDir()).toBeNull();
   });
 });

@@ -15,6 +15,7 @@ import {
   photoMessage,
   textMessage,
 } from './support/fake-chats.js';
+import { saveDownloadSettings } from './support/media-fixtures.js';
 import {
   createFakeTelegramApi,
   randomSecretBox,
@@ -159,6 +160,30 @@ describe('ImportRunner', () => {
     expect(api.getNewerMessages).not.toHaveBeenCalled();
   });
 
+  it('records files outside the automatic download settings as skipped, downloadable on request', async () => {
+    const { chats, runner } = await setup();
+    chats.addChat(chatInfo(CHAT_ID), [
+      photoMessage(CHAT_ID, 1, 500),
+      photoMessage(CHAT_ID, 2, 5_000_000),
+    ]);
+    await saveDownloadSettings(prisma, { maxFileSizeMb: 1 });
+    const channel = await addChannel();
+    const data = await newJob(channel);
+
+    await expect(runner.run(data)).resolves.toBe('completed');
+
+    const media = await prisma.media.findMany({
+      include: { message: true, downloadJob: true },
+      orderBy: { size: 'asc' },
+    });
+    expect(media.map((item) => [item.message.telegramMessageId, item.downloadStatus])).toEqual([
+      [1, 'PENDING'],
+      [2, 'SKIPPED'],
+    ]);
+    expect(media[0]!.downloadJob).toMatchObject({ status: 'PENDING', reason: null });
+    expect(media[1]!.downloadJob).toMatchObject({ status: 'SKIPPED', reason: 'POLICY' });
+    expect(await jobOf(data)).toMatchObject({ totalMedia: 2, skippedFiles: 1 });
+  });
   it('resumes after a crash exactly where the stored pages end, storing nothing twice', async () => {
     const { runner, chats, api } = await setup();
     chats.addChat(chatInfo(CHAT_ID), history(CHAT_ID, 250));

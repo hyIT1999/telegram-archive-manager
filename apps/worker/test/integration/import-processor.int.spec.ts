@@ -23,6 +23,7 @@ import {
 } from 'vitest';
 import { ImportReconciler } from '../../src/imports/import-reconciler.js';
 import { IMPORT_SETTINGS, type ImportSettings } from '../../src/imports/import-settings.js';
+import { MEDIA_SETTINGS } from '../../src/media/media-settings.js';
 import { WAITING_DETAILS } from '../../src/imports/import.processor.js';
 import { ShutdownCoordinator } from '../../src/shutdown/index.js';
 import { ACCOUNT_KEY } from '../../src/telegram/telegram-auth.service.js';
@@ -32,6 +33,7 @@ import {
 } from '../../src/telegram/telegram.tokens.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { FakeChats, chatInfo, history } from './support/fake-chats.js';
+import { IDLE_MEDIA_SETTINGS } from './support/media-fixtures.js';
 import {
   createFakeTelegramApi,
   resetTelegramTables,
@@ -83,6 +85,9 @@ describe('import jobs through the queue', () => {
       .useValue(fake.provider)
       .overrideProvider(IMPORT_SETTINGS)
       .useValue(settings)
+      // Imported media stay PENDING here: downloads have tests of their own.
+      .overrideProvider(MEDIA_SETTINGS)
+      .useValue(IDLE_MEDIA_SETTINGS)
       .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
       .compile();
     await moduleRef.init();
@@ -116,7 +121,10 @@ describe('import jobs through the queue', () => {
   it('runs the import processor, which receives an AbortSignal', async () => {
     const context = await boot(createFakeTelegramApi());
     const workers = context.get(ShutdownCoordinator).workers();
-    expect(workers.map((worker) => worker.name)).toEqual([QUEUES.telegramImport]);
+    expect(workers.map((worker) => worker.name)).toEqual([
+      QUEUES.telegramImport,
+      QUEUES.mediaDownload,
+    ]);
     expect(Reflect.get(workers[0]!, 'processorAcceptsSignal')).toBe(true);
     expect(workers[0]!.opts).toMatchObject({ concurrency: 1, maxStalledCount: 10 });
   });

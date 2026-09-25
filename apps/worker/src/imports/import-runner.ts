@@ -420,8 +420,9 @@ export class ImportRunner {
   }
 
   /**
-   * History phase done. Media files are recorded with a download job each; downloading them is
-   * a later phase, so the job completes here. The total becomes exact.
+   * History phase done, and the total becomes exact. Media files are recorded with a download job
+   * each; they download on their own schedule (MediaModule), so the job completes here and the
+   * channel can be imported or synced again while files are still downloading.
    */
   private async complete(run: Run): Promise<void> {
     const now = new Date();

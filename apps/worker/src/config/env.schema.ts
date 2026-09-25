@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { z } from 'zod';
 
 /** Accepted LOG_LEVEL values (see .env.example). */
@@ -6,6 +7,8 @@ export type LogLevelName = (typeof LOG_LEVELS)[number];
 
 /** Byte length of TELEGRAM_SESSION_KEY once base64-decoded (an AES-256 key). */
 export const TELEGRAM_SESSION_KEY_BYTES = 32;
+/** Byte length of STORAGE_SECRET_KEY once base64-decoded (an AES-256 key). */
+export const STORAGE_SECRET_KEY_BYTES = 32;
 
 const INT32_MAX = 2_147_483_647;
 
@@ -27,6 +30,11 @@ const redisUrl = z
     (value) => /^(\/\d*)?$/.test(parseConnectionUrl(value, ['redis:', 'rediss:'])?.pathname ?? 'x'),
     'must be a redis://[:password@]host:port[/db] URL',
   );
+
+const absolutePath = z
+  .string()
+  .trim()
+  .refine((value) => path.isAbsolute(value), 'must be an absolute path');
 
 function wholeNumber(min: number, max: number) {
   return z
@@ -59,8 +67,33 @@ export const workerEnvSchema = z
     /** Pause between two pages of history (100 messages), to stay clear of Telegram's limits. */
     IMPORT_PAGE_DELAY_MS: wholeNumber(0, 60_000).default(1_000),
 
-    STORAGE_LOCAL_ROOT: z.string().default('./data/storage'),
+    /** Folder of the built-in "This computer" location; the default home of the two below. */
+    STORAGE_LOCAL_ROOT: absolutePath.optional(),
+    /** Downloads to folders on this server stop before their disk has less free space. */
     MIN_FREE_DISK_MB: wholeNumber(0, 10_000_000).default(2_048),
+    /** Where files wait before going to Google Drive (default: <STORAGE_LOCAL_ROOT>/.tam-tmp). */
+    DOWNLOAD_STAGING_DIR: absolutePath.optional(),
+    /** Small previews from Telegram (default: <STORAGE_LOCAL_ROOT>/.tam-thumbnails). */
+    THUMBNAIL_DIR: absolutePath.optional(),
+    /** Opens the Google Drive credentials the api stored (the same key as the api's). */
+    STORAGE_SECRET_KEY: z
+      .string()
+      .trim()
+      .refine(
+        (value) => isBase64Key(value, STORAGE_SECRET_KEY_BYTES),
+        `must be ${STORAGE_SECRET_KEY_BYTES} random bytes encoded as base64 (see .env.example)`,
+      )
+      .optional(),
+    /** The Google OAuth client, to refresh access to Google Drive locations. */
+    GOOGLE_OAUTH_CLIENT_ID: z
+      .string()
+      .trim()
+      .regex(
+        /^[\w.-]+\.apps\.googleusercontent\.com$/,
+        'must be the client ID of a Google OAuth client (…apps.googleusercontent.com)',
+      )
+      .optional(),
+    GOOGLE_OAUTH_CLIENT_SECRET: z.string().trim().min(8, 'is too short').optional(),
 
     TELEGRAM_API_ID: z
       .string()
@@ -84,7 +117,15 @@ export const workerEnvSchema = z
   .refine((env) => (env.TELEGRAM_API_ID === undefined) === (env.TELEGRAM_API_HASH === undefined), {
     path: ['TELEGRAM_API_ID'],
     message: 'TELEGRAM_API_ID and TELEGRAM_API_HASH must be set together',
-  });
+  })
+  .refine(
+    (env) =>
+      (env.GOOGLE_OAUTH_CLIENT_ID === undefined) === (env.GOOGLE_OAUTH_CLIENT_SECRET === undefined),
+    {
+      path: ['GOOGLE_OAUTH_CLIENT_ID'],
+      message: 'GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    },
+  );
 
 export type WorkerEnv = z.output<typeof workerEnvSchema>;
 

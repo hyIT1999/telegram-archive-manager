@@ -5,8 +5,6 @@
 export const QUEUES = {
   telegramImport: 'telegram-import',
   mediaDownload: 'media-download',
-  thumbnailGeneration: 'thumbnail-generation',
-  metadataProcessing: 'metadata-processing',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
@@ -29,24 +27,16 @@ export interface ImportJobData {
   runSeq: number;
 }
 
+/** One try of a download (download_jobs row); a newer run number makes older tries stale. */
 export interface MediaDownloadJobData {
-  mediaId: string;
-}
-
-export interface ThumbnailJobData {
-  mediaId: string;
-}
-
-export interface MetadataJobData {
-  mediaId: string;
+  downloadJobId: string;
+  runSeq: number;
 }
 
 /** Deterministic BullMQ job ids (no ':' and never all digits, per BullMQ rules). */
 export const jobIds = {
   importRun: (importJobId: string, runSeq: number) => `ij-${importJobId}-${runSeq}`,
-  mediaDownload: (mediaId: string) => `media-${mediaId}`,
-  thumbnail: (mediaId: string) => `thumb-${mediaId}`,
-  metadata: (mediaId: string) => `meta-${mediaId}`,
+  mediaDownload: (downloadJobId: string, runSeq: number) => `dl-${downloadJobId}-${runSeq}`,
 } as const;
 
 /** BullMQ job name of an import run (queue QUEUES.telegramImport). */
@@ -68,5 +58,22 @@ export function importRunJobOptions(importJobId: string, runSeq: number) {
     removeOnComplete: true,
     // Kept a week, so the reconciler (and people) can see why a run failed.
     removeOnFail: { age: 7 * 24 * 60 * 60 },
+  } as const;
+}
+
+/** BullMQ job name of one download try (queue QUEUES.mediaDownload). */
+export const DOWNLOAD_JOB_NAME = 'download';
+
+/**
+ * BullMQ options of one download try. The worker's scheduler hands a few tries at a time to the
+ * queue; retries and their delays are kept in download_jobs, so BullMQ never retries by itself.
+ */
+export function downloadJobOptions(downloadJobId: string, runSeq: number) {
+  return {
+    jobId: jobIds.mediaDownload(downloadJobId, runSeq),
+    attempts: 1,
+    removeOnComplete: true,
+    // Kept a day, so the reconciler can tell a failed try from a lost one.
+    removeOnFail: { age: 24 * 60 * 60 },
   } as const;
 }

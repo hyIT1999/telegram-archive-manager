@@ -130,6 +130,10 @@
       <app-channel-import-panel [channel]="item" />
     </section>
 
+    <section class="surface-card panel" aria-labelledby="channel-downloads-title">
+      <app-channel-downloads-panel [channel]="item" (channelChange)="updated($event)" />
+    </section>
+
     <section class="surface-card panel" aria-label="Messages">
       <app-empty-state
         icon="chat"

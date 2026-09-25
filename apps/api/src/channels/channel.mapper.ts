@@ -34,6 +34,8 @@ export function toChannelDto(channel: ChannelWithStorage, stats: ChannelStatsDto
       ? { id: location.id, kind: location.kind, name: location.name, displayPath: location.displayPath }
       : null,
     storageFolder: channel.storageFolder,
+    downloadMedia: channel.downloadMedia,
+    downloadNote: channel.downloadNote,
     createdAt: channel.createdAt.toISOString(),
     updatedAt: channel.updatedAt.toISOString(),
     stats: { ...stats },

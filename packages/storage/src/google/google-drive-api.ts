@@ -39,6 +39,14 @@ export interface UploadSource {
   contentType: string;
 }
 
+/** Controls of a long upload. */
+export interface UploadOptions {
+  /** Stops the upload (the request in flight is aborted; Drive keeps what it had). */
+  signal?: AbortSignal;
+  /** Bytes Google has stored so far. */
+  onProgress?: (uploadedBytes: number) => void;
+}
+
 export interface GoogleDriveApiOptions {
   endpoints?: GoogleEndpoints;
   fetch?: typeof fetch;
@@ -64,6 +72,27 @@ const wait = (milliseconds: number) =>
 /** Exponential backoff with jitter: ~1 s, 2 s, 4 s, … capped at 32 s. */
 function backoff(attempt: number): number {
   return Math.min(32_000, 1_000 * 2 ** (attempt - 1)) + Math.floor(Math.random() * 500);
+}
+
+/** The wait Google asks for (Retry-After, in seconds), if any. */
+function retryAfterMs(response: Response): number | null {
+  const seconds = Number(response.headers.get('retry-after'));
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+}
+
+/** A request's signal: its timeout (if any), cut short by the caller's signal (if any). */
+function requestSignal(timeoutMs: number | null, signal: AbortSignal | undefined): AbortSignal | null {
+  const signals: AbortSignal[] = [];
+  if (timeoutMs !== null) {
+    signals.push(AbortSignal.timeout(timeoutMs));
+  }
+  if (signal) {
+    signals.push(signal);
+  }
+  if (signals.length === 0) {
+    return null;
+  }
+  return signals.length === 1 ? (signals[0] as AbortSignal) : AbortSignal.any(signals);
 }
 
 /** Drive query strings quote with ' and escape \ and '. */
@@ -195,18 +224,22 @@ export class GoogleDriveApi {
   }
 
   /** Uploads a local file: in one request when small, resumable in chunks otherwise. */
-  async upload(target: UploadTarget, source: UploadSource): Promise<DriveFile> {
+  async upload(target: UploadTarget, source: UploadSource, options: UploadOptions = {}): Promise<DriveFile> {
     if (source.size <= this.multipartMaxBytes) {
       const handle = await open(source.path, 'r');
+      let data: Buffer;
       try {
-        return await this.uploadBytes(target, await handle.readFile(), source.contentType);
+        data = await handle.readFile();
       } finally {
         await handle.close();
       }
+      const file = await this.uploadBytes(target, data, source.contentType, options.signal);
+      options.onProgress?.(source.size);
+      return file;
     }
     for (let session = 1; session <= 3; session += 1) {
-      const sessionUri = await this.startSession(target, source);
-      const file = await this.sendChunks(sessionUri, source);
+      const sessionUri = await this.startSession(target, source, options.signal);
+      const file = await this.sendChunks(sessionUri, source, options);
       if (file) {
         return file;
       }
@@ -216,7 +249,12 @@ export class GoogleDriveApi {
   }
 
   /** Small content (≤ 5 MB) with its metadata in one multipart/related request. */
-  uploadBytes(target: UploadTarget, data: Uint8Array, contentType: string): Promise<DriveFile> {
+  uploadBytes(
+    target: UploadTarget,
+    data: Uint8Array,
+    contentType: string,
+    signal?: AbortSignal,
+  ): Promise<DriveFile> {
     const boundary = `tam-${randomUUID()}`;
     const metadata = 'fileId' in target ? {} : { name: target.name, parents: [target.parentId] };
     const body = Buffer.concat([
@@ -235,6 +273,7 @@ export class GoogleDriveApi {
         body,
       },
       TRANSFER_TIMEOUT_MS,
+      signal,
     );
   }
 
@@ -246,16 +285,25 @@ export class GoogleDriveApi {
     return this.url(path, { uploadType, fields: FILE_FIELDS });
   }
 
-  private async startSession(target: UploadTarget, source: UploadSource): Promise<string> {
-    const response = await this.send(this.uploadUrl(target, 'resumable'), {
-      method: 'fileId' in target ? 'PATCH' : 'POST',
-      headers: {
-        'content-type': 'application/json; charset=UTF-8',
-        'x-upload-content-type': source.contentType,
-        'x-upload-content-length': String(source.size),
+  private async startSession(
+    target: UploadTarget,
+    source: UploadSource,
+    signal: AbortSignal | undefined,
+  ): Promise<string> {
+    const response = await this.send(
+      this.uploadUrl(target, 'resumable'),
+      {
+        method: 'fileId' in target ? 'PATCH' : 'POST',
+        headers: {
+          'content-type': 'application/json; charset=UTF-8',
+          'x-upload-content-type': source.contentType,
+          'x-upload-content-length': String(source.size),
+        },
+        body: JSON.stringify('fileId' in target ? {} : { name: target.name, parents: [target.parentId] }),
       },
-      body: JSON.stringify('fileId' in target ? {} : { name: target.name, parents: [target.parentId] }),
-    });
+      METADATA_TIMEOUT_MS,
+      signal,
+    );
     if (!response.ok) {
       throw await this.toError(response);
     }
@@ -267,17 +315,30 @@ export class GoogleDriveApi {
     return sessionUri;
   }
 
-  /** Sends the file from the first byte Google does not have yet; null when the session expired. */
-  private async sendChunks(sessionUri: string, source: UploadSource): Promise<DriveFile | null> {
+  /**
+   * Sends the file from the first byte Google does not have yet; null when the session expired.
+   * Network errors, 5xx, 429 and rate-limit 403s wait (as long as Retry-After asks, if it does),
+   * then ask Google what it kept; a rejected access token is refreshed once in a row. After the
+   * last try the error keeps Google's status and reason, so callers can tell a rate limit apart.
+   */
+  private async sendChunks(
+    sessionUri: string,
+    source: UploadSource,
+    options: UploadOptions,
+  ): Promise<DriveFile | null> {
+    const { signal, onProgress } = options;
     const handle = await open(source.path, 'r');
     try {
       let offset = 0;
       let failures = 0;
       let askStatus = false;
+      let refreshedToken = false;
       for (;;) {
+        signal?.throwIfAborted();
         if (askStatus) {
-          const status = await this.sessionStatus(sessionUri, source.size);
+          const status = await this.sessionStatus(sessionUri, source.size, signal);
           if (status.kind === 'complete') {
+            onProgress?.(source.size);
             return status.file;
           }
           if (status.kind === 'expired') {
@@ -291,7 +352,7 @@ export class GoogleDriveApi {
             if (failures >= this.maxAttempts) {
               throw new GoogleApiError('The upload to Google Drive keeps failing', null, null);
             }
-            await this.sleep(backoff(failures));
+            await this.pause(backoff(failures), signal);
             continue;
           }
         }
@@ -305,37 +366,53 @@ export class GoogleDriveApi {
           }
           read += bytesRead;
         }
-        let response: Response | null = null;
+        // Outside the try below: a revoked grant must reach the caller as GoogleAuthRevokedError.
+        const token = await this.tokens.get();
+        const chunkSignal = requestSignal(TRANSFER_TIMEOUT_MS, signal);
+        let response: Response | null;
         try {
           response = await this.fetchFn(sessionUri, {
             method: 'PUT',
             headers: {
-              authorization: `Bearer ${await this.tokens.get()}`,
+              authorization: `Bearer ${token}`,
               'content-range': `bytes ${offset}-${offset + length - 1}/${source.size}`,
             },
             body: chunk,
-            signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS),
+            ...(chunkSignal ? { signal: chunkSignal } : {}),
           });
         } catch {
+          signal?.throwIfAborted();
           response = null;
         }
-        if (response === null || response.status >= 500 || response.status === 429) {
-          await response?.body?.cancel();
+        if (response?.status === 401 && !refreshedToken) {
+          refreshedToken = true;
+          await response.body?.cancel();
+          this.tokens.invalidate();
+          continue;
+        }
+        if (response === null || (await this.isRetryable(response))) {
           failures += 1;
           if (failures >= this.maxAttempts) {
-            throw new GoogleApiError('The upload to Google Drive keeps failing', response?.status ?? null, null);
+            throw response === null
+              ? new GoogleApiError('The upload to Google Drive keeps failing', null, null)
+              : await this.toError(response);
           }
-          await this.sleep(backoff(failures));
+          const delay = (response === null ? null : retryAfterMs(response)) ?? backoff(failures);
+          await response?.body?.cancel();
+          await this.pause(delay, signal);
           askStatus = true;
           continue;
         }
         if (response.status === 200 || response.status === 201) {
+          onProgress?.(source.size);
           return this.parse<DriveFile>(response);
         }
         if (response.status === 308) {
           await response.body?.cancel();
           offset = receivedBytes(response.headers.get('range'));
           failures = 0;
+          refreshedToken = false;
+          onProgress?.(offset);
           continue;
         }
         if (response.status === 404 || response.status === 410) {
@@ -349,18 +426,25 @@ export class GoogleDriveApi {
     }
   }
 
-  private async sessionStatus(sessionUri: string, size: number): Promise<SessionStatus> {
+  private async sessionStatus(
+    sessionUri: string,
+    size: number,
+    signal: AbortSignal | undefined,
+  ): Promise<SessionStatus> {
+    const token = await this.tokens.get();
+    const statusSignal = requestSignal(METADATA_TIMEOUT_MS, signal);
     let response: Response;
     try {
       response = await this.fetchFn(sessionUri, {
         method: 'PUT',
         headers: {
-          authorization: `Bearer ${await this.tokens.get()}`,
+          authorization: `Bearer ${token}`,
           'content-range': `bytes */${size}`,
         },
-        signal: AbortSignal.timeout(METADATA_TIMEOUT_MS),
+        ...(statusSignal ? { signal: statusSignal } : {}),
       });
     } catch {
+      signal?.throwIfAborted();
       return { kind: 'unknown' };
     }
     if (response.status === 200 || response.status === 201) {
@@ -373,6 +457,9 @@ export class GoogleDriveApi {
     if (response.status === 404 || response.status === 410) {
       return { kind: 'expired' };
     }
+    if (response.status === 401) {
+      this.tokens.invalidate();
+    }
     return { kind: 'unknown' };
   }
 
@@ -384,8 +471,13 @@ export class GoogleDriveApi {
     return url.toString();
   }
 
-  private async json<T>(url: string, init: RequestInit, timeoutMs = METADATA_TIMEOUT_MS): Promise<T> {
-    return this.parse<T>(await this.send(url, init, timeoutMs));
+  private async json<T>(
+    url: string,
+    init: RequestInit,
+    timeoutMs = METADATA_TIMEOUT_MS,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    return this.parse<T>(await this.send(url, init, timeoutMs, signal));
   }
 
   private async parse<T>(response: Response): Promise<T> {
@@ -397,30 +489,34 @@ export class GoogleDriveApi {
 
   /**
    * One request with the access token; retries network errors, 429, 5xx and rate-limit 403s.
-   * `timeoutMs` bounds the whole exchange, body included; null leaves it unbounded.
+   * `timeoutMs` bounds the whole exchange, body included; null leaves it unbounded. `signal`
+   * aborts the request and any wait between tries.
    */
   private async send(
     url: string,
     init: RequestInit,
     timeoutMs: number | null = METADATA_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<Response> {
     let refreshedToken = false;
     for (let attempt = 1; ; attempt += 1) {
       const token = await this.tokens.get();
+      const attemptSignal = requestSignal(timeoutMs, signal);
       let response: Response;
       try {
         response = await this.fetchFn(url, {
           ...init,
           headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${token}` },
-          ...(timeoutMs === null ? {} : { signal: AbortSignal.timeout(timeoutMs) }),
+          ...(attemptSignal ? { signal: attemptSignal } : {}),
         });
       } catch (error) {
+        signal?.throwIfAborted();
         if (attempt >= this.maxAttempts) {
           throw new GoogleApiError('Cannot reach Google Drive. Check the internet connection of the server.', null, null, {
             cause: error,
           });
         }
-        await this.sleep(backoff(attempt));
+        await this.pause(backoff(attempt), signal);
         continue;
       }
       if (response.status === 401 && !refreshedToken) {
@@ -431,11 +527,28 @@ export class GoogleDriveApi {
       }
       if (attempt < this.maxAttempts && (await this.isRetryable(response))) {
         await response.body?.cancel();
-        const retryAfter = Number(response.headers.get('retry-after'));
-        await this.sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : backoff(attempt));
+        await this.pause(retryAfterMs(response) ?? backoff(attempt), signal);
         continue;
       }
       return response;
+    }
+  }
+
+  /** Waits between tries; an abort ends the wait at once. */
+  private async pause(milliseconds: number, signal: AbortSignal | undefined): Promise<void> {
+    if (!signal) {
+      return this.sleep(milliseconds);
+    }
+    signal.throwIfAborted();
+    let onAbort = (): void => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal.reason instanceof Error ? signal.reason : new Error('Aborted'));
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([this.sleep(milliseconds), aborted]);
+    } finally {
+      signal.removeEventListener('abort', onAbort);
     }
   }
 

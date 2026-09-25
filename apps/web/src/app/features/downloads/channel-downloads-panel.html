@@ -1,0 +1,175 @@
+<h2 id="channel-downloads-title" class="panel-title">Media downloads</h2>
+
+@if (channel().isProtected) {
+  <p class="hint">Content protection is on for this chat, so its files are not downloaded.</p>
+} @else if (loadError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+  <div class="actions">
+    <button matButton="tonal" type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Try again
+    </button>
+  </div>
+} @else if (data(); as item) {
+  <div class="switch">
+    <mat-slide-toggle
+      [checked]="item.downloadMedia"
+      [disabled]="switching()"
+      (change)="toggle($event)"
+    >
+      Download media automatically
+    </mat-slide-toggle>
+    <p class="hint">
+      @if (item.downloadMedia) {
+        Files download on their own, smallest first, within the limits under
+        <a routerLink="/settings">Settings</a>.
+      } @else {
+        Nothing downloads on its own. Files you ask for one by one still do.
+      }
+    </p>
+  </div>
+
+  @if (item.downloadNote; as note) {
+    <app-notice tone="warning" title="Downloads stopped">{{ note }}</app-notice>
+  }
+  @if (item.paused) {
+    <app-notice tone="info" icon="pause_circle">
+      Every download is paused. <a routerLink="/settings">Resume downloads in Settings</a>.
+    </app-notice>
+  }
+
+  @if (item.location; as location) {
+    <p class="location">
+      <mat-icon aria-hidden="true">{{
+        location.kind === 'GOOGLE_DRIVE' ? 'add_to_drive' : 'folder'
+      }}</mat-icon>
+      <span>
+        Saved to <strong>{{ location.name }}</strong> ({{ location.displayPath }})
+        @if (location.freeBytes !== null) {
+          · {{ location.freeBytes | bytes }} free
+        }
+      </span>
+    </p>
+    @if (location.unavailableUntil) {
+      <app-notice tone="warning" title="This location waits">
+        Downloads to it continue at {{ location.unavailableUntil | date: 'shortTime' }}.
+        {{ location.lastError }}
+      </app-notice>
+    }
+    @if (item.fits === false) {
+      <app-notice tone="warning" title="Not enough room">
+        This location has {{ location.freeBytes | bytes }} free; the remaining files need
+        {{ item.bytes.remaining | bytes }}. Choose a bigger location for this channel, or make room.
+      </app-notice>
+    }
+  } @else {
+    <app-notice tone="warning">
+      No storage location: choose one under <a routerLink="/settings">Settings</a>.
+    </app-notice>
+  }
+
+  @if (wanted(); as wanted) {
+    @if (wanted.files > 0) {
+      <div class="progress">
+        <mat-progress-bar
+          mode="determinate"
+          [value]="wanted.percent"
+          [attr.aria-label]="'Media downloads of ' + channel().title"
+        />
+        <p class="hint">
+          {{ item.files.downloaded }} of {{ wanted.files }} files ·
+          {{ item.bytes.downloaded | bytes }} of {{ wanted.bytes | bytes }}
+          @if (timeLeft(); as left) {
+            · about {{ left }} left at the current speed
+          }
+        </p>
+      </div>
+    } @else {
+      <p class="hint">No media files to download.</p>
+    }
+  }
+
+  <dl class="counts">
+    <div>
+      <dt>Waiting</dt>
+      <dd>{{ item.files.pending }}</dd>
+    </div>
+    <div>
+      <dt>Downloading</dt>
+      <dd>{{ item.files.active }}</dd>
+    </div>
+    <div>
+      <dt>Failed</dt>
+      <dd>{{ item.files.failed }}</dd>
+    </div>
+    <div>
+      <dt>Skipped</dt>
+      <dd>{{ item.files.skipped }}</dd>
+    </div>
+  </dl>
+
+  @if (active().length > 0) {
+    <ul class="active" aria-label="Downloading now">
+      @for (row of active(); track row.item.mediaId) {
+        <li>
+          <div class="active-head">
+            <span class="name">{{ row.item.name }}</span>
+            <button
+              matButton
+              type="button"
+              [disabled]="cancelling() !== null"
+              [showProgress]="cancelling() === row.item.mediaId"
+              (click)="cancel(row.item.mediaId)"
+            >
+              Cancel
+              <mat-progress-spinner progressIndicator mode="indeterminate" diameter="16" />
+            </button>
+          </div>
+          <mat-progress-bar
+            [mode]="row.item.stage ? 'determinate' : 'query'"
+            [value]="row.item.progress"
+            [attr.aria-label]="row.item.name"
+          />
+          <p class="hint">
+            {{ row.stageLabel }}
+            @if (row.item.stage && row.item.size !== null) {
+              · {{ row.item.downloadedBytes | bytes }} of {{ row.item.size | bytes }}
+            }
+            @if (speedText(row); as speed) {
+              · {{ speed }}
+            }
+            @if (row.item.requested) {
+              · asked for
+            }
+          </p>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (retried(); as queued) {
+    <app-notice tone="success"
+      >{{ queued }} failed {{ queued === 1 ? 'file is' : 'files are' }} back in line.</app-notice
+    >
+  }
+  @if (actionError(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+  @if (item.files.failed > 0) {
+    <div class="actions">
+      <button
+        matButton="tonal"
+        type="button"
+        [disabled]="retrying()"
+        [showProgress]="retrying()"
+        (click)="retryFailed()"
+      >
+        <mat-icon>replay</mat-icon>
+        Retry {{ item.files.failed }} failed
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  }
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading downloads…" />
+}

@@ -62,6 +62,28 @@ export const DownloadJobStatus = {
 } as const;
 export type DownloadJobStatus = (typeof DownloadJobStatus)[keyof typeof DownloadJobStatus];
 
+/** Why a file is not downloaded (download_jobs.reason, with status SKIPPED). */
+export const DownloadSkipReason = {
+  /** Outside the automatic download settings (type or size); downloads when requested. */
+  POLICY: 'POLICY',
+  /** The message was deleted on Telegram, or its file was replaced. */
+  NOT_AVAILABLE: 'NOT_AVAILABLE',
+  /** Content protection was turned on for the chat. */
+  PROTECTED: 'PROTECTED',
+} as const;
+export type DownloadSkipReason = (typeof DownloadSkipReason)[keyof typeof DownloadSkipReason];
+
+/** What a running download does right now (download_jobs.stage). */
+export const DownloadStage = {
+  /** Reading the file from Telegram. */
+  FETCHING: 'FETCHING',
+  /** Checking its size and SHA-256. */
+  VERIFYING: 'VERIFYING',
+  /** Writing it to the storage location (an upload for Google Drive). */
+  STORING: 'STORING',
+} as const;
+export type DownloadStage = (typeof DownloadStage)[keyof typeof DownloadStage];
+
 export const JobStatus = {
   PENDING: 'PENDING',
   RUNNING: 'RUNNING',

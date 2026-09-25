@@ -31,6 +31,14 @@ import type {
 import { isInsideFolder } from './local-folder-policy.js';
 
 const PROBE_FOLDER = '.tam-probe';
+/** Unfinished downloads of this location (hidden in the folder browser, like every dot folder). */
+export const STAGING_FOLDER = '.tam-tmp';
+
+/** Windows briefly locks files that were just written (antivirus, indexing): try again soon. */
+const RENAME_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+const RENAME_RETRY_DELAYS_MS = [50, 150, 400, 1_000];
+
+const pause = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
@@ -74,12 +82,17 @@ export class LocalStorageDriver implements StorageDriver {
     return target;
   }
 
+  stagingDir(): string {
+    return path.join(this.root, STAGING_FOLDER);
+  }
+
   async putFile(key: string, sourcePath: string, options: PutOptions = {}): Promise<StoredObjectInfo> {
     const target = this.localPath(key);
+    options.signal?.throwIfAborted();
     try {
       await mkdir(path.dirname(target), { recursive: true });
       try {
-        await rename(sourcePath, target);
+        await renameWithRetry(sourcePath, target);
       } catch (error) {
         if (errorCode(error) !== 'EXDEV') {
           throw error;
@@ -178,6 +191,21 @@ export class LocalStorageDriver implements StorageDriver {
       };
     } catch (error) {
       throw accessError(this.root, error);
+    }
+  }
+}
+
+async function renameWithRetry(source: string, target: string): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await rename(source, target);
+      return;
+    } catch (error) {
+      const delay = RENAME_RETRY_DELAYS_MS[attempt];
+      if (delay === undefined || !RENAME_RETRY_CODES.has(errorCode(error) ?? '')) {
+        throw error;
+      }
+      await pause(delay);
     }
   }
 }

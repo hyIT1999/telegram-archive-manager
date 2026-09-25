@@ -18,7 +18,7 @@ import type { Job, Worker } from 'bullmq';
  * ```ts
  * override async process(job: Job<MediaDownloadJobData>, token?: string, signal?: AbortSignal) {
  *   try {
- *     return await this.downloader.download(job.data.mediaId, { signal });
+ *     return await this.downloader.run(job.data, signal);
  *   } catch (error) {
  *     if (isShutdownAbort(signal)) await requeueForShutdown(job, token);
  *     throw error;

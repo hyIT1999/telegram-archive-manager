@@ -14,14 +14,14 @@ describe('jobIds', () => {
   it('builds BullMQ-safe ids (no colon, never all digits)', () => {
     const ids = [
       jobIds.importRun('0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f80', 3),
-      jobIds.mediaDownload('42'),
-      jobIds.thumbnail('42'),
-      jobIds.metadata('42'),
+      jobIds.mediaDownload('42', 0),
+      jobIds.mediaDownload('0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f80', 12),
     ];
     for (const id of ids) {
       expect(id).not.toContain(':');
       expect(/^\d+$/.test(id)).toBe(false);
     }
     expect(ids[0]).toBe('ij-0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f80-3');
+    expect(ids[2]).toBe('dl-0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f80-12');
   });
 });

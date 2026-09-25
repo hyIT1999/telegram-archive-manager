@@ -23,6 +23,7 @@ import {
   type GoogleDriveApi,
   type GoogleTokens,
   ensureTopFolder,
+  locationConfig,
   sanitizeName,
   staticAccessToken,
 } from '@tam/storage';
@@ -31,7 +32,7 @@ import { z } from 'zod';
 import { REDIS_CLIENT } from '../redis/redis.constants.js';
 import { StorageDrivers } from './storage-drivers.js';
 import { withStorageErrors } from './storage-errors.js';
-import { driveDisplayPath, locationConfig, toStorageLocationDto } from './storage-location.mapper.js';
+import { driveDisplayPath, toStorageLocationDto } from './storage-location.mapper.js';
 
 const FLOW_KEY_PREFIX = 'tam:storage:google-flow:';
 /** Only one poll of a flow at a time, so a device code is never redeemed twice. */
@@ -227,6 +228,8 @@ export class GoogleDriveConnectService {
         ...(changes.config === undefined ? {} : { config: changes.config }),
         lastError: null,
         lastCheckedAt: new Date(),
+        // Reconnected: downloads that waited for the account go on at once.
+        unavailableUntil: null,
       },
       include: { _count: { select: { channels: true } } },
     });

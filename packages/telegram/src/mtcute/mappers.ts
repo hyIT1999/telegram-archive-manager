@@ -64,7 +64,8 @@ function usernameOf(raw: tl.RawChannel): string | null {
  * File sizes are int64 in TL. mtcute reads them as numbers; a Long or bigint is normalized too, so
  * a change in the reader can never put an object into the database.
  */
-function sizeOf(value: unknown): number | null {
+/** File sizes arrive as numbers or as Long (int64) objects, depending on the TL type. */
+export function sizeOf(value: unknown): number | null {
   if (typeof value === 'number') return value;
   if (typeof value === 'bigint') return Number(value);
   if (value !== null && typeof value === 'object' && 'toNumber' in value) {

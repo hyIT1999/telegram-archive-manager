@@ -33,7 +33,7 @@ FROM manifests AS prod-deps
 RUN npm ci --omit=dev -w @tam/worker
 
 FROM ${NODE_IMAGE} AS runtime
-# Phase 4 adds `ffmpeg` here (video thumbnails and ffprobe metadata).
+# Thumbnails come from Telegram and metadata with the messages, so no ffmpeg is needed.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*

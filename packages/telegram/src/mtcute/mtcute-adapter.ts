@@ -1,42 +1,94 @@
-import { type Chat as MtChat, type SentCode, User as MtUser, tl } from '@mtcute/core';
+import { constants as fsConstants } from 'node:fs';
+import { open } from 'node:fs/promises';
+import {
+  type Chat as MtChat,
+  type Message as MtMessage,
+  type Photo as MtPhoto,
+  type RawDocument as MtRawDocument,
+  type SentCode,
+  Thumbnail,
+  User as MtUser,
+  tl,
+} from '@mtcute/core';
 import type { TelegramClient as MtTelegramClient } from '@mtcute/core/client.js';
 import { TelegramAuthState, TelegramErrorCode } from '@tam/shared';
 import {
   AuthRequiredError,
+  ChatProtectedError,
   ChatUnavailableError,
+  FileReferenceExpiredError,
   FloodWaitError,
   LoginStepError,
+  MediaUnavailableError,
   TelegramError,
 } from '../errors.js';
+import { type FileIdParts, decodeFileId } from '../file-id.js';
 import type { SendCodeResult, SignInResult, TelegramLoginApi } from '../login-api.js';
-import type { TelegramClient, TelegramHistoryReader } from '../telegram-client.js';
+import type { TelegramClient, TelegramHistoryReader, TelegramMediaReader } from '../telegram-client.js';
 import type {
   AuthState,
   Chat,
+  DownloadOptions,
+  DownloadedFile,
   HistoryPage,
   HistoryPageOptions,
   LegacyGroup,
   Message,
   TelegramUser,
+  ThumbnailOptions,
+  ThumbnailRequest,
 } from '../types.js';
 import { toTelegramError, translateErrors } from './error-mapping.js';
-import { mapChat, mapMessage, mapUser } from './mappers.js';
+import { mapChat, mapMessage, mapUser, sizeOf } from './mappers.js';
 
 /** messages.getHistory never returns more than this per call. */
 export const MAX_HISTORY_PAGE = 100;
 
 /**
+ * Resumed downloads restart at a multiple of 1 MiB: every part size mtcute uses divides it, and
+ * Telegram refuses parts that cross a 1 MiB boundary. At most 1 MiB is fetched twice.
+ */
+export const DOWNLOAD_RESUME_ALIGNMENT = 1024 * 1024;
+
+/** Without data for this long a download gives up (mtcute would otherwise wait forever). */
+export const DEFAULT_STALL_TIMEOUT_MS = 120_000;
+
+/** One thumbnail (at most 128 KB) that takes longer than this is given up on. */
+export const DEFAULT_THUMBNAIL_TIMEOUT_MS = 30_000;
+
+/** Fresh file references fetched for one download before giving up. */
+const MAX_REFERENCE_REFRESHES = 3;
+
+/** Written data is flushed to disk every so often, so a power cut loses little. */
+const SYNC_EVERY_BYTES = 32 * 1024 * 1024;
+
+type MtFile = MtPhoto | MtRawDocument;
+
+/** Message media that is a downloadable file of the kinds the archive stores. */
+const FILE_MEDIA_TYPES = new Set(['photo', 'video', 'document', 'audio', 'voice', 'sticker']);
+
+function fileOf(message: MtMessage): MtFile | null {
+  const media = message.media;
+  return media && FILE_MEDIA_TYPES.has(media.type) ? (media as MtFile) : null;
+}
+
+function alignDown(offset: number): number {
+  return Math.max(0, Math.floor(offset / DOWNLOAD_RESUME_ALIGNMENT) * DOWNLOAD_RESUME_ALIGNMENT);
+}
+
+/**
  * The real Telegram adapter, on top of mtcute. It is stateless: the pending-login state lives in
  * the worker's database, and mtcute's session storage holds the (encrypted) auth key.
  *
- * Downloads (Phase 4) and realtime updates (Phase 7) complete the TelegramClient interface later;
- * until then the adapter implements the parts the worker uses.
+ * Realtime updates (Phase 7) complete the TelegramClient interface later; until then the adapter
+ * implements the parts the worker uses.
  */
 export class MtcuteTelegramAdapter
   implements
     TelegramLoginApi,
     TelegramHistoryReader,
-    Pick<TelegramClient, 'authenticate' | 'getChats' | 'getChatHistory'>
+    TelegramMediaReader,
+    Pick<TelegramClient, 'authenticate' | 'getChats' | 'getChatHistory' | 'downloadFile'>
 {
   constructor(private readonly tg: MtTelegramClient) {}
 
@@ -200,6 +252,166 @@ export class MtcuteTelegramAdapter
     );
     return messages.flatMap((message) => (message ? [mapMessage(message, chatId)] : []));
   }
+
+  async downloadFile(fileId: string, options: DownloadOptions = {}): Promise<DownloadedFile> {
+    const { destPath, signal, onProgress } = options;
+    if (!destPath) {
+      throw new TelegramError('A download needs a target file', TelegramErrorCode.TELEGRAM_ERROR);
+    }
+    const parts = toFileIdParts(fileId);
+    signal?.throwIfAborted();
+    // Read/write without truncating: the part already downloaded is kept (not append mode, which
+    // ignores write positions on Linux).
+    const handle = await open(destPath, fsConstants.O_RDWR | fsConstants.O_CREAT);
+    try {
+      // Whatever lies past the resume point is fetched again (it may be a half-written part).
+      const { size: stored } = await handle.stat();
+      let position = alignDown(Math.min(options.offset ?? 0, stored));
+      await handle.truncate(position);
+      let synced = position;
+      for (let refreshes = 0; ; refreshes += 1) {
+        const file = await this.currentFile(parts);
+        const total = sizeOf(file.fileSize);
+        // mtcute leaves requests in flight when the loop ends early: this stops them too.
+        const stop = new AbortController();
+        const forward = () => stop.abort(signal?.reason);
+        signal?.addEventListener('abort', forward, { once: true });
+        try {
+          for await (const chunk of this.tg.downloadAsIterable(file, {
+            offset: position,
+            abortSignal: stop.signal,
+            stallTimeout: options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS,
+            ...(total === null ? {} : { fileSize: total }),
+          })) {
+            await handle.write(chunk, 0, chunk.length, position);
+            position += chunk.length;
+            if (position - synced >= SYNC_EVERY_BYTES) {
+              await handle.sync();
+              synced = position;
+            }
+            onProgress?.(position, total);
+            signal?.throwIfAborted();
+          }
+          await handle.sync();
+          if (total !== null && position !== total) {
+            throw new TelegramError(
+              `Telegram sent ${position} of ${total} bytes`,
+              TelegramErrorCode.TELEGRAM_ERROR,
+            );
+          }
+          return { path: destPath, size: position, mimeType: mimeTypeOf(file), fileName: fileNameOf(file) };
+        } catch (error) {
+          signal?.throwIfAborted();
+          const translated = toTelegramError(error);
+          if (!(translated instanceof FileReferenceExpiredError) || refreshes >= MAX_REFERENCE_REFRESHES) {
+            throw translated;
+          }
+          // Read the message again for a fresh reference and go on from the last whole MiB.
+          position = alignDown(position);
+          await handle.truncate(position);
+          synced = Math.min(synced, position);
+        } finally {
+          stop.abort();
+          signal?.removeEventListener('abort', forward);
+        }
+      }
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async getThumbnails(
+    chatId: string,
+    files: readonly ThumbnailRequest[],
+    options: ThumbnailOptions = {},
+  ): Promise<Map<string, Uint8Array | null>> {
+    const thumbnails = new Map<string, Uint8Array | null>();
+    if (files.length === 0) {
+      return thumbnails;
+    }
+    const ids = [...new Set(files.map((file) => toMessageId(file.messageId)))].slice(0, MAX_HISTORY_PAGE);
+    const messages = await translateErrors(() => this.tg.getMessages(toPeerId(chatId), ids));
+    const byId = new Map(messages.flatMap((message) => (message ? [[message.id, message] as const] : [])));
+    for (const request of files) {
+      options.signal?.throwIfAborted();
+      const message = byId.get(Number(request.messageId));
+      const file = message && !message.isContentProtected ? fileOf(message) : null;
+      const thumbnail =
+        file?.uniqueFileId === request.fileUniqueId
+          ? (file.getThumbnail(Thumbnail.THUMB_320x320_BOX) ?? file.getThumbnail(Thumbnail.THUMB_100x100_BOX))
+          : null;
+      thumbnails.set(request.fileUniqueId, thumbnail ? await this.thumbnailBytes(thumbnail, options) : null);
+    }
+    return thumbnails;
+  }
+
+  /** The file as Telegram has it now (fresh file reference), checked against the archived one. */
+  private async currentFile(parts: FileIdParts): Promise<MtFile> {
+    const [message] = await translateErrors(() =>
+      this.tg.getMessages(toPeerId(parts.chatId), [toMessageId(parts.messageId)]),
+    );
+    if (!message) {
+      throw new MediaUnavailableError('MESSAGE_DELETED');
+    }
+    if (message.isContentProtected) {
+      throw new ChatProtectedError(parts.chatId);
+    }
+    const file = fileOf(message);
+    if (!file || file.uniqueFileId !== parts.fileUniqueId) {
+      throw new MediaUnavailableError('MEDIA_REPLACED');
+    }
+    return file;
+  }
+
+  /**
+   * One thumbnail, or null when it cannot be had. Only waits and a lost session stop the whole
+   * batch. A hard time limit applies: Telegram may answer "-503 Timeout" for a file forever, and
+   * mtcute keeps retrying small files without a stall timeout of its own.
+   */
+  private async thumbnailBytes(thumbnail: Thumbnail, options: ThumbnailOptions): Promise<Uint8Array | null> {
+    const limit = options.timeoutMs ?? DEFAULT_THUMBNAIL_TIMEOUT_MS;
+    const timeout = new AbortController();
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
+    const download = this.tg.downloadAsBuffer(thumbnail, { abortSignal: signal, stallTimeout: limit });
+    // Settled either way below; a late rejection after the time limit must not go unhandled.
+    download.catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<null>((resolve) => {
+      timer = setTimeout(() => {
+        timeout.abort(new Error('The thumbnail took too long'));
+        resolve(null);
+      }, limit);
+    });
+    try {
+      return await Promise.race([download, timedOut]);
+    } catch (error) {
+      options.signal?.throwIfAborted();
+      const translated = toTelegramError(error);
+      if (translated instanceof FloodWaitError || translated instanceof AuthRequiredError) {
+        throw translated;
+      }
+      return null;
+    } finally {
+      clearTimeout(timer);
+      timeout.abort();
+    }
+  }
+}
+
+function toFileIdParts(fileId: string): FileIdParts {
+  try {
+    return decodeFileId(fileId);
+  } catch {
+    throw new TelegramError(`Invalid file id: ${fileId}`, TelegramErrorCode.TELEGRAM_ERROR);
+  }
+}
+
+function mimeTypeOf(file: MtFile): string | null {
+  return file.type === 'photo' ? 'image/jpeg' : (file as MtRawDocument).mimeType || null;
+}
+
+function fileNameOf(file: MtFile): string | null {
+  return file.type === 'photo' ? null : ((file as MtRawDocument).fileName ?? null);
 }
 
 function fromSentCode(code: SentCode): SendCodeResult {

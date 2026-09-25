@@ -4,6 +4,7 @@ import { SecretBox } from '@tam/crypto';
 import type { WorkerEnv } from '../config/env.schema.js';
 import { TelegramAuthService } from './telegram-auth.service.js';
 import { TelegramConnection } from './telegram-connection.js';
+import { TelegramCooldown } from './telegram-cooldown.js';
 import { TelegramDialogsService } from './telegram-dialogs.service.js';
 import { TelegramLifecycle } from './telegram-lifecycle.js';
 import { TelegramRedisConnection } from './telegram-redis.connection.js';
@@ -41,6 +42,7 @@ import {
       inject: [TelegramRedisConnection],
       useFactory: (connection: TelegramRedisConnection) => connection.client,
     },
+    { provide: TelegramCooldown, useFactory: () => new TelegramCooldown() },
     TelegramConnection,
     { provide: TELEGRAM_API_PROVIDER, useExisting: TelegramConnection },
     TelegramAuthService,
@@ -48,7 +50,8 @@ import {
     TelegramRpcServer,
     TelegramLifecycle,
   ],
-  // Imports read history through the same connection and check the login state first.
-  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService],
+  // Imports and downloads use the same connection, check the login state first and respect
+  // Telegram's waits.
+  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService, TelegramCooldown],
 })
 export class TelegramModule {}

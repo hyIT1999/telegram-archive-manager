@@ -1,4 +1,4 @@
-import { NgTemplateOutlet } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   DestroyRef,
@@ -36,6 +36,7 @@ import { StorageLocations } from './storage-locations';
   selector: 'app-storage-location-list',
   providers: [StorageLocations],
   imports: [
+    DatePipe,
     ErrorState,
     MatButton,
     MatIcon,
@@ -78,6 +79,12 @@ export class StorageLocationList {
 
   protected icon(location: StorageLocationDto): string {
     return location.kind === 'GOOGLE_DRIVE' ? 'add_to_drive' : 'folder';
+  }
+
+  /** When downloads to the location wait (full, rate limited, access lost); null when they do not. */
+  protected waitingUntil(location: StorageLocationDto): string | null {
+    const until = location.unavailableUntil;
+    return until !== null && Date.parse(until) > Date.now() ? until : null;
   }
 
   /** "Checking…", "120 GiB free of 931 GiB", or what is wrong. */

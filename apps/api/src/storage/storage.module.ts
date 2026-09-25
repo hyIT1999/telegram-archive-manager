@@ -21,5 +21,7 @@ import { GOOGLE_ENDPOINTS, STORAGE_SETTINGS, storageSettingsFrom } from './stora
     StorageLocationsService,
     GoogleDriveConnectService,
   ],
+  // Channels and media reach stored files through the same drivers (and cached credentials).
+  exports: [StorageDrivers],
 })
 export class StorageModule {}
