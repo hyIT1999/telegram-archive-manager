@@ -1,0 +1,46 @@
+:host {
+  display: grid;
+  gap: 12px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.progress {
+  display: grid;
+  gap: 4px;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.compact {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ring {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+}
+
+.compact-error {
+  max-width: 16ch;
+  color: var(--mat-sys-error);
+  font: var(--mat-sys-body-small);
+}

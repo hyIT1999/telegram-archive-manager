@@ -12,11 +12,13 @@ import { type Chat, FloodWaitError } from '@tam/telegram';
 import { Redis } from 'ioredis';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, it } from 'vitest';
 import type { WorkerEnv } from '../../src/config/env.schema.js';
+import { ForumTopicsService } from '../../src/telegram/forum-topics.service.js';
 import { ACCOUNT_KEY, TelegramAuthService } from '../../src/telegram/telegram-auth.service.js';
 import { TelegramDialogsService } from '../../src/telegram/telegram-dialogs.service.js';
 import { TelegramRpcServer } from '../../src/telegram/telegram-rpc.server.js';
 import {
   createFakeTelegramApi,
+  forumTopic,
   randomSecretBox,
   resetTelegramTables,
   testPrisma,
@@ -58,9 +60,10 @@ describe('TelegramRpcServer', () => {
     fake = createFakeTelegramApi();
     const auth = new TelegramAuthService(prisma, fake.provider, randomSecretBox());
     dialogs = new TelegramDialogsService(prisma, fake.provider, auth, commands);
+    const topics = new ForumTopicsService(prisma, fake.provider, auth);
     const settings: Record<string, string> = { REDIS_URL: redisUrl, BULLMQ_PREFIX: PREFIX };
     const config = { get: (key: string) => settings[key] } as unknown as ConfigService<WorkerEnv, true>;
-    server = new TelegramRpcServer(config, commands, auth, dialogs);
+    server = new TelegramRpcServer(config, commands, auth, dialogs, topics);
     await server.start();
   });
   afterEach(async () => {
@@ -153,6 +156,27 @@ describe('TelegramRpcServer', () => {
     expect(foreign.receivers).toBe(1);
     await server.drained();
     expect(fake.api.sendCode).not.toHaveBeenCalled();
+  });
+
+  it('reads the topics of a forum and answers once they are stored', async () => {
+    await prisma.telegramAccount.create({ data: { accountKey: ACCOUNT_KEY, authState: 'READY' } });
+    const forum = await prisma.channel.create({
+      data: { telegramChatId: -1_009_001n, title: 'Course', type: 'SUPERGROUP', isForum: true },
+    });
+    const group = await prisma.channel.create({
+      data: { telegramChatId: -1_009_002n, title: 'Chat', type: 'SUPERGROUP' },
+    });
+    fake.api.getForumTopics.mockResolvedValueOnce([forumTopic(1), forumTopic(7)]);
+
+    await expect(call({ method: 'topics.refresh', channelId: forum.id })).resolves.toMatchObject({ ok: true });
+    expect(fake.api.getForumTopics).toHaveBeenCalledWith('-1009001');
+    const titles = await prisma.forumTopic.findMany({ orderBy: { topicId: 'asc' }, select: { title: true } });
+    expect(titles.map((row) => row.title)).toEqual(['General', 'Lesson 7']);
+
+    await expect(call({ method: 'topics.refresh', channelId: group.id })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'NOT_A_FORUM' },
+    });
   });
 
   it('stops receiving requests once stopped (PUBLISH reaches nobody)', async () => {

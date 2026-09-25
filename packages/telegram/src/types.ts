@@ -103,6 +103,21 @@ export interface LegacyGroup {
   isProtected: boolean;
 }
 
+/** A topic of a forum supergroup. */
+export interface ForumTopic {
+  /** Topic id: the id of the service message that created the topic (1 = General). */
+  id: number;
+  title: string;
+  /** RGB colour of the topic icon. */
+  iconColor: number | null;
+  isClosed: boolean;
+  isPinned: boolean;
+  /** Only the General topic can be hidden from the topic list. */
+  isHidden: boolean;
+  /** When the topic was created. */
+  date: Date;
+}
+
 export interface TelegramUser {
   id: string;
   username: string | null;

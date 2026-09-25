@@ -23,8 +23,8 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 2b | Chọn nơi lưu cho từng channel: thư mục trên máy hoặc Google Drive | ✅ Hoàn thành |
 | 3 | Import lịch sử message, import jobs (pause/resume/cancel), BullMQ, reconciler | ✅ Hoàn thành |
 | 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | ✅ Hoàn thành |
-| 5 | Dashboard đầy đủ, Channels, Messages, trình xem media | ⏳ Tiếp theo |
-| 6 | Search, Tags, Favorites, Filters | Kế hoạch |
+| 5 | Dashboard đầy đủ, Channels (kèm forum topic), Messages, trình xem media | ✅ Hoàn thành |
+| 6 | Search, Tags, Favorites, Filters | ⏳ Tiếp theo |
 | 7 | Tiến trình realtime (SSE), sync message mới | Kế hoạch |
 | 8 | Test bổ sung, bảo mật, hiệu năng, Docker production | Kế hoạch |
 
@@ -32,14 +32,14 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 
 | Trang | Phase |
 |---|---|
-| All Messages, Message detail, Videos/Images/Documents/Audio | 5 |
 | Search, Tags, Favorites | 6 |
 | Settings → lịch sync | 7 |
 
 Đã dùng được:
 - Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu), **Settings → Telegram account**, **Settings → Storage locations**.
 - Phase 3: bước 5–7 của wizard (chọn import toàn bộ hoặc từ một ngày, bắt đầu, theo dõi tiến trình), trang **Import Jobs** (`/imports`), chi tiết job `imports/:id` với Pause/Resume/Cancel, mục **Import** trên trang channel. Tiến trình được cập nhật bằng polling vài giây một lần; SSE realtime đến ở Phase 7.
-- Phase 4: mục **Media downloads** trên trang channel (công tắc tải tự động, tiến độ, file đang tải, **Retry failed**), **Settings → Media downloads**, công tắc tải ở bước Start của wizard, số file đã tải trên trang import job, và API xem/tải file `/api/media/*` (trình xem media trên web đến ở Phase 5).
+- Phase 4: mục **Media downloads** trên trang channel (công tắc tải tự động, tiến độ, file đang tải, **Retry failed**), **Settings → Media downloads**, công tắc tải ở bước Start của wizard, số file đã tải trên trang import job, và API xem/tải file `/api/media/*`.
+- Phase 5: **All Messages**, **Videos/Images/Documents/Audio** (bộ lọc channel, topic, loại, ngày, file đã tải, thứ tự), trang message với trình phát video/audio, trình xem ảnh, xem trước PDF và nút tải khi cần; trang channel có **Topics** (forum) và **Library**; trang topic đọc như một khóa học; Dashboard có **Continue watching** và **Latest media** (mục "Xem archive" ở §9).
 
 ## Kiến trúc tổng quan
 
@@ -51,7 +51,7 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
                                                      │
                                   Worker (apps/worker) — process DUY NHẤT giữ kết nối Telegram
                                   queues: telegram-import, media-download
-                                  + scheduler tải, reconciler, thumbnail từ Telegram
+                                  + scheduler tải, reconciler, thumbnail và tên topic từ Telegram
                                                      │
                             Nơi lưu (chọn theo từng channel): thư mục trên máy | Google Drive
 ```
@@ -418,6 +418,40 @@ API import (đều cần đăng nhập web):
 | `GET /api/import-jobs/:id` | Một job, kèm channel và các bộ đếm |
 | `POST /api/import-jobs/:id/pause` / `resume` / `cancel` | Đổi trạng thái; `409 INVALID_JOB_STATE` nếu trạng thái hiện tại không cho phép (`details.status`) |
 
+### Xem archive
+
+- **Danh sách:** **All Messages** và **Videos / Images / Documents / Audio** ở sidebar dùng chung một kiểu danh sách:
+  - Video và ảnh hiện dạng lưới ảnh xem trước; tài liệu và audio hiện dạng dòng, có nút tải; mọi message khác hiện dạng thẻ.
+  - Các message gửi chung một **album** được gộp vào một thẻ.
+  - Message hệ thống (tạo topic, ghim…) không hiện trong danh sách.
+- **Bộ lọc:** loại, channel, **topic** (khi channel là forum), khoảng ngày (theo giờ trình duyệt), *Downloaded / Not downloaded*, thứ tự mới/cũ.
+  - Bộ lọc nằm trên URL, nên link và nút Back giữ nguyên bộ lọc.
+  - Cuộn tới cuối là trang sau tự tải thêm.
+  - Mở một message rồi bấm Back sẽ quay về đúng danh sách và vị trí đang xem, không tải lại.
+- **Forum topic:** channel dạng forum (supergroup có topic) hiện mục **Topics** trên trang channel. Mỗi topic ghi số video/tài liệu/message và khoảng ngày; có ô tìm không phân biệt dấu.
+  - Trang topic (`/channels/:id/topics/:topicId`) liệt kê message **cũ → mới** như một khóa học, kèm nút topic trước và sau.
+  - Tên topic do worker đọc từ Telegram: tự đọc cho forum chưa có tên (trong vòng khoảng một phút), đọc lại mỗi ngày, và khi bấm **Refresh topics**.
+  - Message không thuộc topic nào nằm trong topic **General**.
+- **Trang message:** file hiện theo loại MIME, nên ảnh gửi dạng tài liệu vẫn mở trong trình xem ảnh.
+  - **Video/audio:** trình phát riêng, stream bằng `Range` (không tải cả file vào bộ nhớ). Có play/pause, tua, âm lượng, tốc độ 0.5–2×, toàn màn hình và picture-in-picture.
+    - Phím tắt khi player đang được chọn: Space/K phát hoặc dừng · ←/→ 5 giây · J/L 10 giây · ↑/↓ âm lượng · M tắt tiếng · F toàn màn hình · `<`/`>` tốc độ.
+    - Player nhớ âm lượng, tốc độ và **vị trí đang xem** (trong trình duyệt này). Mở lại là xem tiếp; Dashboard có mục **Continue watching**.
+  - **Ảnh:** bấm để mở toàn màn hình. Zoom bằng nút, phím `+ − 0`, con lăn, double-click hoặc hai ngón; kéo khi đang zoom; ←/→ hoặc vuốt để chuyển giữa các ảnh cùng album.
+  - **PDF:** xem ngay trong trang, kèm nút mở ở tab mới và **Save file**.
+  - **File chưa tải:** hiện ảnh xem trước của Telegram và nút **Download** (tải ngay, bất kể công tắc và Settings), kèm tiến độ. Tải xong thì player hoặc ảnh hiện ngay. Nếu file phải chờ, trang nói lý do (Settings đang Pause, nơi lưu hết chỗ…).
+  - **Chữ:** hiện đúng định dạng của Telegram (đậm, nghiêng, link, code, trích dẫn, spoiler). Kèm thông tin gốc: id message, ngày, sửa lúc, lượt xem, forward từ đâu, reply, topic, nút **Open in Telegram**; và thông tin file: tên, MIME, cỡ, SHA-256, nơi lưu.
+  - Nút **Previous / Next** đi tới message cũ hơn/mới hơn cùng channel, cùng topic và cùng loại (bài trước/bài sau).
+- **Trình duyệt phát được gì:** mp4 (H.264/AAC), webm, mp3/m4a/ogg phát trực tiếp. mkv, wmv, avi… tuỳ trình duyệt; nếu không phát được, trang hiện link **Save file** để mở bằng player trên máy.
+
+API xem archive (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `GET /api/messages` | Mới nhất trước. Lọc: `channelId` (gồm cả group cũ của supergroup), `topicId` (cần `channelId`; `1` = General), `types` (vd. `VIDEO,ANIMATION`; mặc định mọi loại trừ `SERVICE`), `from`/`to` (ngày theo UTC hoặc ISO date-time có offset), `downloaded=true/false`, `sort=newest/oldest`. Phân trang `cursor`/`limit` (≤ 100); `total` chỉ có ở trang đầu |
+| `GET /api/messages/:id` | Message kèm file, album, reply thật (message trong topic không tính là reply), topic, `previousId`/`nextId` cùng topic và loại, `telegramUrl` |
+| `GET /api/channels/:id/topics` | Topic của forum theo thứ tự tạo, với số message theo loại và khoảng ngày; `forum:false` nếu không phải forum |
+| `POST /api/channels/:id/topics/refresh` | Đọc lại tên topic từ Telegram qua worker. `422 NOT_A_FORUM`; `503`/`504`/`429` như các lệnh Telegram khác |
+
 ### Nơi lưu (storage locations)
 
 Mỗi channel lưu media vào một nơi lưu. Quản lý ở **Settings → Storage locations**, hoặc ngay tại bước 4 của wizard.
@@ -539,4 +573,8 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | File *Failed* sau 8 lần thử | Lý do ghi trên file. Bấm **Retry failed** trên trang channel để thử lại từ đầu |
 | Tải chậm | Tài khoản không Premium bị Telegram giới hạn tốc độ tải. Tăng *Files at a time* ít tác dụng, vì các file dùng chung giới hạn đó |
 | Không có thumbnail | Worker thiếu `THUMBNAIL_DIR` hoặc `STORAGE_LOCAL_ROOT` (log worker có cảnh báo). Api và worker phải dùng cùng thư mục |
+| Video hiện "This browser cannot play the file" | Định dạng hoặc codec trình duyệt không hỗ trợ (thường gặp với mkv, wmv, avi). Bấm **Save file** rồi mở bằng player trên máy (VLC…) |
+| PDF không hiện trong trang (nhất là trên iPhone/iPad) | Trình duyệt di động chỉ hiện trang đầu hoặc không nhúng PDF. Dùng **Open in a new tab** |
+| Topic chỉ hiện "Topic #123" | Worker chưa đọc tên topic từ Telegram (worker chưa chạy, chưa kết nối, hoặc tài khoản bị đăng xuất). Tên tự có trong vòng một phút sau khi worker kết nối; hoặc bấm **Refresh topics** trên trang channel |
+| "Continue watching" trống trên máy khác | Vị trí xem được nhớ riêng trong từng trình duyệt (localStorage), không lưu trên server |
 | Dev: sau `npm run db:migrate`, API/worker báo `Unknown argument …` | `tsc -b -w` trong `npm run dev` không build lại Prisma client vừa generate. Dừng `npm run dev`, chạy `npm run build:packages`, rồi chạy lại `npm run dev` |

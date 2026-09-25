@@ -1,0 +1,350 @@
+@if (notFound()) {
+  <app-empty-state
+    class="surface-card"
+    icon="search_off"
+    title="Message not found"
+    message="It is not in the archive. The link may be wrong, or its channel was removed."
+  >
+    <a matButton="filled" routerLink="/messages">
+      <mat-icon>arrow_back</mat-icon>
+      All messages
+    </a>
+  </app-empty-state>
+} @else if (message.error()) {
+  <app-page-header eyebrow="Message" title="Message" />
+  <app-error-state
+    title="This message could not be loaded"
+    [message]="errorMessage()"
+    (retry)="message.reload()"
+  />
+} @else if (data(); as item) {
+  <app-page-header [eyebrow]="item.channel.title" [title]="title()" [subtitle]="subtitle()">
+    <nav class="crumbs" aria-label="Where this message is">
+      <a [routerLink]="['/channels', item.channel.id]">{{ item.channel.title }}</a>
+      @if (item.topic; as topic) {
+        <mat-icon aria-hidden="true">chevron_right</mat-icon>
+        <a [routerLink]="['/channels', item.channel.id, 'topics', topic.id]">{{ topic.title }}</a>
+      }
+      <span class="date">· {{ item.postedAt | date: 'medium' }}</span>
+    </nav>
+    <button pageActions matButton="outlined" type="button" (click)="back()">
+      <mat-icon>arrow_back</mat-icon>
+      Back
+    </button>
+    @if (item.telegramUrl; as link) {
+      <a pageActions matButton="tonal" [href]="link" target="_blank" rel="noopener noreferrer">
+        <mat-icon>open_in_new</mat-icon>
+        Open in Telegram
+      </a>
+    }
+  </app-page-header>
+
+  <div class="layout">
+    <div class="main">
+      @if (media(); as file) {
+        <section class="viewer" aria-label="File">
+          @if (downloaded()) {
+            @switch (kind()) {
+              @case ('video') {
+                <app-video-player
+                  kind="video"
+                  [src]="contentUrl()"
+                  [poster]="thumbnailUrl()"
+                  [title]="title()"
+                  [mediaId]="file.id"
+                  [messageId]="item.id"
+                  [durationHint]="file.duration"
+                  [saveUrl]="saveUrl()"
+                />
+              }
+              @case ('audio') {
+                <app-video-player
+                  kind="audio"
+                  [src]="contentUrl()"
+                  [poster]="thumbnailUrl()"
+                  [title]="title()"
+                  [mediaId]="file.id"
+                  [messageId]="item.id"
+                  [durationHint]="file.duration"
+                  [saveUrl]="saveUrl()"
+                />
+              }
+              @case ('image') {
+                <button
+                  type="button"
+                  class="image-button"
+                  aria-label="Open the image full screen"
+                  (click)="openImage()"
+                >
+                  <img class="image" [src]="contentUrl()" [alt]="title()" />
+                </button>
+              }
+              @case ('pdf') {
+                <app-pdf-preview [mediaId]="file.id" [title]="title()" />
+              }
+              @default {
+                <div class="file-card surface-card">
+                  <span class="file-icon" aria-hidden="true">
+                    <mat-icon>{{ fileInfo().icon }}</mat-icon>
+                  </span>
+                  <div>
+                    <p class="file-name">{{ file.fileName ?? title() }}</p>
+                    <p class="hint">{{ fileInfo().label }} · {{ file.size | bytes }}</p>
+                  </div>
+                </div>
+              }
+            }
+            @if (kind() !== 'pdf') {
+              <app-media-download-control
+                [media]="file"
+                [channelId]="item.channel.id"
+                (mediaChange)="mediaChanged($event)"
+              />
+            }
+          } @else {
+            <div class="preview">
+              @if (thumbnailUrl(); as src) {
+                @if (kind() === 'image') {
+                  <button
+                    type="button"
+                    class="image-button"
+                    aria-label="Open the preview full screen"
+                    (click)="openImage()"
+                  >
+                    <img class="preview-image" [src]="src" [alt]="'Preview of ' + title()" />
+                  </button>
+                } @else {
+                  <img class="preview-image" [src]="src" alt="" />
+                }
+              } @else {
+                <span class="preview-icon" aria-hidden="true">
+                  <mat-icon>{{ fileInfo().icon }}</mat-icon>
+                </span>
+              }
+            </div>
+            <p class="hint">This file is not in the archive yet. Download it to {{ goal() }}.</p>
+            <app-media-download-control
+              [media]="file"
+              [channelId]="item.channel.id"
+              (mediaChange)="mediaChanged($event)"
+            />
+          }
+        </section>
+      } @else if (missingFile()) {
+        <app-notice tone="info">
+          This message's file was not archived (self-destructing media is never kept).
+        </app-notice>
+      }
+
+      @if (item.album.length > 1) {
+        <section class="album" aria-labelledby="album-title">
+          <h2 id="album-title" class="section-title">
+            Album · {{ albumPosition() }} of {{ item.album.length }}
+          </h2>
+          <ul class="strip">
+            @for (entry of item.album; track entry.id) {
+              <li>
+                <a
+                  class="album-item"
+                  [class.current]="entry.id === item.id"
+                  [routerLink]="['/messages', entry.id]"
+                  [attr.aria-current]="entry.id === item.id ? 'page' : null"
+                  [attr.aria-label]="'Album item ' + ($index + 1)"
+                >
+                  @if (albumThumbnail(entry); as src) {
+                    <img [src]="src" alt="" loading="lazy" />
+                  } @else {
+                    <mat-icon aria-hidden="true">{{ albumIcon(entry) }}</mat-icon>
+                  }
+                  @if (albumLength(entry); as text) {
+                    <span class="badge">{{ text }}</span>
+                  }
+                </a>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
+      @if (serviceLabel(); as label) {
+        <app-notice tone="info" icon="info">{{ label }}</app-notice>
+      }
+
+      @if (text(); as body) {
+        <section class="surface-card text" aria-label="Text">
+          <app-message-text [text]="body" [entities]="item.entities" />
+        </section>
+      } @else if (albumCaption(); as caption) {
+        <section class="surface-card text" aria-label="Album caption">
+          <p class="hint">Album caption</p>
+          <p class="caption">{{ caption }}</p>
+        </section>
+      }
+
+      <nav class="neighbours" aria-label="Previous and next message">
+        @if (item.previousId; as previousId) {
+          <a matButton="outlined" [routerLink]="['/messages', previousId]">
+            <mat-icon>chevron_left</mat-icon>
+            Previous
+          </a>
+        } @else {
+          <button matButton="outlined" type="button" disabled>
+            <mat-icon>chevron_left</mat-icon>
+            Previous
+          </button>
+        }
+        @if (item.nextId; as nextId) {
+          <a matButton="outlined" [routerLink]="['/messages', nextId]">
+            Next
+            <mat-icon iconPositionEnd>chevron_right</mat-icon>
+          </a>
+        } @else {
+          <button matButton="outlined" type="button" disabled>
+            Next
+            <mat-icon iconPositionEnd>chevron_right</mat-icon>
+          </button>
+        }
+      </nav>
+    </div>
+
+    <aside class="side">
+      <section class="surface-card panel" aria-labelledby="telegram-title">
+        <h2 id="telegram-title" class="section-title">Telegram</h2>
+        <dl class="details">
+          <div>
+            <dt>Message</dt>
+            <dd class="mono">#{{ item.telegramMessageId }}</dd>
+          </div>
+          <div>
+            <dt>Posted</dt>
+            <dd>{{ item.postedAt | date: 'medium' }}</dd>
+          </div>
+          @if (item.editedAt) {
+            <div>
+              <dt>Edited</dt>
+              <dd>{{ item.editedAt | date: 'medium' }}</dd>
+            </div>
+          }
+          @if (item.topic; as topic) {
+            <div>
+              <dt>Topic</dt>
+              <dd>
+                <a [routerLink]="['/channels', item.channel.id, 'topics', topic.id]">{{
+                  topic.title
+                }}</a>
+              </dd>
+            </div>
+          }
+          @if (item.postAuthor) {
+            <div>
+              <dt>Signed by</dt>
+              <dd>{{ item.postAuthor }}</dd>
+            </div>
+          }
+          @if (item.views !== null) {
+            <div>
+              <dt>Views</dt>
+              <dd>{{ item.views | number }}</dd>
+            </div>
+          }
+          @if (item.forwards !== null) {
+            <div>
+              <dt>Forwards</dt>
+              <dd>{{ item.forwards | number }}</dd>
+            </div>
+          }
+          @if (item.pinned) {
+            <div>
+              <dt>Pinned</dt>
+              <dd>Yes</dd>
+            </div>
+          }
+          @if (item.forward; as forward) {
+            <div>
+              <dt>Forwarded from</dt>
+              <dd>
+                {{ forward.senderName ?? forward.fromChatId ?? 'Someone' }}
+                · {{ forward.date | date: 'medium' }}
+              </dd>
+            </div>
+          }
+          @if (item.replyTo; as reply) {
+            <div>
+              <dt>Reply to</dt>
+              <dd>
+                @if (reply.messageId; as repliedId) {
+                  <a [routerLink]="['/messages', repliedId]">#{{ reply.telegramMessageId }}</a>
+                } @else {
+                  #{{ reply.telegramMessageId }} (not in the archive)
+                }
+                @if (reply.excerpt) {
+                  <span class="quote">{{ reply.excerpt }}</span>
+                }
+              </dd>
+            </div>
+          }
+        </dl>
+      </section>
+
+      @if (media(); as file) {
+        <section class="surface-card panel" aria-labelledby="file-title">
+          <h2 id="file-title" class="section-title">File</h2>
+          <dl class="details">
+            <div>
+              <dt>Name</dt>
+              <dd>{{ file.fileName ?? '—' }}</dd>
+            </div>
+            <div>
+              <dt>Type</dt>
+              <dd>
+                {{ fileInfo().label }}
+                @if (file.mimeType) {
+                  <span class="mono small">{{ file.mimeType }}</span>
+                }
+              </dd>
+            </div>
+            <div>
+              <dt>Size</dt>
+              <dd>{{ file.size | bytes }}</dd>
+            </div>
+            @if (dimensions(); as size) {
+              <div>
+                <dt>Dimensions</dt>
+                <dd>{{ size }}</dd>
+              </div>
+            }
+            @if (length(); as duration) {
+              <div>
+                <dt>Length</dt>
+                <dd>{{ duration }}</dd>
+              </div>
+            }
+            <div>
+              <dt>Status</dt>
+              <dd>{{ status() }}</dd>
+            </div>
+            @if (file.checksum) {
+              <div>
+                <dt>SHA-256</dt>
+                <dd class="mono small">{{ file.checksum }}</dd>
+              </div>
+            }
+            @if (file.storageLocation; as location) {
+              <div>
+                <dt>Stored in</dt>
+                <dd>
+                  {{ location.name }}
+                  @if (file.storageKey) {
+                    <span class="mono small">{{ file.storageKey }}</span>
+                  }
+                </dd>
+              </div>
+            }
+          </dl>
+        </section>
+      }
+    </aside>
+  </div>
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading message…" />
+}

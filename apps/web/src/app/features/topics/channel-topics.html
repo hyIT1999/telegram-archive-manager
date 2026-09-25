@@ -1,0 +1,78 @@
+<div class="head">
+  <h2 id="channel-topics-title" class="panel-title">Topics</h2>
+  @if (data(); as list) {
+    <span class="count">{{ list.topics.length }}</span>
+  }
+  <span class="spacer"></span>
+  <button
+    matButton
+    type="button"
+    [disabled]="refreshing()"
+    [showProgress]="refreshing()"
+    (click)="refresh()"
+  >
+    <mat-icon>sync</mat-icon>
+    Refresh topics
+    <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+  </button>
+</div>
+
+@if (refreshError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+}
+
+@if (data(); as list) {
+  @if (waitingForNames()) {
+    <app-notice tone="info" icon="hourglass_top">
+      Topic names are being read from Telegram; they show up here within a minute or so while the
+      worker is connected.
+    </app-notice>
+  }
+  @if (list.topics.length > previewCount) {
+    <mat-form-field class="filter">
+      <mat-label>Find a topic</mat-label>
+      <input matInput type="search" [value]="query()" (input)="search($event)" />
+      <mat-icon matSuffix>search</mat-icon>
+    </mat-form-field>
+  }
+  @if (list.topics.length === 0) {
+    <p class="hint">No topics yet.</p>
+  } @else if (filtered().length === 0) {
+    <p class="hint">No topic matches “{{ query() }}”.</p>
+  }
+  <ul class="topics">
+    @for (topic of visible(); track topic.topicId) {
+      <li>
+        <a class="topic" [routerLink]="['/channels', channelId(), 'topics', topic.topicId]">
+          <span class="dot" [style.background]="topic.iconColor" aria-hidden="true"></span>
+          <span class="text">
+            <span class="title">{{ topic.title }}</span>
+            <span class="meta">{{ counts(topic) }}</span>
+            @if (topic.firstPostedAt && topic.lastPostedAt) {
+              <span class="meta">
+                {{ topic.firstPostedAt | date: 'mediumDate' }}
+                @if (!sameDay(topic)) {
+                  – {{ topic.lastPostedAt | date: 'mediumDate' }}
+                }
+              </span>
+            }
+          </span>
+          @if (topic.isPinned) {
+            <mat-icon class="flag" aria-label="Pinned">push_pin</mat-icon>
+          }
+        </a>
+      </li>
+    }
+  </ul>
+  @if (!showAll() && !query().trim() && filtered().length > previewCount) {
+    <div class="more">
+      <button matButton="tonal" type="button" (click)="showAll.set(true)">
+        Show all {{ filtered().length }} topics
+      </button>
+    </div>
+  }
+} @else if (loadError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading topics…" />
+}

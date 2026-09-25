@@ -7,6 +7,7 @@ import {
   FileReferenceExpiredError,
   FloodWaitError,
   LoginStepError,
+  NotAForumError,
   TelegramError,
   TelegramTimeoutError,
 } from '../errors.js';
@@ -102,6 +103,9 @@ function fromRpcError(error: tl.RpcError): TelegramError {
   }
   if (CHAT_GONE.has(text)) {
     return new ChatUnavailableError();
+  }
+  if (text === 'CHANNEL_FORUM_MISSING') {
+    return new NotAForumError();
   }
   const login = LOGIN_ERRORS[text];
   if (login) {

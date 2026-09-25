@@ -1,0 +1,72 @@
+@if (notFound()) {
+  <app-empty-state
+    class="surface-card"
+    icon="search_off"
+    title="Topic not found"
+    message="The link may be wrong, or the channel is not in the archive."
+  >
+    <a matButton="filled" routerLink="/channels">
+      <mat-icon>arrow_back</mat-icon>
+      Back to channels
+    </a>
+  </app-empty-state>
+} @else if (channel.error()) {
+  <app-page-header eyebrow="Topic" title="Topic" />
+  <app-error-state
+    title="This topic could not be loaded"
+    [message]="errorMessage()"
+    (retry)="channel.reload()"
+  />
+} @else if (channelData(); as item) {
+  <app-page-header [eyebrow]="item.title" [title]="title()" [subtitle]="summary()">
+    @if (topic(); as current) {
+      @if (current.firstPostedAt && current.lastPostedAt) {
+        <p class="dates">
+          {{ current.firstPostedAt | date: 'mediumDate' }} –
+          {{ current.lastPostedAt | date: 'mediumDate' }}
+        </p>
+      }
+    }
+    <a pageActions matButton="outlined" [routerLink]="['/channels', item.id]">
+      <mat-icon>arrow_back</mat-icon>
+      {{ item.title }}
+    </a>
+  </app-page-header>
+
+  @let around = neighbours();
+  @if (around.previous || around.next) {
+    <nav class="topic-nav" aria-label="Other topics">
+      @if (around.previous; as previous) {
+        <a class="step" [routerLink]="['/channels', item.id, 'topics', previous.topicId]">
+          <mat-icon aria-hidden="true">chevron_left</mat-icon>
+          <span>
+            <span class="label">Previous topic</span>
+            <span class="name">{{ previous.title }}</span>
+          </span>
+        </a>
+      } @else {
+        <span></span>
+      }
+      @if (around.next; as next) {
+        <a class="step next" [routerLink]="['/channels', item.id, 'topics', next.topicId]">
+          <span>
+            <span class="label">Next topic</span>
+            <span class="name">{{ next.title }}</span>
+          </span>
+          <mat-icon aria-hidden="true">chevron_right</mat-icon>
+        </a>
+      }
+    </nav>
+  }
+
+  @if (topicNumber(); as number) {
+    <app-message-feed
+      [channelId]="item.id"
+      [topicId]="number"
+      defaultSort="oldest"
+      [forum]="true"
+    />
+  }
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading topic…" />
+}

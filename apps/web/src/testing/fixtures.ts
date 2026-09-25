@@ -4,7 +4,14 @@ import type {
   AuthUserDto,
   ChannelDownloadsDto,
   ChannelDto,
+  ForumTopicDto,
+  ForumTopicListDto,
   ImportJobDto,
+  MediaDto,
+  MediaSummaryDto,
+  MessageDto,
+  MessagePageDto,
+  MessageSummaryDto,
   Page,
   SettingsDto,
   StatsDto,
@@ -267,6 +274,126 @@ export function makeDialogList(
   overrides: Partial<TelegramDialogListDto> = {},
 ): TelegramDialogListDto {
   return { items, refreshing: false, refreshedAt: '2026-09-24T08:00:00.000Z', ...overrides };
+}
+
+let mediaSequence = 0;
+
+/** A 90 MiB video of 12 minutes, not downloaded yet, with a Telegram preview. */
+export function makeMediaSummary(overrides: Partial<MediaSummaryDto> = {}): MediaSummaryDto {
+  mediaSequence += 1;
+  return {
+    id: `0199a0b1-0000-7000-8000-e${String(mediaSequence).padStart(11, '0')}`,
+    type: 'VIDEO',
+    fileName: `Lesson ${mediaSequence}.mp4`,
+    mimeType: 'video/mp4',
+    size: 90 * 1024 ** 2,
+    width: 1280,
+    height: 720,
+    duration: 720,
+    downloadStatus: 'PENDING',
+    downloadProgress: 0,
+    hasThumbnail: true,
+    ...overrides,
+  };
+}
+
+/** The same video as GET /api/media/:id describes it. */
+export function makeMedia(overrides: Partial<MediaDto> = {}): MediaDto {
+  return {
+    ...makeMediaSummary(),
+    messageId: '0199a0b1-0000-7000-8000-d00000000001',
+    channelId: '0199a0b1-0000-7000-8000-000000000001',
+    telegramMessageId: 42,
+    postedAt: '2026-03-01T10:00:00.000Z',
+    downloadedBytes: 0,
+    skipReason: null,
+    stage: null,
+    requested: false,
+    attempts: 0,
+    error: null,
+    checksum: null,
+    storageLocation: null,
+    storageKey: null,
+    updatedAt: '2026-09-24T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+let messageSequence = 0;
+
+/** A video message of "Physics Notes" posted on 1 March 2026. */
+export function makeMessage(overrides: Partial<MessageSummaryDto> = {}): MessageSummaryDto {
+  messageSequence += 1;
+  return {
+    id: `0199a0b1-0000-7000-8000-d${String(messageSequence).padStart(11, '0')}`,
+    channel: { id: '0199a0b1-0000-7000-8000-000000000001', title: 'Physics Notes' },
+    telegramMessageId: 100 + messageSequence,
+    type: 'VIDEO',
+    postedAt: '2026-03-01T10:00:00.000Z',
+    excerpt: null,
+    mediaGroupId: null,
+    topic: null,
+    media: makeMediaSummary(),
+    ...overrides,
+  };
+}
+
+/** A message as GET /api/messages/:id describes it (a video, not in an album). */
+export function makeMessageDetail(overrides: Partial<MessageDto> = {}): MessageDto {
+  const summary = makeMessage();
+  return {
+    ...summary,
+    media: makeMedia({ messageId: summary.id, telegramMessageId: summary.telegramMessageId }),
+    text: null,
+    caption: null,
+    entities: [],
+    editedAt: null,
+    views: null,
+    forwards: null,
+    postAuthor: null,
+    pinned: false,
+    serviceAction: null,
+    forward: null,
+    replyTo: null,
+    album: [],
+    previousId: null,
+    nextId: null,
+    telegramUrl: null,
+    ...overrides,
+  };
+}
+
+export function makeMessagePage(
+  items: MessageSummaryDto[],
+  nextCursor: string | null = null,
+  total: number | null = items.length,
+): MessagePageDto {
+  return { items, nextCursor, total };
+}
+
+let topicSequence = 1;
+
+export function makeTopic(overrides: Partial<ForumTopicDto> = {}): ForumTopicDto {
+  topicSequence += 1;
+  return {
+    topicId: topicSequence * 10,
+    title: `Module ${topicSequence}`,
+    iconColor: '#6fb9f0',
+    isClosed: false,
+    isPinned: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    counts: { messages: 12, videos: 10, images: 0, documents: 2, audio: 0 },
+    firstPostedAt: '2026-01-02T00:00:00.000Z',
+    lastPostedAt: '2026-02-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeTopicList(
+  topics: ForumTopicDto[],
+  overrides: Partial<ForumTopicListDto> = {},
+): ForumTopicListDto {
+  return { forum: true, refreshedAt: '2026-09-24T08:00:00.000Z', topics, ...overrides };
 }
 
 /** Answers a pending request with an error body shaped like the API's. */

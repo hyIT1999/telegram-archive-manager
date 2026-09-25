@@ -1,0 +1,36 @@
+:host {
+  display: grid;
+  gap: 12px;
+}
+
+.fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.field {
+  flex: 0 1 170px;
+  min-width: 140px;
+
+  &.wide {
+    flex-basis: 240px;
+  }
+}
+
+.clear {
+  flex: none;
+}
+
+// Phones: two small fields per row, channel and topic on their own.
+@media (max-width: 599.98px) {
+  .field {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+
+  .field.wide {
+    flex-basis: 100%;
+  }
+}

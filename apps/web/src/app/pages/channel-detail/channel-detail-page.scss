@@ -48,6 +48,16 @@
   margin-top: 32px;
 }
 
+.section {
+  display: block;
+  margin-bottom: 32px;
+}
+
+.section-title {
+  margin-bottom: 16px;
+  font: var(--mat-sys-title-large);
+}
+
 .panels {
   display: grid;
   gap: 24px;

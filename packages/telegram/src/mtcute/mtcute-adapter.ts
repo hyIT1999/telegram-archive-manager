@@ -30,6 +30,7 @@ import type {
   Chat,
   DownloadOptions,
   DownloadedFile,
+  ForumTopic,
   HistoryPage,
   HistoryPageOptions,
   LegacyGroup,
@@ -39,7 +40,7 @@ import type {
   ThumbnailRequest,
 } from '../types.js';
 import { toTelegramError, translateErrors } from './error-mapping.js';
-import { mapChat, mapMessage, mapUser, sizeOf } from './mappers.js';
+import { mapChat, mapForumTopic, mapMessage, mapUser, sizeOf } from './mappers.js';
 
 /** messages.getHistory never returns more than this per call. */
 export const MAX_HISTORY_PAGE = 100;
@@ -58,6 +59,12 @@ export const DEFAULT_THUMBNAIL_TIMEOUT_MS = 30_000;
 
 /** Fresh file references fetched for one download before giving up. */
 const MAX_REFERENCE_REFRESHES = 3;
+
+/** messages.getForumTopics returns at most this many topics per call. */
+const FORUM_TOPICS_PAGE = 100;
+
+/** Paging stops after this many pages (10,000 topics), whatever Telegram answers. */
+const MAX_FORUM_TOPIC_PAGES = 100;
 
 /** Written data is flushed to disk every so often, so a power cut loses little. */
 const SYNC_EVERY_BYTES = 32 * 1024 * 1024;
@@ -193,6 +200,44 @@ export class MtcuteTelegramAdapter
       return null;
     }
     return { id: String(chat.id), title: chat.title, isProtected: chat.hasContentProtection };
+  }
+
+  /**
+   * Every topic of a forum, page by page. The raw call replaces mtcute's iterForumTopics, whose
+   * paging reads each topic's last message and fails when Telegram leaves one out.
+   */
+  async getForumTopics(chatId: string): Promise<ForumTopic[]> {
+    const peer = await translateErrors(() => this.tg.resolvePeer(toPeerId(chatId)));
+    const topics = new Map<number, ForumTopic>();
+    let offset = { offsetDate: 0, offsetId: 0, offsetTopic: 0 };
+    for (let page = 0; page < MAX_FORUM_TOPIC_PAGES; page += 1) {
+      const current = offset;
+      const result = await translateErrors(() =>
+        this.tg.call({
+          _: 'messages.getForumTopics',
+          peer,
+          offsetDate: current.offsetDate,
+          offsetId: current.offsetId,
+          offsetTopic: current.offsetTopic,
+          limit: FORUM_TOPICS_PAGE,
+        }),
+      );
+      const found = result.topics.filter((topic): topic is tl.RawForumTopic => topic._ === 'forumTopic');
+      for (const topic of found) {
+        topics.set(topic.id, mapForumTopic(topic));
+      }
+      const last = found.at(-1);
+      if (!last || found.length < FORUM_TOPICS_PAGE || topics.size >= result.count) {
+        break;
+      }
+      // Topics come by creation date or by their last message; the next page starts after `last`.
+      offset = {
+        offsetDate: result.orderByCreateDate ? last.date : (messageDate(result.messages, last.topMessage) ?? last.date),
+        offsetId: last.topMessage,
+        offsetTopic: last.id,
+      };
+    }
+    return [...topics.values()];
   }
 
   /** Newest → oldest, strictly older than `fromMessageId`; empty when history is exhausted. */
@@ -432,6 +477,16 @@ function fromSentCode(code: SentCode): SendCodeResult {
 
 function clampLimit(limit: number): number {
   return Math.min(Math.max(Math.trunc(limit), 1), MAX_HISTORY_PAGE);
+}
+
+/** Date (in seconds) of a message Telegram sent along, if it is there. */
+function messageDate(messages: readonly tl.TypeMessage[], id: number): number | null {
+  for (const message of messages) {
+    if (message.id === id && message._ !== 'messageEmpty') {
+      return message.date;
+    }
+  }
+  return null;
 }
 
 function toPeerId(chatId: string): number {

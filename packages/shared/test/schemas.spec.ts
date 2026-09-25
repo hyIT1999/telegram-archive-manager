@@ -9,6 +9,8 @@ import {
   loginRequestSchema,
   messageListQuerySchema,
   newPasswordSchema,
+  rangeEnd,
+  rangeStart,
   telegramIdSchema,
 } from '../src/index.js';
 
@@ -101,19 +103,52 @@ describe('importRunJobOptions', () => {
 });
 
 describe('messageListQuerySchema', () => {
-  it('parses comma separated media types and de-duplicates them', () => {
-    const parsed = messageListQuerySchema.parse({ mediaTypes: 'VIDEO, PHOTO,VIDEO' });
-    expect(parsed.mediaTypes).toEqual(['VIDEO', 'PHOTO']);
+  const channelId = '0199a0b1-0000-7000-8000-000000000001';
+
+  it('parses comma separated message types and de-duplicates them', () => {
+    const parsed = messageListQuerySchema.parse({ types: 'VIDEO, PHOTO,VIDEO' });
+    expect(parsed.types).toEqual(['VIDEO', 'PHOTO']);
     expect(parsed.sort).toBe('newest');
+    expect(parsed.limit).toBe(50);
   });
 
-  it('parses the favorite flag from a query string', () => {
-    expect(messageListQuerySchema.parse({ favorite: 'true' }).favorite).toBe(true);
-    expect(messageListQuerySchema.parse({ favorite: 'false' }).favorite).toBe(false);
+  it('rejects unknown message types', () => {
+    expect(messageListQuerySchema.safeParse({ types: 'VIDEO,HOLOGRAM' }).success).toBe(false);
   });
 
-  it('rejects unknown media types', () => {
-    expect(messageListQuerySchema.safeParse({ mediaTypes: 'VIDEO,HOLOGRAM' }).success).toBe(false);
+  it('parses the downloaded flag and the topic from a query string', () => {
+    const parsed = messageListQuerySchema.parse({ channelId, topicId: '42', downloaded: 'true' });
+    expect(parsed).toMatchObject({ channelId, topicId: 42, downloaded: true });
+    expect(messageListQuerySchema.parse({ downloaded: 'false' }).downloaded).toBe(false);
+  });
+
+  it('needs the channel of a topic', () => {
+    const result = messageListQuerySchema.safeParse({ topicId: '42' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['topicId']);
+    expect(messageListQuerySchema.safeParse({ channelId, topicId: '0' }).success).toBe(false);
+  });
+
+  it('accepts dates and date-times, but not a range that ends before it starts', () => {
+    expect(messageListQuerySchema.safeParse({ from: '2026-01-01', to: '2026-01-01' }).success).toBe(
+      true,
+    );
+    expect(
+      messageListQuerySchema.safeParse({
+        from: '2026-01-01T00:00:00+07:00',
+        to: '2026-01-31T23:59:59.999+07:00',
+      }).success,
+    ).toBe(true);
+    const reversed = messageListQuerySchema.safeParse({ from: '2026-02-01', to: '2026-01-31' });
+    expect(reversed.success).toBe(false);
+    expect(reversed.error?.issues[0]?.path).toEqual(['from']);
+    expect(messageListQuerySchema.safeParse({ from: 'yesterday' }).success).toBe(false);
+  });
+
+  it('reads a bare date as a whole UTC day', () => {
+    expect(rangeStart('2026-03-05').toISOString()).toBe('2026-03-05T00:00:00.000Z');
+    expect(rangeEnd('2026-03-05').toISOString()).toBe('2026-03-05T23:59:59.999Z');
+    expect(rangeEnd('2026-03-05T10:00:00+07:00').toISOString()).toBe('2026-03-05T03:00:00.000Z');
   });
 });
 

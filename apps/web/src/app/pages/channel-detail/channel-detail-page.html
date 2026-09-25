@@ -69,6 +69,17 @@
     />
   </div>
 
+  @if (item.isForum) {
+    <section class="surface-card panel section" aria-labelledby="channel-topics-title">
+      <app-channel-topics [channelId]="item.id" />
+    </section>
+  }
+
+  <section class="section" aria-labelledby="channel-library-title">
+    <h2 id="channel-library-title" class="section-title">Library</h2>
+    <app-message-feed [channelId]="item.id" [forum]="item.isForum" />
+  </section>
+
   <div class="panels">
     <section class="surface-card panel" aria-labelledby="channel-details-title">
       <h2 id="channel-details-title" class="panel-title">Details</h2>
@@ -132,15 +143,6 @@
 
     <section class="surface-card panel" aria-labelledby="channel-downloads-title">
       <app-channel-downloads-panel [channel]="item" (channelChange)="updated($event)" />
-    </section>
-
-    <section class="surface-card panel" aria-label="Messages">
-      <app-empty-state
-        icon="chat"
-        note="Arrives in Phase 5"
-        title="Messages will appear here"
-        message="Browsing, filtering and opening this channel's messages arrives in Phase 5."
-      />
     </section>
   </div>
 } @else {

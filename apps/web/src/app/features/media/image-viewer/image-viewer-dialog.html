@@ -1,0 +1,121 @@
+@let image = current();
+<div class="toolbar">
+  <div class="caption">
+    <h2 class="title">{{ image.title }}</h2>
+    @if (images().length > 1) {
+      <span class="counter">{{ index() + 1 }} / {{ images().length }}</span>
+    }
+  </div>
+  <div class="tools">
+    <button
+      matIconButton
+      type="button"
+      aria-label="Zoom out"
+      matTooltip="Zoom out (−)"
+      [disabled]="zoom().scale <= 1"
+      (click)="zoomOut()"
+    >
+      <mat-icon>zoom_out</mat-icon>
+    </button>
+    <button
+      matIconButton
+      type="button"
+      aria-label="Normal size"
+      matTooltip="Normal size (0)"
+      [disabled]="zoom().scale === 1"
+      (click)="resetZoom()"
+    >
+      <mat-icon>fit_screen</mat-icon>
+    </button>
+    <button
+      matIconButton
+      type="button"
+      aria-label="Zoom in"
+      matTooltip="Zoom in (+)"
+      [disabled]="zoom().scale >= maxScale || !src()"
+      (click)="zoomIn()"
+    >
+      <mat-icon>zoom_in</mat-icon>
+    </button>
+    <button
+      matIconButton
+      type="button"
+      [attr.aria-label]="fullscreen() ? 'Leave full screen' : 'Full screen'"
+      matTooltip="Full screen (F)"
+      (click)="toggleFullscreen()"
+    >
+      <mat-icon>{{ fullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
+    </button>
+    @if (downloaded()) {
+      <a matIconButton [href]="saveUrl()" download aria-label="Save file" matTooltip="Save file">
+        <mat-icon>file_download</mat-icon>
+      </a>
+    }
+    <a
+      matIconButton
+      [routerLink]="['/messages', image.messageId]"
+      aria-label="Open the message"
+      matTooltip="Open the message"
+      (click)="close()"
+    >
+      <mat-icon>open_in_new</mat-icon>
+    </a>
+    <button
+      matIconButton
+      type="button"
+      mat-dialog-close
+      aria-label="Close"
+      matTooltip="Close (Esc)"
+    >
+      <mat-icon>close</mat-icon>
+    </button>
+  </div>
+</div>
+
+<div
+  #stage
+  class="stage"
+  (wheel)="wheel($event)"
+  (dblclick)="doubleClick($event)"
+  (pointerdown)="pointerDown($event)"
+  (pointermove)="pointerMove($event)"
+  (pointerup)="pointerUp($event)"
+  (pointercancel)="pointerUp($event)"
+>
+  @if (src(); as url) {
+    <img
+      #image
+      class="image"
+      [src]="url"
+      [alt]="image.title"
+      [style.transform]="transform()"
+      [class.zoomed]="zoom().scale > 1"
+      draggable="false"
+    />
+  } @else {
+    <p class="missing">This file has no preview.</p>
+  }
+  @if (index() > 0) {
+    <button
+      matIconButton
+      type="button"
+      class="nav prev"
+      aria-label="Previous image"
+      (click)="previous()"
+    >
+      <mat-icon>chevron_left</mat-icon>
+    </button>
+  }
+  @if (index() < images().length - 1) {
+    <button matIconButton type="button" class="nav next" aria-label="Next image" (click)="next()">
+      <mat-icon>chevron_right</mat-icon>
+    </button>
+  }
+</div>
+
+@if (!downloaded()) {
+  <div class="footer">
+    <p class="hint">A small preview. Download the file to see it in full size.</p>
+    <app-media-download-control [media]="image.media" (mediaChange)="mediaChanged($event)" />
+  </div>
+}

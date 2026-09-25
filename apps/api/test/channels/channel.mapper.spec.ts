@@ -28,6 +28,7 @@ const channel: ChannelWithStorage = {
   storageFolder: null,
   downloadMedia: true,
   downloadNote: null,
+  topicsRefreshedAt: null,
   createdAt: new Date('2026-08-01T00:00:00.000Z'),
   updatedAt: new Date('2026-09-01T10:00:00.000Z'),
   storageLocation: null,

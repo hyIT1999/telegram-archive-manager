@@ -1,0 +1,114 @@
+<app-feed-filters
+  [filters]="filters()"
+  [scope]="scope()"
+  [forumChannel]="forum()"
+  (filtersChange)="changeFilters($event)"
+/>
+
+<div class="summary">
+  <p class="count" aria-live="polite">
+    @if (total() !== null) {
+      {{ total() | number }} {{ noun() }}
+    }
+  </p>
+  <button
+    matIconButton
+    type="button"
+    aria-label="Load the list again"
+    matTooltip="Load again"
+    [disabled]="firstPage.isLoading()"
+    (click)="refresh()"
+  >
+    <mat-icon>refresh</mat-icon>
+  </button>
+</div>
+
+@if (errorMessage(); as message) {
+  <app-error-state
+    title="The messages could not be loaded"
+    [message]="message"
+    (retry)="refresh()"
+  />
+} @else if (!isLoaded()) {
+  <app-skeleton
+    [variant]="layout() === 'grid' ? 'card' : 'line'"
+    [count]="layout() === 'grid' ? 6 : 5"
+    label="Loading messages…"
+  />
+} @else if (items().length === 0) {
+  <app-empty-state
+    class="surface-card"
+    [icon]="narrowed() ? 'filter_alt_off' : 'inbox'"
+    [title]="emptyTitle()"
+  >
+    @if (narrowed()) {
+      <button matButton="tonal" type="button" (click)="clearFilters()">
+        <mat-icon>filter_alt_off</mat-icon>
+        Clear filters
+      </button>
+    } @else if (!channelId()) {
+      <a matButton="tonal" routerLink="/imports">
+        <mat-icon>download</mat-icon>
+        Import a channel
+      </a>
+    }
+  </app-empty-state>
+} @else {
+  @switch (layout()) {
+    @case ('grid') {
+      <ul class="grid" [class.square]="images()">
+        @for (item of items(); track item.id) {
+          <li>
+            <app-media-tile
+              [item]="item"
+              [showChannel]="showChannel()"
+              [square]="images()"
+              [opens]="images()"
+              (open)="openImage(item)"
+            />
+          </li>
+        }
+      </ul>
+    }
+    @case ('rows') {
+      <ul class="rows surface-card">
+        @for (item of items(); track item.id) {
+          <li>
+            <app-media-row [item]="item" [showChannel]="showChannel()" [showTopic]="showTopic()" />
+          </li>
+        }
+      </ul>
+    }
+    @default {
+      <ul class="cards">
+        @for (entry of entries(); track entry.key) {
+          <li>
+            <app-message-card
+              [entry]="entry"
+              [showChannel]="showChannel()"
+              [showTopic]="showTopic()"
+            />
+          </li>
+        }
+      </ul>
+    }
+  }
+
+  @if (nextCursor()) {
+    <div class="more" (appInView)="loadMore()">
+      @if (loadMoreError(); as message) {
+        <p class="more-error" role="alert">{{ message }}</p>
+      }
+      <button
+        matButton="tonal"
+        type="button"
+        [showProgress]="loadingMore()"
+        [disabled]="loadingMore()"
+        (click)="loadMore()"
+      >
+        Load more
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  }
+}

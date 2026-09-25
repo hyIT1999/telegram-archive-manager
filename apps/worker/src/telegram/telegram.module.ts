@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SecretBox } from '@tam/crypto';
 import type { WorkerEnv } from '../config/env.schema.js';
+import { ForumTopicsService } from './forum-topics.service.js';
 import { TelegramAuthService } from './telegram-auth.service.js';
 import { TelegramConnection } from './telegram-connection.js';
 import { TelegramCooldown } from './telegram-cooldown.js';
@@ -47,11 +48,12 @@ import {
     { provide: TELEGRAM_API_PROVIDER, useExisting: TelegramConnection },
     TelegramAuthService,
     TelegramDialogsService,
+    ForumTopicsService,
     TelegramRpcServer,
     TelegramLifecycle,
   ],
-  // Imports and downloads use the same connection, check the login state first and respect
-  // Telegram's waits.
-  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService, TelegramCooldown],
+  // Imports, downloads and topic refreshes use the same connection, check the login state first
+  // and respect Telegram's waits.
+  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService, TelegramCooldown, ForumTopicsService],
 })
 export class TelegramModule {}

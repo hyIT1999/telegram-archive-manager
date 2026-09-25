@@ -1,0 +1,191 @@
+<div
+  #frame
+  class="frame"
+  [class.audio]="kind() === 'audio'"
+  [class.idle]="idle()"
+  [class.fullscreen]="fullscreen()"
+  role="group"
+  [attr.aria-label]="title() ? title() + ' — player' : 'Player'"
+  tabindex="0"
+  (keydown)="key($event)"
+  (pointermove)="poke()"
+  (focusin)="poke()"
+>
+  @if (kind() === 'video') {
+    <video
+      #media
+      class="media"
+      [src]="src()"
+      [attr.poster]="poster()"
+      preload="metadata"
+      playsinline
+      (click)="toggle()"
+      (dblclick)="toggleFullscreen()"
+      (loadedmetadata)="loadedMetadata()"
+      (timeupdate)="timeUpdate()"
+      (progress)="progress()"
+      (play)="played()"
+      (pause)="paused()"
+      (ended)="ended()"
+      (waiting)="waiting.set(true)"
+      (playing)="waiting.set(false)"
+      (canplay)="waiting.set(false)"
+      (volumechange)="volumeChanged()"
+      (ratechange)="rateChanged()"
+      (error)="errored()"
+      (emptied)="emptied()"
+    ></video>
+  } @else {
+    @if (poster(); as artwork) {
+      <img class="artwork" [src]="artwork" alt="" />
+    }
+    <audio
+      #media
+      [src]="src()"
+      preload="metadata"
+      (loadedmetadata)="loadedMetadata()"
+      (timeupdate)="timeUpdate()"
+      (progress)="progress()"
+      (play)="played()"
+      (pause)="paused()"
+      (ended)="ended()"
+      (waiting)="waiting.set(true)"
+      (playing)="waiting.set(false)"
+      (canplay)="waiting.set(false)"
+      (volumechange)="volumeChanged()"
+      (ratechange)="rateChanged()"
+      (error)="errored()"
+      (emptied)="emptied()"
+    ></audio>
+  }
+
+  @if (waiting() && !failed()) {
+    <mat-progress-spinner class="spinner" mode="indeterminate" diameter="48" aria-label="Loading" />
+  }
+
+  @if (failed()) {
+    <div class="failure" role="alert">
+      <p>This browser cannot play the file.</p>
+      @if (saveUrl(); as url) {
+        <a [href]="url" download>Save the file</a> and open it in a player on this device.
+      }
+    </div>
+  }
+
+  @if (resumedText(); as at) {
+    <p class="resumed">
+      Resumed at {{ at }} ·
+      <button type="button" class="link" (click)="startOver()">Start over</button>
+    </p>
+  }
+
+  <div class="controls">
+    <input
+      class="seek"
+      type="range"
+      min="0"
+      step="0.1"
+      [max]="duration()"
+      [value]="position()"
+      [style.--played]="playedPercent() + '%'"
+      [style.--buffered]="bufferedPercent() + '%'"
+      aria-label="Position"
+      [attr.aria-valuetext]="timeText()"
+      (input)="seekInput($event)"
+    />
+    <div class="bar">
+      <button
+        matIconButton
+        type="button"
+        [attr.aria-label]="playing() ? 'Pause' : 'Play'"
+        [matTooltip]="playing() ? 'Pause (K)' : 'Play (K)'"
+        (click)="toggle()"
+      >
+        <mat-icon>{{ playing() ? 'pause' : 'play_arrow' }}</mat-icon>
+      </button>
+      <button
+        matIconButton
+        type="button"
+        aria-label="Back 10 seconds"
+        matTooltip="Back 10 s (J)"
+        (click)="seekBy(-10)"
+      >
+        <mat-icon>replay_10</mat-icon>
+      </button>
+      <button
+        matIconButton
+        type="button"
+        aria-label="Forward 10 seconds"
+        matTooltip="Forward 10 s (L)"
+        (click)="seekBy(10)"
+      >
+        <mat-icon>forward_10</mat-icon>
+      </button>
+      <span class="time">{{ timeText() }}</span>
+      <span class="spacer"></span>
+      <button
+        matIconButton
+        type="button"
+        [attr.aria-label]="muted() ? 'Unmute' : 'Mute'"
+        [matTooltip]="muted() ? 'Unmute (M)' : 'Mute (M)'"
+        (click)="toggleMute()"
+      >
+        <mat-icon>{{ volumeIcon() }}</mat-icon>
+      </button>
+      <input
+        class="volume"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        [value]="muted() ? 0 : volume()"
+        aria-label="Volume"
+        (input)="volumeInput($event)"
+      />
+      <button
+        matIconButton
+        type="button"
+        class="rate"
+        [matMenuTriggerFor]="speedMenu"
+        [attr.aria-label]="'Playback speed ' + rate() + '×'"
+        matTooltip="Speed (&lt; &gt;)"
+      >
+        {{ rate() }}×
+      </button>
+      <mat-menu #speedMenu="matMenu">
+        @for (option of rates; track option) {
+          <button
+            mat-menu-item
+            type="button"
+            [class.current]="option === rate()"
+            (click)="setRate(option)"
+          >
+            {{ option }}×
+          </button>
+        }
+      </mat-menu>
+      @if (kind() === 'video') {
+        @if (pipSupported) {
+          <button
+            matIconButton
+            type="button"
+            aria-label="Picture in picture"
+            matTooltip="Picture in picture"
+            (click)="togglePictureInPicture()"
+          >
+            <mat-icon>picture_in_picture_alt</mat-icon>
+          </button>
+        }
+        <button
+          matIconButton
+          type="button"
+          [attr.aria-label]="fullscreen() ? 'Leave full screen' : 'Full screen'"
+          matTooltip="Full screen (F)"
+          (click)="toggleFullscreen()"
+        >
+          <mat-icon>{{ fullscreen() ? 'fullscreen_exit' : 'fullscreen' }}</mat-icon>
+        </button>
+      }
+    </div>
+  </div>
+</div>

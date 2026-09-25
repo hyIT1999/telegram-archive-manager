@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaService } from '@tam/database/nest';
 import { SecretBox } from '@tam/crypto';
-import type { Chat, TelegramUser } from '@tam/telegram';
+import type { Chat, ForumTopic, TelegramUser } from '@tam/telegram';
 import { inject, vi } from 'vitest';
 import type { TelegramApi, TelegramApiProvider } from '../../../src/telegram/telegram.tokens.js';
 
@@ -35,6 +35,7 @@ export function createFakeTelegramApi() {
     getMessages: vi.fn<TelegramApi['getMessages']>(async () => []),
     refreshChat: vi.fn<TelegramApi['refreshChat']>(async (chatId) => chat(chatId)),
     getLegacyGroup: vi.fn<TelegramApi['getLegacyGroup']>(async () => null),
+    getForumTopics: vi.fn<TelegramApi['getForumTopics']>(async () => []),
     // Media: scripted by FakeFiles (fake-files.ts) in the download tests.
     downloadFile: vi.fn<TelegramApi['downloadFile']>(async () => {
       throw new Error('No fake file was set up');
@@ -72,5 +73,19 @@ export function testPrisma(): PrismaService {
 export async function resetTelegramTables(prisma: PrismaService): Promise<void> {
   await prisma.$executeRaw`
     TRUNCATE TABLE telegram_dialogs, telegram_accounts, channels, messages, media, import_jobs,
-      download_jobs, storage_locations, app_settings CASCADE`;
+      download_jobs, storage_locations, app_settings, forum_topics CASCADE`;
+}
+
+/** A forum topic as the adapter reports it. */
+export function forumTopic(id: number, overrides: Partial<ForumTopic> = {}): ForumTopic {
+  return {
+    id,
+    title: id === 1 ? 'General' : `Lesson ${id}`,
+    iconColor: 0x6fb9f0,
+    isClosed: false,
+    isPinned: false,
+    isHidden: false,
+    date: new Date(Date.UTC(2026, 0, 1) + id * 60_000),
+    ...overrides,
+  };
 }

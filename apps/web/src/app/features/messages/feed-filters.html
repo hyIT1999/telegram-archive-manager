@@ -1,0 +1,85 @@
+@let current = filters();
+@if (!categoryFixed()) {
+  <mat-chip-listbox
+    class="kinds"
+    aria-label="Kind of message"
+    hideSingleSelectionIndicator
+    [value]="current.category ?? 'all'"
+    (change)="setCategory($event.value)"
+  >
+    <mat-chip-option value="all">All</mat-chip-option>
+    @for (option of categories; track option.category) {
+      <mat-chip-option [value]="option.category">{{ option.label }}</mat-chip-option>
+    }
+  </mat-chip-listbox>
+}
+
+<div class="fields">
+  @if (!scope().channelId) {
+    <mat-form-field class="field wide">
+      <mat-label>Channel</mat-label>
+      <mat-select [value]="current.channelId" (selectionChange)="setChannel($event.value)">
+        <mat-option [value]="null">All channels</mat-option>
+        @for (channel of channelOptions(); track channel.id) {
+          <mat-option [value]="channel.id">{{ channel.title }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+  }
+  @if (topicsVisible()) {
+    <mat-form-field class="field wide">
+      <mat-label>Topic</mat-label>
+      <mat-select [value]="current.topicId" (selectionChange)="setTopic($event.value)">
+        <mat-option [value]="null">All topics</mat-option>
+        @for (topic of topicOptions(); track topic.topicId) {
+          <mat-option [value]="topic.topicId"
+            >{{ topic.title }} ({{ topic.counts.messages }})</mat-option
+          >
+        }
+      </mat-select>
+    </mat-form-field>
+  }
+  <mat-form-field class="field">
+    <mat-label>From</mat-label>
+    <input
+      matInput
+      type="date"
+      [value]="current.from ?? ''"
+      [max]="current.to ?? ''"
+      (change)="setDay('from', $event)"
+    />
+  </mat-form-field>
+  <mat-form-field class="field">
+    <mat-label>To</mat-label>
+    <input
+      matInput
+      type="date"
+      [value]="current.to ?? ''"
+      [min]="current.from ?? ''"
+      (change)="setDay('to', $event)"
+    />
+  </mat-form-field>
+  @if (showDownloaded()) {
+    <mat-form-field class="field">
+      <mat-label>Files</mat-label>
+      <mat-select [value]="current.downloaded" (selectionChange)="setDownloaded($event.value)">
+        <mat-option value="all">All files</mat-option>
+        <mat-option value="downloaded">Downloaded</mat-option>
+        <mat-option value="missing">Not downloaded</mat-option>
+      </mat-select>
+    </mat-form-field>
+  }
+  <mat-form-field class="field">
+    <mat-label>Order</mat-label>
+    <mat-select [value]="current.sort" (selectionChange)="setSort($event.value)">
+      <mat-option value="newest">Newest first</mat-option>
+      <mat-option value="oldest">Oldest first</mat-option>
+    </mat-select>
+  </mat-form-field>
+  @if (narrowed()) {
+    <button matButton type="button" class="clear" (click)="clear()">
+      <mat-icon>filter_alt_off</mat-icon>
+      Clear filters
+    </button>
+  }
+</div>

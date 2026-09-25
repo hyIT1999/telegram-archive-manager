@@ -8,6 +8,8 @@ import { channelHandle, chatTypeLabel, telegramUrl } from '../../features/channe
 import { ChannelsApi } from '../../features/channels/channels-api';
 import { ChannelDownloadsPanel } from '../../features/downloads/channel-downloads-panel';
 import { ChannelImportPanel } from '../../features/imports/channel-import-panel';
+import { MessageFeed } from '../../features/messages/message-feed';
+import { ChannelTopics } from '../../features/topics/channel-topics';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
@@ -21,12 +23,14 @@ import { BytesPipe } from '../../shared/pipes/bytes-pipe';
   imports: [
     ChannelDownloadsPanel,
     ChannelImportPanel,
+    ChannelTopics,
     DatePipe,
     DecimalPipe,
     EmptyState,
     ErrorState,
     MatButton,
     MatIcon,
+    MessageFeed,
     PageHeader,
     RouterLink,
     Skeleton,

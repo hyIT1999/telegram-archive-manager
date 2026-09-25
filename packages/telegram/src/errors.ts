@@ -61,6 +61,13 @@ export class ChatUnavailableError extends TelegramError {
   }
 }
 
+/** The chat is not a forum (any more), so it has no topics. */
+export class NotAForumError extends TelegramError {
+  constructor(message = 'This chat is not a forum, so it has no topics') {
+    super(message, TelegramErrorCode.NOT_A_FORUM);
+  }
+}
+
 /** The session is missing, revoked or unregistered — the user has to log in again. */
 export class AuthRequiredError extends TelegramError {
   constructor(reason = 'The Telegram session is no longer valid; log in again') {

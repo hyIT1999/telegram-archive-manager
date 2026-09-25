@@ -25,6 +25,7 @@ const channel: Channel = {
   storageFolder: null,
   downloadMedia: true,
   downloadNote: null,
+  topicsRefreshedAt: null,
   createdAt: created,
   updatedAt: created,
 };

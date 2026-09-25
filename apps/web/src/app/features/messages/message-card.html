@@ -1,0 +1,86 @@
+@let head = first();
+<article class="surface-card card">
+  <header class="head">
+    @if (showChannel()) {
+      <a class="channel" [routerLink]="['/channels', head.channel.id]">{{ head.channel.title }}</a>
+    }
+    @if (showTopic()) {
+      @if (head.topic; as topic) {
+        <a class="topic" [routerLink]="['/channels', head.channel.id, 'topics', topic.id]">
+          <mat-icon aria-hidden="true">tag</mat-icon>{{ topic.title }}
+        </a>
+      }
+    }
+    <time class="date" [attr.datetime]="head.postedAt">{{ head.postedAt | date: 'medium' }}</time>
+  </header>
+
+  @if (album()) {
+    <ul class="album" [attr.aria-label]="'Album of ' + items().length + ' files'">
+      @for (item of previews(); track item.id; let last = $last) {
+        <li>
+          <a
+            class="album-item"
+            [routerLink]="['/messages', item.id]"
+            [attr.aria-label]="
+              label(item) + ' ' + (item.media?.fileName ?? '#' + item.telegramMessageId)
+            "
+          >
+            @if (thumbnail(item); as src) {
+              <img [src]="src" alt="" loading="lazy" decoding="async" />
+            } @else {
+              <mat-icon aria-hidden="true">{{ icon(item) }}</mat-icon>
+            }
+            @if (length(item); as text) {
+              <span class="badge">{{ text }}</span>
+            }
+            @if (last && hiddenCount() > 0) {
+              <span class="more">+{{ hiddenCount() }}</span>
+            }
+          </a>
+        </li>
+      }
+    </ul>
+    @if (excerpt(); as text) {
+      <p class="excerpt">{{ text }}</p>
+    }
+    <p class="meta">
+      <mat-icon aria-hidden="true">collections</mat-icon>
+      Album · {{ items().length }} files
+    </p>
+  } @else {
+    <a class="body" [routerLink]="['/messages', head.id]">
+      @if (head.media) {
+        <span class="thumb">
+          @if (thumbnail(head); as src) {
+            <img [src]="src" alt="" loading="lazy" decoding="async" />
+          } @else {
+            <mat-icon aria-hidden="true">{{ icon(head) }}</mat-icon>
+          }
+          @if (length(head); as text) {
+            <span class="badge">{{ text }}</span>
+          }
+        </span>
+      }
+      <span class="text">
+        @if (title(); as name) {
+          <span class="title">{{ name }}</span>
+        }
+        @if (head.excerpt; as text) {
+          <span class="excerpt">{{ text }}</span>
+        } @else if (!head.media) {
+          <span class="excerpt empty">{{ label(head) }} without text</span>
+        }
+        <span class="meta">
+          <mat-icon aria-hidden="true">{{ icon(head) }}</mat-icon>
+          {{ label(head) }}
+          @if (head.media?.size) {
+            · {{ head.media?.size | bytes }}
+          }
+          @if (status(head); as state) {
+            · {{ state }}
+          }
+        </span>
+      </span>
+    </a>
+  }
+</article>

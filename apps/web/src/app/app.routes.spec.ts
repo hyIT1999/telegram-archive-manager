@@ -14,6 +14,7 @@ import {
 import { RouterTestingHarness } from '@angular/router/testing';
 import { MEDIA_CATEGORIES } from '@tam/shared';
 import {
+  makeMessagePage,
   makePage,
   makeSettings,
   makeStats,
@@ -38,6 +39,7 @@ import { TagsPage } from './features/tags/tags-page';
 import { Shell } from './layout/shell/shell';
 import { NAV_ITEMS } from './layout/sidebar/nav-items';
 import { ChannelDetailPage } from './pages/channel-detail/channel-detail-page';
+import { ChannelTopicPage } from './pages/channel-topic/channel-topic-page';
 import { DashboardPage } from './pages/dashboard/dashboard-page';
 import { ImportJobPage } from './pages/import-job/import-job-page';
 import { LoginPage } from './pages/login/login-page';
@@ -108,6 +110,9 @@ describe('app routes', () => {
     for (const request of http.match('/api/settings')) {
       request.flush(makeSettings());
     }
+    for (const request of http.match((candidate) => candidate.url === '/api/messages')) {
+      request.flush(makeMessagePage([]));
+    }
   }
 
   async function navigateSignedIn(harness: RouterTestingHarness, url: string): Promise<void> {
@@ -176,6 +181,7 @@ describe('app routes', () => {
 
     const harness = await RouterTestingHarness.create();
     await navigateSignedIn(harness, '/documents');
+    answerPageRequests();
     await harness.fixture.whenStable();
 
     const page = harness.fixture.debugElement.query(By.directive(MediaBrowserPage));
@@ -186,6 +192,7 @@ describe('app routes', () => {
 
   it.each<[string, Type<unknown>]>([
     ['/channels/0199a0b1-0000-7000-8000-000000000001', ChannelDetailPage],
+    ['/channels/0199a0b1-0000-7000-8000-000000000001/topics/42', ChannelTopicPage],
     ['/messages/0199a0b1-0000-7000-8000-000000000002', MessageDetailPage],
     ['/imports/new', ImportWizardPage],
     ['/imports/0199a0b1-0000-7000-8000-000000000003', ImportJobPage],

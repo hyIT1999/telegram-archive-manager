@@ -1,0 +1,218 @@
+:host {
+  display: block;
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  font: var(--mat-sys-body-medium);
+  color: var(--mat-sys-on-surface-variant);
+
+  a {
+    color: var(--mat-sys-primary);
+  }
+
+  mat-icon {
+    width: 18px;
+    height: 18px;
+    font-size: 18px;
+  }
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: start;
+  gap: 24px;
+}
+
+// One column that never grows past its share: the album strip scrolls instead of widening it.
+.main,
+.side,
+.viewer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+}
+
+.section-title {
+  margin-bottom: 12px;
+  font: var(--mat-sys-title-medium);
+}
+
+.hint {
+  margin: 0;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.image-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mat-sys-corner-large);
+  background: none;
+  cursor: zoom-in;
+
+  &:focus-visible {
+    outline: 3px solid var(--mat-sys-primary);
+    outline-offset: 2px;
+  }
+}
+
+.image,
+.preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: 75dvh;
+  margin: 0 auto;
+  border-radius: var(--mat-sys-corner-large);
+  object-fit: contain;
+}
+
+.preview {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  min-height: 160px;
+  border-radius: var(--mat-sys-corner-large);
+  background: var(--mat-sys-surface-container);
+}
+
+.preview-image {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  filter: saturate(0.85);
+}
+
+.preview-icon mat-icon,
+.file-icon mat-icon {
+  width: 56px;
+  height: 56px;
+  font-size: 56px;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px;
+}
+
+.file-name {
+  margin: 0 0 4px;
+  font: var(--mat-sys-title-medium);
+  overflow-wrap: anywhere;
+}
+
+.strip {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 4px;
+  overflow-x: auto;
+  list-style: none;
+}
+
+.album-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 128px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: var(--mat-sys-corner-small);
+  background: var(--mat-sys-surface-container-high);
+  color: var(--mat-sys-on-surface-variant);
+
+  &.current {
+    border-color: var(--mat-sys-primary);
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 72%);
+  color: #fff;
+  font: var(--mat-sys-label-small);
+}
+
+.text {
+  padding: 20px 24px;
+}
+
+.caption {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.neighbours {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel {
+  padding: 20px;
+}
+
+.details {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+
+  div {
+    display: grid;
+    gap: 2px;
+  }
+
+  dt {
+    font: var(--mat-sys-label-medium);
+    color: var(--mat-sys-on-surface-variant);
+  }
+
+  dd {
+    display: grid;
+    gap: 2px;
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.mono {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+}
+
+.small {
+  font-size: 0.85em;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.quote {
+  padding-left: 8px;
+  border-left: 2px solid var(--mat-sys-outline-variant);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+@media (max-width: 959.98px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

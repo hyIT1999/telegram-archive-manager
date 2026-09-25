@@ -15,6 +15,7 @@ import { QueuesModule } from './queues/queues.module.js';
 import { ShutdownCoordinator } from './shutdown/shutdown-coordinator.js';
 import { WorkerStatusModule } from './status/worker-status.module.js';
 import { TelegramModule } from './telegram/telegram.module.js';
+import { TopicsModule } from './topics/topics.module.js';
 
 @Module({
   imports: [
@@ -37,6 +38,8 @@ import { TelegramModule } from './telegram/telegram.module.js';
     ImportsModule,
     // Media downloads (media-download queue) and thumbnails.
     MediaModule,
+    // Names of forum topics, read from Telegram.
+    TopicsModule,
   ],
   // HeartbeatService and ShutdownCoordinator must stay here, in the root module: Nest runs
   // onModuleDestroy for the root module first and for global modules (PrismaModule) last.

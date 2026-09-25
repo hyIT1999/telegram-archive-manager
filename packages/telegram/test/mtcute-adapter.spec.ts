@@ -2,7 +2,7 @@ import { Long, tl } from '@mtcute/core';
 import { TelegramClient } from '@mtcute/core/client.js';
 import { StubTelegramClient, createStub } from '@mtcute/test';
 import { describe, expect, it } from 'vitest';
-import { LoginStepError, MtcuteTelegramAdapter, decodeFileId } from '../src/index.js';
+import { LoginStepError, MtcuteTelegramAdapter, NotAForumError, decodeFileId } from '../src/index.js';
 
 const CHANNEL_ID = 1_234_567_890;
 const MARKED_CHANNEL_ID = String(-1_000_000_000_000 - CHANNEL_ID);
@@ -431,6 +431,82 @@ describe('MtcuteTelegramAdapter — imports', () => {
         isProtected: true,
       });
       await expect(adapter.getLegacyGroup('-300')).resolves.toBeNull();
+    });
+  });
+
+  it('reads every forum topic, page by page', async () => {
+    const { stub, adapter } = setup();
+    const forum = createStub('channel', {
+      id: CHANNEL_ID,
+      title: 'Course',
+      megagroup: true,
+      forum: true,
+      accessHash: Long.fromNumber(5),
+    });
+    await stub.registerPeers(forum);
+    const topic = (id: number, extra: Partial<tl.RawForumTopic> = {}) =>
+      createStub('forumTopic', {
+        id,
+        date: 1_700_000_000 + id,
+        title: `Lesson ${id}`,
+        iconColor: 0x6fb9f0,
+        topMessage: 1_000 + id,
+        ...extra,
+      });
+    const all = [
+      topic(1, { title: 'General', hidden: true }),
+      ...Array.from({ length: 149 }, (_, index) =>
+        topic(index + 2, { pinned: index === 0, closed: index === 5 }),
+      ),
+    ];
+    const requests: tl.messages.RawGetForumTopicsRequest[] = [];
+    stub.respondWith('messages.getForumTopics', (request) => {
+      requests.push(request);
+      const start =
+        request.offsetTopic === 0 ? 0 : all.findIndex((item) => item.id === request.offsetTopic) + 1;
+      const page = all.slice(start, start + request.limit);
+      return createStub('messages.forumTopics', {
+        count: all.length,
+        topics: page,
+        // Each topic's last message, whose date pages topics ordered by activity.
+        messages: page.map((item) => message(item.topMessage)),
+        chats: [forum],
+        users: [],
+      });
+    });
+
+    await stub.with(async () => {
+      const topics = await adapter.getForumTopics(MARKED_CHANNEL_ID);
+      expect(topics).toHaveLength(150);
+      expect(requests).toHaveLength(2);
+      expect(requests[0]).toMatchObject({ offsetDate: 0, offsetId: 0, offsetTopic: 0, limit: 100 });
+      expect(requests[1]).toMatchObject({
+        offsetTopic: 100,
+        offsetId: 1_100,
+        offsetDate: 1_700_000_000 + 1_100,
+      });
+      expect(topics[0]).toEqual({
+        id: 1,
+        title: 'General',
+        iconColor: 0x6fb9f0,
+        isClosed: false,
+        isPinned: false,
+        isHidden: true,
+        date: new Date((1_700_000_000 + 1) * 1000),
+      });
+      expect(topics[1]).toMatchObject({ id: 2, title: 'Lesson 2', isPinned: true });
+      expect(topics[6]).toMatchObject({ id: 7, isClosed: true });
+    });
+  });
+
+  it('turns a chat without topics into NotAForumError', async () => {
+    const { stub, adapter } = setup();
+    await stub.registerPeers(channel);
+    stub.respondWith('messages.getForumTopics', () => {
+      throw rpcError(400, 'CHANNEL_FORUM_MISSING');
+    });
+    await stub.with(async () => {
+      await expect(adapter.getForumTopics(MARKED_CHANNEL_ID)).rejects.toBeInstanceOf(NotAForumError);
     });
   });
 });

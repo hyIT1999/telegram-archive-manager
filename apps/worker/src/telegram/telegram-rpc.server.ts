@@ -14,6 +14,7 @@ import { FloodWaitError, TelegramError } from '@tam/telegram';
 import { Redis } from 'ioredis';
 import { errorMessage } from '../common/error-message.js';
 import type { WorkerEnv } from '../config/env.schema.js';
+import { ForumTopicsService } from './forum-topics.service.js';
 import { TelegramAuthService } from './telegram-auth.service.js';
 import { TelegramDialogsService } from './telegram-dialogs.service.js';
 import { TELEGRAM_REDIS } from './telegram.tokens.js';
@@ -22,7 +23,7 @@ import { TELEGRAM_REDIS } from './telegram.tokens.js';
 const DRAIN_TIMEOUT_MS = 10_000;
 
 /**
- * Serves the api's Telegram requests (login steps, chat list refresh) over Redis pub/sub while
+ * Serves the api's Telegram requests (login steps, chat list and forum topic refreshes) over Redis pub/sub while
  * this process owns the Telegram connection. Payloads carry login codes and passwords: they are
  * validated, never logged and never persisted.
  */
@@ -38,6 +39,7 @@ export class TelegramRpcServer {
     @Inject(TELEGRAM_REDIS) private readonly publisher: Redis,
     private readonly auth: TelegramAuthService,
     private readonly dialogs: TelegramDialogsService,
+    private readonly topics: ForumTopicsService,
   ) {
     this.channels = telegramRpcChannels(config.get('BULLMQ_PREFIX', { infer: true }));
   }
@@ -133,6 +135,10 @@ export class TelegramRpcServer {
         return;
       case 'dialogs.refresh':
         await this.dialogs.startRefresh();
+        return;
+      case 'topics.refresh':
+        // Answers once the topics are stored, so the api's next read shows them.
+        await this.topics.refresh(call.channelId);
         return;
     }
   }

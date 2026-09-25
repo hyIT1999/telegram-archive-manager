@@ -10,13 +10,24 @@ import {
   makeChannel,
   makeChannelDownloads,
   makeImportJob,
+  makeMessage,
+  makeMessagePage,
   makePage,
+  makeTopic,
+  makeTopicList,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
 import { DOWNLOAD_ENDPOINTS, DOWNLOAD_POLLING } from '../../features/downloads/downloads-api';
 import { IMPORT_POLLING } from '../../features/imports/import-job-watch';
 import { IMPORT_ENDPOINTS } from '../../features/imports/imports-api';
-import type { ChannelDownloadsDto, ChannelDto, ImportJobDto } from '../../shared/models';
+import { MESSAGE_ENDPOINTS } from '../../features/messages/messages-api';
+import { TOPIC_ENDPOINTS } from '../../features/topics/topics-api';
+import type {
+  ChannelDownloadsDto,
+  ChannelDto,
+  ImportJobDto,
+  MessageSummaryDto,
+} from '../../shared/models';
 import { ChannelDetailPage } from './channel-detail-page';
 
 /** Stands in for the import job page the channel page links to. */
@@ -55,6 +66,13 @@ describe('ChannelDetailPage', () => {
     return harness;
   }
 
+  /** Answers the Library feed of the channel page (empty by default). */
+  async function answerLibrary(items: MessageSummaryDto[] = []) {
+    const request = await nextRequest(http, MESSAGE_ENDPOINTS.list);
+    request.flush(makeMessagePage(items));
+    return request;
+  }
+
   it('loads the channel from the route id and shows its details', async () => {
     const channel = makeChannel({
       title: 'Daily Physics',
@@ -65,6 +83,7 @@ describe('ChannelDetailPage', () => {
     });
     const harness = await open(channel.id);
     http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+    await answerLibrary();
     await harness.fixture.whenStable();
 
     const page = harness.routeNativeElement as HTMLElement;
@@ -101,6 +120,7 @@ describe('ChannelDetailPage', () => {
     http.expectOne(`/api/channels/${channel.id}`).flush(channel);
     (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
     (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(makeChannelDownloads());
+    await answerLibrary();
     await harness.fixture.whenStable();
 
     expect(page.querySelector('h1')?.textContent).toContain(channel.title);
@@ -117,6 +137,7 @@ describe('ChannelDetailPage', () => {
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id }),
       );
+      await answerLibrary();
       await harness.fixture.whenStable();
       return { channel, harness, page: harness.routeNativeElement as HTMLElement };
     }
@@ -181,6 +202,7 @@ describe('ChannelDetailPage', () => {
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id }),
       );
+      await answerLibrary();
       await harness.fixture.whenStable();
 
       const panel = (harness.routeNativeElement as HTMLElement).querySelector(
@@ -204,6 +226,7 @@ describe('ChannelDetailPage', () => {
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id, ...downloads }),
       );
+      await answerLibrary();
       await harness.fixture.whenStable();
       const page = harness.routeNativeElement as HTMLElement;
       return {
@@ -291,6 +314,62 @@ describe('ChannelDetailPage', () => {
       );
       await harness.fixture.whenStable();
       expect(panel.textContent).toContain('2 failed files are back in line.');
+    });
+  });
+
+  describe('library and topics', () => {
+    async function openBrowsable(overrides: Partial<ChannelDto> = {}) {
+      const channel = makeChannel({ isProtected: false, ...overrides });
+      const harness = await open(channel.id);
+      http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
+      return { channel, harness, page: harness.routeNativeElement as HTMLElement };
+    }
+
+    it("lists the channel's messages, with no channel filter and no topics outside forums", async () => {
+      const { channel, harness, page } = await openBrowsable();
+      const welcome = makeMessage({ type: 'TEXT', media: null, excerpt: 'Welcome to the course' });
+      const request = await answerLibrary([welcome]);
+      expect(request.request.params.get('channelId')).toBe(channel.id);
+      await harness.fixture.whenStable();
+
+      const library = page.querySelector('[aria-labelledby="channel-library-title"]');
+      expect(library?.querySelector('app-message-card')?.textContent).toContain(
+        'Welcome to the course',
+      );
+      expect(library?.textContent).not.toContain('All channels');
+      expect(page.querySelector('app-channel-topics')).toBeNull();
+      http.expectNone((candidate) => candidate.url === '/api/channels');
+      http.expectNone(TOPIC_ENDPOINTS.list(channel.id));
+    });
+
+    it('shows the topics of a forum, and the library offers them as a filter', async () => {
+      const { channel, harness, page } = await openBrowsable({ isForum: true });
+      await answerLibrary();
+      const topics = makeTopicList([
+        makeTopic({ topicId: 20, title: 'Optics' }),
+        makeTopic({ topicId: 30, title: 'Waves' }),
+      ]);
+      // The topic list and the library's topic filter both read the topics.
+      let answered = 0;
+      await vi.waitFor(() => {
+        for (const request of http.match(TOPIC_ENDPOINTS.list(channel.id))) {
+          request.flush(topics);
+          answered += 1;
+        }
+        expect(answered).toBe(2);
+      });
+      await harness.fixture.whenStable();
+
+      const list = page.querySelector('app-channel-topics');
+      expect(list?.textContent).toContain('Optics');
+      expect(list?.textContent).toContain('10 videos · 2 documents · 12 messages');
+      expect(list?.querySelector(`a[href="/channels/${channel.id}/topics/20"]`)).not.toBeNull();
+      const library = page.querySelector('[aria-labelledby="channel-library-title"]');
+      expect(library?.textContent).toContain('Topic');
     });
   });
 });

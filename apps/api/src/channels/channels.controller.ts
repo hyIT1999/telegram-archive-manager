@@ -19,6 +19,7 @@ import {
   type ChannelDto,
   type ChannelListQuery,
   type CreateChannelRequest,
+  type ForumTopicListDto,
   type IdParam,
   type Page,
   type RetryDownloadsDto,
@@ -26,6 +27,7 @@ import {
 } from '@tam/shared';
 import type { Response } from 'express';
 import { ChannelDownloadsService } from './channel-downloads.service.js';
+import { ChannelTopicsService } from './channel-topics.service.js';
 import { ChannelsService } from './channels.service.js';
 
 @Controller('channels')
@@ -33,6 +35,7 @@ export class ChannelsController {
   constructor(
     private readonly channels: ChannelsService,
     private readonly downloads: ChannelDownloadsService,
+    private readonly topics: ChannelTopicsService,
   ) {}
 
   /** Newest first; `nextCursor` continues the listing, `q` filters title/username. */
@@ -79,5 +82,18 @@ export class ChannelsController {
   @HttpCode(HttpStatus.OK)
   retryDownloads(@Param({ schema: idParamSchema }) params: IdParam): Promise<RetryDownloadsDto> {
     return this.downloads.retryFailed(params.id);
+  }
+
+  /** The forum topics of the channel with how many messages each holds (empty outside forums). */
+  @Get(':id/topics')
+  topicList(@Param({ schema: idParamSchema }) params: IdParam): Promise<ForumTopicListDto> {
+    return this.topics.list(params.id);
+  }
+
+  /** Reads the topic names from Telegram again, through the worker. */
+  @Post(':id/topics/refresh')
+  @HttpCode(HttpStatus.OK)
+  refreshTopics(@Param({ schema: idParamSchema }) params: IdParam): Promise<ForumTopicListDto> {
+    return this.topics.refresh(params.id);
   }
 }

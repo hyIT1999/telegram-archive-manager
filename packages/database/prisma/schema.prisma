@@ -291,6 +291,8 @@ model Channel {
   downloadMedia       Boolean   @default(true) @map("download_media")
   /// Why automatic downloads stopped by themselves (e.g. the chat can no longer be read).
   downloadNote        String?   @map("download_note")
+  /// When the worker last read the forum topics from Telegram (forums only).
+  topicsRefreshedAt   DateTime? @map("topics_refreshed_at") @db.Timestamptz(3)
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -299,6 +301,7 @@ model Channel {
   storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
   messages        Message[]
   importJobs      ImportJob[]
+  forumTopics     ForumTopic[]
 
   @@index([migratedToChannelId])
   @@index([storageLocationId])
@@ -341,6 +344,10 @@ model Message {
   @@unique([channelId, telegramMessageId])
   @@index([channelId, telegramDate(sort: Desc), telegramMessageId(sort: Desc)])
   @@index([telegramDate(sort: Desc), telegramMessageId(sort: Desc)])
+  /// Lists of one category (Videos, Documents…) across channels.
+  @@index([type, telegramDate(sort: Desc), telegramMessageId(sort: Desc)])
+  /// A forum topic's messages in order, and the counts per topic.
+  @@index([channelId, threadId, telegramDate, telegramMessageId])
   @@index([channelId, mediaGroupId])
   @@index([favoritedAt(sort: Desc)], map: "messages_favorites_idx", where: raw("is_favorite"))
   @@index([searchVector], map: "messages_search_vector_idx", type: Gin)
@@ -393,6 +400,30 @@ model Media {
   @@index([filename(ops: raw("gin_trgm_ops"))], map: "media_filename_trgm_idx", type: Gin)
   @@index([id], map: "media_thumbnail_pending_idx", where: raw("(thumbnail_checked_at IS NULL)"))
   @@map("media")
+}
+
+/// A topic of a forum supergroup, as Telegram describes it (read by the worker). Messages point at
+/// their topic through messages.thread_id, except those of the General topic (id 1): null there.
+model ForumTopic {
+  id           String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  channelId    String    @map("channel_id") @db.Uuid
+  /// Telegram topic id: the id of the service message that created the topic (1 = General).
+  topicId      Int       @map("topic_id")
+  title        String
+  /// RGB colour of the topic icon.
+  iconColor    Int?      @map("icon_color")
+  isClosed     Boolean   @default(false) @map("is_closed")
+  isPinned     Boolean   @default(false) @map("is_pinned")
+  isHidden     Boolean   @default(false) @map("is_hidden")
+  /// When the topic was created on Telegram.
+  telegramDate DateTime? @map("telegram_date") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, topicId])
+  @@map("forum_topics")
 }
 
 model Tag {

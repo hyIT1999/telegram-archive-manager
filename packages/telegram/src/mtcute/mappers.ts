@@ -10,6 +10,7 @@ import { ChatType, MediaType, MessageType } from '@tam/shared';
 import { encodeFileId } from '../file-id.js';
 import type {
   Chat,
+  ForumTopic,
   ForwardInfo,
   Message,
   MessageEntity,
@@ -19,6 +20,19 @@ import type {
 
 export function mapUser(user: MtUser): TelegramUser {
   return { id: String(user.id), username: user.username, displayName: user.displayName };
+}
+
+/** A forum topic as the archive keeps it. */
+export function mapForumTopic(raw: tl.RawForumTopic): ForumTopic {
+  return {
+    id: raw.id,
+    title: raw.title,
+    iconColor: Number.isInteger(raw.iconColor) ? raw.iconColor : null,
+    isClosed: raw.closed === true,
+    isPinned: raw.pinned === true,
+    isHidden: raw.hidden === true,
+    date: new Date(raw.date * 1000),
+  };
 }
 
 const CHAT_TYPES: Partial<Record<MtChat['chatType'], ChatType>> = {

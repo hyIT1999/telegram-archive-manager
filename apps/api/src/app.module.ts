@@ -12,6 +12,7 @@ import type { Env } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { ImportsModule } from './imports/imports.module.js';
 import { MediaModule } from './media/media.module.js';
+import { MessagesModule } from './messages/messages.module.js';
 import { RedisModule } from './redis/redis.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { StatsModule } from './stats/stats.module.js';
@@ -41,6 +42,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     ChannelsModule,
     ImportsModule,
     MediaModule,
+    MessagesModule,
     SettingsModule,
     StatsModule,
     StorageModule,

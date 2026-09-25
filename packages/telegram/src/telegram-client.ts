@@ -3,6 +3,7 @@ import type {
   Chat,
   DownloadOptions,
   DownloadedFile,
+  ForumTopic,
   HistoryPage,
   HistoryPageOptions,
   LegacyGroup,
@@ -60,6 +61,11 @@ export interface TelegramHistoryReader {
   refreshChat(chatId: string): Promise<Chat>;
   /** The old basic group of an upgraded supergroup; null when this account cannot read it. */
   getLegacyGroup(chatId: string): Promise<LegacyGroup | null>;
+  /**
+   * Every topic of a forum supergroup (the General topic included), in Telegram's order.
+   * Throws NotAForumError when the chat has no topics.
+   */
+  getForumTopics(chatId: string): Promise<ForumTopic[]>;
 }
 
 /** Media downloads of the archive. */

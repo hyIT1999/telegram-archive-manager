@@ -43,7 +43,9 @@ const STATUS_BY_CODE: Readonly<Record<string, HttpStatus>> = {
   [TelegramErrorCode.FLOOD_WAIT]: HttpStatus.TOO_MANY_REQUESTS,
   [TelegramErrorCode.CHAT_PROTECTED]: HttpStatus.UNPROCESSABLE_ENTITY,
   [TelegramErrorCode.CHAT_UNAVAILABLE]: HttpStatus.UNPROCESSABLE_ENTITY,
+  [TelegramErrorCode.NOT_A_FORUM]: HttpStatus.UNPROCESSABLE_ENTITY,
   [ApiErrorCode.TELEGRAM_UNAVAILABLE]: HttpStatus.SERVICE_UNAVAILABLE,
+  [ApiErrorCode.NOT_FOUND]: HttpStatus.NOT_FOUND,
 };
 
 interface PendingCall {

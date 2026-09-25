@@ -1,0 +1,110 @@
+@let file = current();
+@if (compact()) {
+  <div class="compact">
+    @if (status() === 'DOWNLOADED') {
+      <a matIconButton [href]="saveUrl()" download aria-label="Save file" matTooltip="Save file">
+        <mat-icon>file_download</mat-icon>
+      </a>
+    } @else if (inFlight()) {
+      <span class="ring" [matTooltip]="stageLabel() + ' · ' + file.downloadProgress + '%'">
+        <mat-progress-spinner
+          [mode]="status() === 'DOWNLOADING' ? 'determinate' : 'indeterminate'"
+          [value]="file.downloadProgress"
+          diameter="24"
+          [attr.aria-label]="'Downloading, ' + file.downloadProgress + '%'"
+        />
+      </span>
+      <button
+        matIconButton
+        type="button"
+        aria-label="Cancel the download"
+        matTooltip="Cancel the download"
+        [disabled]="busy()"
+        (click)="cancel()"
+      >
+        <mat-icon>close</mat-icon>
+      </button>
+    } @else if (!protectedFile()) {
+      <button
+        matIconButton
+        type="button"
+        [attr.aria-label]="
+          status() === 'FAILED' ? 'Try the download again' : 'Download into the archive'
+        "
+        [matTooltip]="failure() ?? skipReason() ?? 'Download into the archive'"
+        [disabled]="busy()"
+        (click)="download()"
+      >
+        <mat-icon>{{ status() === 'FAILED' ? 'replay' : 'cloud_download' }}</mat-icon>
+      </button>
+    }
+    @if (error(); as message) {
+      <span class="compact-error" role="alert">{{ message }}</span>
+    }
+  </div>
+} @else {
+  @if (status() === 'DOWNLOADED') {
+    <div class="actions">
+      <a matButton="tonal" [href]="saveUrl()" download>
+        <mat-icon>file_download</mat-icon>
+        Save file
+      </a>
+    </div>
+  } @else if (inFlight()) {
+    <div class="progress">
+      <mat-progress-bar
+        [mode]="status() === 'DOWNLOADING' ? 'determinate' : 'query'"
+        [value]="file.downloadProgress"
+        aria-label="Download progress"
+      />
+      <div class="progress-row">
+        <p class="hint">
+          {{ stageLabel() }}
+          @if (status() === 'DOWNLOADING') {
+            · {{ file.downloadProgress }}%
+          }
+          @if (file.size !== null) {
+            · {{ file.size | bytes }}
+          }
+        </p>
+        <button matButton type="button" [disabled]="busy()" (click)="cancel()">Cancel</button>
+      </div>
+    </div>
+    @if (waitReason(); as reason) {
+      <app-notice tone="info" icon="hourglass_top">
+        @if (reason === 'paused') {
+          Every download is paused. <a routerLink="/settings">Resume downloads in Settings</a>.
+        } @else {
+          {{ reason }}
+        }
+      </app-notice>
+    }
+  } @else if (protectedFile()) {
+    <p class="hint">Content protection is on for this chat, so the file is not downloaded.</p>
+  } @else {
+    @if (failure(); as message) {
+      <app-notice tone="error" title="The download failed">{{ message }}</app-notice>
+    } @else if (skipReason(); as reason) {
+      <p class="hint">{{ reason }}.</p>
+    }
+    <div class="actions">
+      <button
+        matButton="filled"
+        type="button"
+        [disabled]="busy()"
+        [showProgress]="busy()"
+        (click)="download()"
+      >
+        <mat-icon>{{ status() === 'FAILED' ? 'replay' : 'cloud_download' }}</mat-icon>
+        {{ status() === 'FAILED' ? 'Try again' : 'Download' }}
+        @if (file.size !== null) {
+          ({{ file.size | bytes }})
+        }
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  }
+  @if (error(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+}

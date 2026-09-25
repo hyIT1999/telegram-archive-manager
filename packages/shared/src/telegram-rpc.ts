@@ -32,6 +32,8 @@ export const telegramRpcCallSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('auth.password'), password: z.string().min(1).max(256) }),
   z.object({ method: z.literal('auth.logout') }),
   z.object({ method: z.literal('dialogs.refresh') }),
+  /** Reads the forum topics of an archived channel into forum_topics. */
+  z.object({ method: z.literal('topics.refresh'), channelId: z.uuid() }),
 ]);
 export type TelegramRpcCall = z.infer<typeof telegramRpcCallSchema>;
 export type TelegramRpcMethod = TelegramRpcCall['method'];

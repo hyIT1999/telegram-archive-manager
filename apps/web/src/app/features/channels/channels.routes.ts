@@ -12,4 +12,10 @@ export const channelsRoutes: Routes = [
     loadComponent: () =>
       import('../../pages/channel-detail/channel-detail-page').then((m) => m.ChannelDetailPage),
   },
+  {
+    path: ':id/topics/:topicId',
+    title: 'Topic',
+    loadComponent: () =>
+      import('../../pages/channel-topic/channel-topic-page').then((m) => m.ChannelTopicPage),
+  },
 ];

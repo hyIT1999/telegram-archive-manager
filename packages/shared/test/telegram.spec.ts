@@ -70,6 +70,22 @@ describe('telegram RPC contract', () => {
     ).toBe(false);
   });
 
+  it('names the channel whose forum topics to read', () => {
+    const request = {
+      id,
+      replyTo: `${telegramRpcChannels('tam').replyPrefix}api-1`,
+      deadline: Date.now() + 30_000,
+      call: { method: 'topics.refresh', channelId: id },
+    };
+    expect(telegramRpcRequestSchema.parse(request).call).toEqual({
+      method: 'topics.refresh',
+      channelId: id,
+    });
+    expect(
+      telegramRpcRequestSchema.safeParse({ ...request, call: { method: 'topics.refresh' } }).success,
+    ).toBe(false);
+  });
+
   it('distinguishes success and failure replies', () => {
     expect(telegramRpcReplySchema.parse({ id, ok: true })).toEqual({ id, ok: true });
     const failure = telegramRpcReplySchema.parse({

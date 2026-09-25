@@ -38,6 +38,40 @@
     </section>
   }
 
+  @if (watching().length > 0) {
+    <section class="group" aria-labelledby="continue-title">
+      <h2 class="group-title" id="continue-title">Continue watching</h2>
+      <ul class="shelf">
+        @for (entry of watching(); track entry.mediaId) {
+          <li>
+            <a class="surface-card resume" [routerLink]="['/messages', entry.messageId]">
+              <span class="resume-thumb">
+                @if (!missingThumbnails().has(entry.mediaId)) {
+                  <img
+                    [src]="thumbnail(entry)"
+                    alt=""
+                    loading="lazy"
+                    (error)="thumbnailFailed(entry)"
+                  />
+                }
+                <mat-icon aria-hidden="true">{{
+                  entry.kind === 'audio' ? 'headphones' : 'play_circle'
+                }}</mat-icon>
+              </span>
+              <span class="resume-title">{{ entry.title }}</span>
+              <span class="resume-meta">{{ left(entry) }} left</span>
+              <mat-progress-bar
+                mode="determinate"
+                [value]="progress(entry)"
+                [attr.aria-label]="progress(entry) + '% watched'"
+              />
+            </a>
+          </li>
+        }
+      </ul>
+    </section>
+  }
+
   @for (group of groups; track group.title) {
     <section class="group" [attr.aria-labelledby]="'stat-group-' + $index">
       <h2 class="group-title" [id]="'stat-group-' + $index">{{ group.title }}</h2>
@@ -54,6 +88,17 @@
           />
         }
       </div>
+    </section>
+  }
+
+  @if (latestItems().length > 0) {
+    <section class="group" aria-labelledby="latest-title">
+      <h2 class="group-title" id="latest-title">Latest media</h2>
+      <ul class="shelf latest">
+        @for (item of latestItems(); track item.id) {
+          <li><app-media-tile [item]="item" /></li>
+        }
+      </ul>
     </section>
   }
 } @else {

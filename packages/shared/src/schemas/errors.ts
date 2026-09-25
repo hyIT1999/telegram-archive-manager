@@ -48,6 +48,8 @@ export const TelegramErrorCode = {
   CHAT_PROTECTED: 'CHAT_PROTECTED',
   /** The account can no longer read the chat (it left, was banned, or the chat is gone). */
   CHAT_UNAVAILABLE: 'CHAT_UNAVAILABLE',
+  /** The chat is not a forum, so it has no topics. */
+  NOT_A_FORUM: 'NOT_A_FORUM',
   /** Any other Telegram failure. */
   TELEGRAM_ERROR: 'TELEGRAM_ERROR',
 } as const;

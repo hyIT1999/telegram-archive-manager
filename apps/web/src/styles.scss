@@ -180,6 +180,18 @@ a {
   );
 }
 
+// The image viewer fills the screen on black, whatever the theme (photos read best on it).
+.image-viewer-panel {
+  @include mat.dialog-overrides(
+    (
+      container-shape: 0,
+      container-color: #0b0b0c,
+      container-max-width: 100vw,
+      container-small-max-width: 100vw,
+    )
+  );
+}
+
 // Shown inside <app-root> until Angular replaces it.
 .boot-splash {
   display: grid;

@@ -7,14 +7,9 @@ import type {
 } from '../enums.js';
 import type { ChannelStorageLocationDto } from './channels.js';
 
-/** GET /api/media/:id — one media file of the archive. Never includes server paths. */
-export interface MediaDto {
+/** A media file as lists show it (inside MessageSummaryDto). */
+export interface MediaSummaryDto {
   id: string;
-  messageId: string;
-  channelId: string;
-  telegramMessageId: number;
-  /** When the message was posted on Telegram. */
-  postedAt: string;
   type: MediaType;
   fileName: string | null;
   mimeType: string | null;
@@ -27,6 +22,17 @@ export interface MediaDto {
   downloadStatus: DownloadStatus;
   /** 0–100. */
   downloadProgress: number;
+  /** Telegram's small preview is in the thumbnail cache (GET /api/media/:id/thumbnail). */
+  hasThumbnail: boolean;
+}
+
+/** GET /api/media/:id — one media file of the archive. Never includes server paths. */
+export interface MediaDto extends MediaSummaryDto {
+  messageId: string;
+  channelId: string;
+  telegramMessageId: number;
+  /** When the message was posted on Telegram. */
+  postedAt: string;
   downloadedBytes: number;
   /** Why the file is not downloaded, when it was skipped. */
   skipReason: DownloadSkipReason | null;
@@ -43,7 +49,6 @@ export interface MediaDto {
   storageLocation: ChannelStorageLocationDto | null;
   /** Path inside that location, e.g. "Physics (-100123)/2026-09/42 - notes.pdf". */
   storageKey: string | null;
-  hasThumbnail: boolean;
   updatedAt: string;
 }
 
