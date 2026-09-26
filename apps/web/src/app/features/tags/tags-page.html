@@ -1,0 +1,71 @@
+<app-page-header eyebrow="Collections" title="Tags" [subtitle]="subtitle()">
+  <button pageActions matButton="filled" type="button" (click)="create()">
+    <mat-icon>add</mat-icon>
+    New tag
+  </button>
+</app-page-header>
+
+@if (store.error(); as message) {
+  <app-error-state
+    title="The tags could not be loaded"
+    [message]="message"
+    (retry)="store.reload()"
+  />
+} @else if (!store.loaded()) {
+  <app-skeleton variant="line" [count]="4" label="Loading tags…" />
+} @else if (store.tags().length === 0) {
+  <app-empty-state
+    class="surface-card"
+    icon="sell"
+    title="No tags yet"
+    message="Open a message and type a tag in its Tags panel, or create one here."
+  >
+    <button matButton="tonal" type="button" (click)="create()">
+      <mat-icon>add</mat-icon>
+      New tag
+    </button>
+  </app-empty-state>
+} @else {
+  @if (store.tags().length > searchFrom) {
+    <mat-form-field class="search" subscriptSizing="dynamic">
+      <mat-icon matPrefix aria-hidden="true">search</mat-icon>
+      <mat-label>Find a tag</mat-label>
+      <input
+        matInput
+        type="search"
+        autocomplete="off"
+        [value]="query()"
+        (input)="onQuery($event)"
+      />
+    </mat-form-field>
+  }
+  <ul class="list surface-card" aria-label="Tags">
+    @for (tag of shown(); track tag.id) {
+      <li class="row">
+        <span class="dot" aria-hidden="true" [style.background]="tag.color"></span>
+        <a class="name" [routerLink]="['/tags', tag.id]">{{ tag.name }}</a>
+        <span class="count">{{ count(tag) }}</span>
+        <button
+          matIconButton
+          type="button"
+          [attr.aria-label]="'Actions for the tag ' + tag.name"
+          [matMenuTriggerFor]="menu"
+        >
+          <mat-icon>more_vert</mat-icon>
+        </button>
+        <mat-menu #menu="matMenu" xPosition="before">
+          <button mat-menu-item type="button" (click)="edit(tag)">
+            <mat-icon>edit</mat-icon>
+            <span>Rename or recolor</span>
+          </button>
+          <button mat-menu-item type="button" (click)="remove(tag)">
+            <mat-icon>delete</mat-icon>
+            <span>Delete</span>
+          </button>
+        </mat-menu>
+      </li>
+    } @empty {
+      <li class="none">No tag matches “{{ query() }}”.</li>
+    }
+  </ul>
+}

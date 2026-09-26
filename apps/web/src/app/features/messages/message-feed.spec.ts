@@ -19,6 +19,7 @@ import {
 import type { MessageSummaryDto } from '../../shared/models';
 import { ImageViewer } from '../media/image-viewer/image-viewer';
 import { FeedFiltersBar } from './feed-filters';
+import { MessageChanges, favoriteChanged, tagsChanged } from './message-changes';
 import { FEED_PAGE_SIZE, MessageFeed } from './message-feed';
 
 @Component({ template: '<app-message-feed />', imports: [MessageFeed] })
@@ -114,6 +115,53 @@ describe('MessageFeed', () => {
     expect(page(harness).querySelector('.count')?.textContent).toContain('3 messages');
   });
 
+  it('searches the words in the URL, one card per result, with the words marked', async () => {
+    const harness = await open('/messages?q=bai%202');
+    const request = http.expectOne((candidate) => candidate.url === '/api/search');
+    expect(request.request.params.get('q')).toBe('bai 2');
+    expect(request.request.params.get('sort')).toBe('relevance');
+    const name = 'Bài 2 notes.pdf';
+    const found = [1, 2].map(() =>
+      makeMessage({
+        mediaGroupId: '5',
+        media: makeMediaSummary({ fileName: name }),
+        matches: {
+          fileName: [
+            [0, 3],
+            [4, 1],
+          ],
+          excerpt: [],
+        },
+      }),
+    );
+    request.flush(makeMessagePage(found, null, 2));
+    await harness.fixture.whenStable();
+
+    // Results of one album stay apart, so each shows what was found in it.
+    const cards = page(harness).querySelectorAll('app-message-card');
+    expect(cards).toHaveLength(2);
+    const marks = Array.from(cards[0]?.querySelectorAll('mark') ?? []).map((m) => m.textContent);
+    expect(marks).toEqual(['Bài', '2']);
+    expect(page(harness).querySelector('.count')?.textContent).toContain('2 results');
+  });
+
+  it('shows favorites and tags changed elsewhere, and keeps them for Back', async () => {
+    const harness = await open('/messages');
+    const message = makeMessage({ type: 'TEXT', media: null, excerpt: 'Candles' });
+    await answer(harness, [message]);
+    const heart = () => page(harness).querySelector('app-message-card app-favorite-button button');
+    expect(heart()?.getAttribute('aria-pressed')).toBe('false');
+
+    const tag = { id: '0199a0b1-0000-7000-8000-e00000000001', name: 'Charts', color: null };
+    const changes = TestBed.inject(MessageChanges);
+    changes.publish(favoriteChanged(message.id, true));
+    changes.publish(tagsChanged(message.id, [tag]));
+    await harness.fixture.whenStable();
+
+    expect(heart()?.getAttribute('aria-pressed')).toBe('true');
+    expect(page(harness).querySelector('app-tag-chip')?.textContent).toContain('Charts');
+  });
+
   it('asks the api for the filters in the URL', async () => {
     await open(
       `/messages?channel=${CHANNEL}&type=documents&from=2026-01-01&to=2026-01-31&sort=oldest&downloaded=missing`,
@@ -136,9 +184,12 @@ describe('MessageFeed', () => {
     const filters = harness.fixture.debugElement.query(By.directive(FeedFiltersBar))
       .componentInstance as FeedFiltersBar;
     filters.filtersChange.emit({
+      q: '',
       channelId: CHANNEL,
       topicId: null,
       category: 'videos',
+      tagIds: [],
+      favorite: false,
       from: null,
       to: null,
       sort: 'newest',

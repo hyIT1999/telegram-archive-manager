@@ -1,8 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import type { Channel, Message, Prisma } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
-  ApiErrorCode,
   type MessageDto,
   type MessageListQuery,
   type MessagePageDto,
@@ -13,19 +12,19 @@ import {
   telegramMessageUrl,
 } from '@tam/shared';
 import { MEDIA_INCLUDE, toMediaDto } from '../media/media.mapper.js';
+import { MESSAGE_TAGS_INCLUDE } from '../tags/tag.mapper.js';
 import {
   MESSAGE_SUMMARY_INCLUDE,
   type MessageSummaryRow,
-  type TopicTitles,
   excerptOf,
   toEntityDtos,
   toForwardDto,
   toMessageMeta,
   toMessageSummaryDto,
-  topicIdOf,
-  topicKey,
 } from './message.mapper.js';
+import { channelWithOldGroups, messageNotFound, topicTitles } from './message-lookups.js';
 import {
+  afterCursor,
   beyond,
   decodeMessageCursor,
   encodeMessageCursor,
@@ -35,14 +34,6 @@ import {
 
 /** An album has at most 10 items; a few more are tolerated, never an unbounded list. */
 const ALBUM_LIMIT = 20;
-
-function messageNotFound(): NotFoundException {
-  return new NotFoundException({ message: 'Message not found', code: ApiErrorCode.NOT_FOUND });
-}
-
-function channelNotFound(): NotFoundException {
-  return new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
-}
 
 type DetailChannel = Pick<
   Channel,
@@ -58,11 +49,13 @@ export class MessagesService {
     const cursor =
       query.cursor === undefined ? undefined : decodeMessageCursor(query.cursor, query.sort);
     const channelIds =
-      query.channelId === undefined ? null : await this.channelWithOldGroups(query.channelId);
+      query.channelId === undefined
+        ? null
+        : await channelWithOldGroups(this.prisma, query.channelId);
     const where = messageWhere(query, channelIds);
     const [rows, total] = await Promise.all([
       this.prisma.message.findMany({
-        where: cursor ? { AND: [where, beyond(cursor, query.sort)] } : where,
+        where: cursor ? { AND: [where, afterCursor(cursor)] } : where,
         orderBy: messageOrder(query.sort),
         take: query.limit + 1,
         include: MESSAGE_SUMMARY_INCLUDE,
@@ -71,7 +64,7 @@ export class MessagesService {
     ]);
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
-    const titles = await this.topicTitles(page);
+    const titles = await topicTitles(this.prisma, page);
     const last = page.at(-1);
     return {
       items: page.map((row) => toMessageSummaryDto(row, titles)),
@@ -95,6 +88,7 @@ export class MessagesService {
           },
         },
         media: { orderBy: { createdAt: 'asc' }, take: 1, include: MEDIA_INCLUDE },
+        tags: MESSAGE_TAGS_INCLUDE,
       },
     });
     if (!message) {
@@ -108,7 +102,7 @@ export class MessagesService {
       this.neighbour(message, channel, 'oldest'),
     ]);
     const row: MessageSummaryRow = { ...message, channel, media: message.media };
-    const titles = await this.topicTitles([row, ...album]);
+    const titles = await topicTitles(this.prisma, [row, ...album]);
     const meta = toMessageMeta(message.telegramMeta);
     const file = message.media[0];
     return {
@@ -136,35 +130,8 @@ export class MessagesService {
         },
         message.telegramMessageId,
       ),
+      favoritedAt: message.favoritedAt?.toISOString() ?? null,
     };
-  }
-
-  /** The channel and the old basic groups upgraded into it (404 when the channel is unknown). */
-  private async channelWithOldGroups(channelId: string): Promise<string[]> {
-    const channel = await this.prisma.channel.findUnique({
-      where: { id: channelId },
-      select: { id: true, migratedFrom: { select: { id: true } } },
-    });
-    if (!channel) {
-      throw channelNotFound();
-    }
-    return [channel.id, ...channel.migratedFrom.map((group) => group.id)];
-  }
-
-  /** Names of the forum topics the rows belong to. */
-  private async topicTitles(rows: readonly MessageSummaryRow[]): Promise<TopicTitles> {
-    const forumRows = rows.filter((row) => row.channel.isForum);
-    if (forumRows.length === 0) {
-      return new Map();
-    }
-    const topics = await this.prisma.forumTopic.findMany({
-      where: {
-        channelId: { in: [...new Set(forumRows.map((row) => row.channel.id))] },
-        topicId: { in: [...new Set(forumRows.map((row) => topicIdOf(row)))] },
-      },
-      select: { channelId: true, topicId: true, title: true },
-    });
-    return new Map(topics.map((topic) => [topicKey(topic.channelId, topic.topicId), topic.title]));
   }
 
   /** Every message of the album, oldest first; empty outside albums. */

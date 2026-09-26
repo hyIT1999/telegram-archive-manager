@@ -19,10 +19,12 @@ import {
   makeSettings,
   makeStats,
   makeStorageList,
+  makeTag,
+  makeTagList,
   makeTelegramStatus,
   makeUser,
 } from '../testing/fixtures';
-import { answerSessionCheck } from '../testing/http';
+import { answerSessionCheck, nextRequest } from '../testing/http';
 import { routes } from './app.routes';
 import { serverErrorInterceptor } from './core/interceptors/server-error-interceptor';
 import { unauthorizedInterceptor } from './core/interceptors/unauthorized-interceptor';
@@ -35,6 +37,7 @@ import { MediaBrowserPage } from './features/media/media-browser-page';
 import { MEDIA_SECTIONS } from './features/media/media-sections';
 import { MessageListPage } from './features/messages/message-list-page';
 import { SettingsPage } from './features/settings/settings-page';
+import { TagPage } from './features/tags/tag-page';
 import { TagsPage } from './features/tags/tags-page';
 import { Shell } from './layout/shell/shell';
 import { NAV_ITEMS } from './layout/sidebar/nav-items';
@@ -46,6 +49,8 @@ import { LoginPage } from './pages/login/login-page';
 import { MessageDetailPage } from './pages/message-detail/message-detail-page';
 import { NotFoundPage } from './pages/not-found/not-found-page';
 import { SearchPage } from './pages/search/search-page';
+
+const TAG = makeTag({ name: 'Charts' });
 
 /** The page each sidebar entry must open. */
 const SIDEBAR_PAGES: Readonly<Record<string, Type<unknown>>> = {
@@ -113,6 +118,9 @@ describe('app routes', () => {
     for (const request of http.match((candidate) => candidate.url === '/api/messages')) {
       request.flush(makeMessagePage([]));
     }
+    for (const request of http.match('/api/tags')) {
+      request.flush(makeTagList([TAG]));
+    }
   }
 
   async function navigateSignedIn(harness: RouterTestingHarness, url: string): Promise<void> {
@@ -171,6 +179,22 @@ describe('app routes', () => {
       const page = harness.fixture.debugElement.query(By.directive(SIDEBAR_PAGES[item.path]));
       expect(page, `page for ${item.path}`).not.toBeNull();
     }
+    http.verify();
+  });
+
+  it('opens a tag by id with the messages that carry it', async () => {
+    const harness = await RouterTestingHarness.create();
+    await navigateSignedIn(harness, `/tags/${TAG.id}`);
+    (await nextRequest(http, '/api/tags')).flush(makeTagList([TAG]));
+    const feed = await nextRequest(http, '/api/messages');
+    expect(feed.request.params.get('tagIds')).toBe(TAG.id);
+    feed.flush(makeMessagePage([]));
+    answerPageRequests();
+    await harness.fixture.whenStable();
+
+    expect(routedPage()).toBe(TagPage);
+    expect(harness.routeNativeElement?.querySelector('h1')?.textContent).toContain('Charts');
+    expect(document.title).toBe('Tag · Unofficial Telegram Archive Manager');
     http.verify();
   });
 

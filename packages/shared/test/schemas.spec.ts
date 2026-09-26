@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   IMPORT_RUN_ATTEMPTS,
+  SEARCH_QUERY_MAX_LENGTH,
+  TAG_NAME_MAX_LENGTH,
+  addMessageTagRequestSchema,
   appEventSchema,
+  createTagRequestSchema,
   cursorQuerySchema,
   importJobListQuerySchema,
   importRequestSchema,
@@ -9,9 +13,13 @@ import {
   loginRequestSchema,
   messageListQuerySchema,
   newPasswordSchema,
+  normalizeTagName,
   rangeEnd,
   rangeStart,
+  searchQuerySchema,
+  tagNameSchema,
   telegramIdSchema,
+  updateTagRequestSchema,
 } from '../src/index.js';
 
 describe('loginRequestSchema', () => {
@@ -149,6 +157,93 @@ describe('messageListQuerySchema', () => {
     expect(rangeStart('2026-03-05').toISOString()).toBe('2026-03-05T00:00:00.000Z');
     expect(rangeEnd('2026-03-05').toISOString()).toBe('2026-03-05T23:59:59.999Z');
     expect(rangeEnd('2026-03-05T10:00:00+07:00').toISOString()).toBe('2026-03-05T03:00:00.000Z');
+  });
+
+  it('filters by tags (at most ten) and favorites', () => {
+    const tag = '0199a0b1-0000-7000-8000-00000000000a';
+    const parsed = messageListQuerySchema.parse({ tagIds: `${tag},${tag}`, favorite: 'true' });
+    expect(parsed).toMatchObject({ tagIds: [tag], favorite: true });
+    expect(messageListQuerySchema.safeParse({ tagIds: 'not-a-uuid' }).success).toBe(false);
+    const eleven = Array.from(
+      { length: 11 },
+      (_, index) => `0199a0b1-0000-7000-8000-${String(index).padStart(12, '0')}`,
+    );
+    expect(messageListQuerySchema.safeParse({ tagIds: eleven.join(',') }).success).toBe(false);
+  });
+
+  it('sorts by favorite date only when listing favorites', () => {
+    expect(messageListQuerySchema.parse({ sort: 'favorited', favorite: 'true' }).sort).toBe(
+      'favorited',
+    );
+    const result = messageListQuerySchema.safeParse({ sort: 'favorited' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['sort']);
+  });
+});
+
+describe('searchQuerySchema', () => {
+  it('trims the query and sorts the best matches first by default', () => {
+    const parsed = searchQuerySchema.parse({ q: '  bài học  ', types: 'VIDEO' });
+    expect(parsed).toMatchObject({ q: 'bài học', sort: 'relevance', types: ['VIDEO'] });
+    expect(searchQuerySchema.parse({ q: 'x', sort: 'oldest' }).sort).toBe('oldest');
+    expect(searchQuerySchema.safeParse({ q: 'x', sort: 'favorited' }).success).toBe(false);
+  });
+
+  it('needs a letter or digit, and at most 200 characters', () => {
+    expect(searchQuerySchema.safeParse({}).success).toBe(false);
+    expect(searchQuerySchema.safeParse({ q: '   ' }).success).toBe(false);
+    expect(searchQuerySchema.safeParse({ q: '#!?' }).success).toBe(false);
+    expect(searchQuerySchema.safeParse({ q: '2' }).success).toBe(true);
+    expect(
+      searchQuerySchema.safeParse({ q: 'a'.repeat(SEARCH_QUERY_MAX_LENGTH + 1) }).success,
+    ).toBe(false);
+  });
+
+  it('checks the filters like the message list', () => {
+    const result = searchQuerySchema.safeParse({ q: 'x', topicId: '42' });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.path).toEqual(['topicId']);
+  });
+});
+
+describe('tag schemas', () => {
+  it('cleans names and compares them without case', () => {
+    expect(createTagRequestSchema.parse({ name: '  Quan   trọng ' })).toEqual({
+      name: 'Quan trọng',
+    });
+    // Decomposed input is stored composed, so it cannot hide a duplicate.
+    expect(tagNameSchema.parse('Toán'.normalize('NFD'))).toBe('Toán');
+    expect(normalizeTagName(' ĐÃ  Xem ')).toBe('đã xem');
+    expect(normalizeTagName('Toán'.normalize('NFD'))).toBe(normalizeTagName('toán'));
+  });
+
+  it('rejects empty, long and control-character names', () => {
+    expect(tagNameSchema.safeParse('   ').success).toBe(false);
+    expect(tagNameSchema.safeParse('a'.repeat(TAG_NAME_MAX_LENGTH)).success).toBe(true);
+    expect(tagNameSchema.safeParse('a'.repeat(TAG_NAME_MAX_LENGTH + 1)).success).toBe(false);
+    expect(tagNameSchema.safeParse('bell\u0007').success).toBe(false);
+  });
+
+  it('takes #rrggbb colors in lower case, or none', () => {
+    expect(createTagRequestSchema.parse({ name: 'a', color: '#3F51B5' }).color).toBe('#3f51b5');
+    expect(createTagRequestSchema.parse({ name: 'a', color: null }).color).toBeNull();
+    expect(createTagRequestSchema.safeParse({ name: 'a', color: 'blue' }).success).toBe(false);
+  });
+
+  it('needs something to change', () => {
+    expect(updateTagRequestSchema.safeParse({}).success).toBe(false);
+    expect(updateTagRequestSchema.parse({ color: null })).toEqual({ color: null });
+  });
+
+  it('tags a message with an existing tag or by name', () => {
+    const tagId = '0199a0b1-0000-7000-8000-00000000000a';
+    expect(addMessageTagRequestSchema.parse({ tagId })).toEqual({ tagId });
+    expect(addMessageTagRequestSchema.parse({ name: ' Wave ', color: '#00897B' })).toEqual({
+      name: 'Wave',
+      color: '#00897b',
+    });
+    expect(addMessageTagRequestSchema.safeParse({}).success).toBe(false);
+    expect(addMessageTagRequestSchema.safeParse({ tagId: 'nope' }).success).toBe(false);
   });
 });
 

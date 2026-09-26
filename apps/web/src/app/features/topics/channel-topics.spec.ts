@@ -6,7 +6,8 @@ import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { provideRouter } from '@angular/router';
 import { flushError, makeTopic, makeTopicList } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
-import { ChannelTopics, TOPIC_PREVIEW_COUNT, searchable, topicCounts } from './channel-topics';
+import { searchable } from '../../shared/text/searchable';
+import { ChannelTopics, TOPIC_PREVIEW_COUNT, topicCounts } from './channel-topics';
 import { TOPICS_WAIT_POLL_MS, TOPIC_ENDPOINTS } from './topics-api';
 
 const CHANNEL = '0199a0b1-0000-7000-8000-000000000001';

@@ -47,6 +47,35 @@
   font: var(--mat-sys-body-small);
 }
 
+.favorite {
+  margin: -8px -8px -8px 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    display: flex;
+    min-width: 0;
+  }
+}
+
+.loved {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  font-size: 18px;
+  color: #ff6b81;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 80%));
+}
+
 .body {
   display: flex;
   gap: 16px;

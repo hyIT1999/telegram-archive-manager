@@ -2,23 +2,32 @@ import { DatePipe } from '@angular/common';
 import { Component, computed, input, output, signal } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
+import { HighlightedText } from '../../shared/components/highlighted-text/highlighted-text';
 import type { MessageSummaryDto } from '../../shared/models';
 import { BytesPipe } from '../../shared/pipes/bytes-pipe';
-import { messageTitle, typeIcon } from '../messages/message-labels';
+import { FavoriteButton } from '../favorites/favorite-button';
+import { messageTitle, titleMatches, typeIcon } from '../messages/message-labels';
 import { MEDIA_ENDPOINTS } from './media-api';
 import { durationLabel } from './media-labels';
 
 /**
- * A video or image in a gallery: Telegram's preview, length, whether it is downloaded, and a link
- * to its message. With `opens`, a plain click opens a viewer instead (modified clicks still follow
- * the link, e.g. into a new tab).
+ * A video or image in a gallery: Telegram's preview, length, whether it is downloaded, a heart to
+ * favorite it, and a link to its message. With `opens`, a plain click opens a viewer instead
+ * (modified clicks still follow the link, e.g. into a new tab).
  */
 @Component({
   selector: 'app-media-tile',
-  imports: [BytesPipe, DatePipe, MatIcon, RouterLink],
+  imports: [BytesPipe, DatePipe, FavoriteButton, HighlightedText, MatIcon, RouterLink],
   template: `
     @let message = item();
     @let file = message.media;
+    <app-favorite-button
+      class="favorite"
+      variant="overlay"
+      [class.on]="message.isFavorite"
+      [messageId]="message.id"
+      [favorite]="message.isFavorite"
+    />
     <a class="tile" [routerLink]="['/messages', message.id]" (click)="clicked($event)">
       <span class="frame" [class.square]="square()">
         @if (file?.hasThumbnail && !thumbnailFailed()) {
@@ -44,7 +53,7 @@ import { durationLabel } from './media-labels';
           <span class="badge saved">{{ file?.downloadProgress }}%</span>
         }
       </span>
-      <span class="title">{{ title() }}</span>
+      <span class="title"><app-highlighted-text [text]="title()" [ranges]="titleRanges()" /></span>
       <span class="meta">
         {{ message.postedAt | date: 'mediumDate' }}
         @if (file?.size) {
@@ -58,8 +67,31 @@ import { durationLabel } from './media-labels';
   `,
   styles: `
     :host {
+      position: relative;
       display: block;
       min-width: 0;
+    }
+
+    /* Over the preview, outside the link: shown when favorited, on hover or focus, on touch. */
+    .favorite {
+      position: absolute;
+      top: 6px;
+      left: 6px;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity 120ms ease;
+    }
+
+    :host(:hover) .favorite,
+    .favorite:focus-within,
+    .favorite.on {
+      opacity: 1;
+    }
+
+    @media (hover: none) {
+      .favorite {
+        opacity: 1;
+      }
     }
 
     .tile {
@@ -150,7 +182,8 @@ import { durationLabel } from './media-labels';
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .frame img {
+      .frame img,
+      .favorite {
         transition: none;
       }
     }
@@ -167,6 +200,7 @@ export class MediaTile {
 
   protected readonly thumbnailFailed = signal(false);
   protected readonly title = computed(() => messageTitle(this.item()));
+  protected readonly titleRanges = computed(() => titleMatches(this.item()));
   protected readonly icon = computed(() => typeIcon(this.item().type));
   protected readonly length = computed(() => durationLabel(this.item().media?.duration));
   protected readonly thumbnail = computed(() => {

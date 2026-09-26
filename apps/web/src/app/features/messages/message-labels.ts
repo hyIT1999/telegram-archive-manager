@@ -3,6 +3,7 @@ import type {
   MessageCategory,
   MessageSummaryDto,
   MessageType,
+  TextRange,
 } from '../../shared/models';
 
 /** Topic id of a forum's General topic (mirrors GENERAL_TOPIC_ID in @tam/shared). */
@@ -93,24 +94,60 @@ export function typeIcon(type: MessageType): string {
   return TYPE_ICONS[type];
 }
 
+type TitledMessage = Pick<MessageSummaryDto, 'type' | 'telegramMessageId' | 'excerpt'> & {
+  media: Pick<MediaSummaryDto, 'fileName'> | null;
+};
+
+/** Characters of a text line a title shows. */
+const TITLE_LENGTH = 120;
+
+/** What names a message: its file name, or the first line of its text; where it starts there. */
+function titleSource(
+  message: TitledMessage,
+): { kind: 'file' | 'text'; start: number; text: string } | null {
+  const fileName = message.media?.fileName;
+  if (fileName?.trim()) {
+    const start = fileName.length - fileName.trimStart().length;
+    return { kind: 'file', start, text: fileName.trim() };
+  }
+  let offset = 0;
+  for (const line of message.excerpt?.split('\n') ?? []) {
+    const text = line.trim();
+    if (text) {
+      return { kind: 'text', start: offset + line.length - line.trimStart().length, text };
+    }
+    offset += line.length + 1;
+  }
+  return null;
+}
+
 /** What people call a message: its file name, the first line of its text, or "Video #42". */
-export function messageTitle(
-  message: Pick<MessageSummaryDto, 'type' | 'telegramMessageId' | 'excerpt'> & {
-    media: Pick<MediaSummaryDto, 'fileName'> | null;
-  },
-): string {
-  const fileName = message.media?.fileName?.trim();
-  if (fileName) {
-    return fileName;
+export function messageTitle(message: TitledMessage): string {
+  const source = titleSource(message);
+  if (!source) {
+    return `${TYPE_LABELS[message.type]} #${message.telegramMessageId}`;
   }
-  const firstLine = message.excerpt
-    ?.split('\n')
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-  if (firstLine) {
-    return firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine;
+  return source.kind === 'text' && source.text.length > TITLE_LENGTH
+    ? `${source.text.slice(0, TITLE_LENGTH - 1)}…`
+    : source.text;
+}
+
+/** Where a search found its words in messageTitle(message). */
+export function titleMatches(
+  message: TitledMessage & Pick<MessageSummaryDto, 'matches'>,
+): TextRange[] {
+  const source = titleSource(message);
+  const matches = message.matches;
+  if (!source || !matches) {
+    return [];
   }
-  return `${TYPE_LABELS[message.type]} #${message.telegramMessageId}`;
+  const shown =
+    source.kind === 'text' && source.text.length > TITLE_LENGTH
+      ? TITLE_LENGTH - 1
+      : source.text.length;
+  return (source.kind === 'file' ? matches.fileName : matches.excerpt)
+    .map(([at, length]): TextRange => [at - source.start, length])
+    .filter(([at, length]) => at >= 0 && at + length <= shown);
 }
 
 const SERVICE_ACTIONS: Readonly<Record<string, string>> = {

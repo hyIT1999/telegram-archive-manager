@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { iconColorHex } from '../../src/channels/channel-topics.service.js';
 import {
+  type MessageSummaryRow,
   excerptOf,
   toEntityDtos,
   toForwardDto,
   toMessageMeta,
+  toMessageSummaryDto,
   topicTitle,
 } from '../../src/messages/message.mapper.js';
 
@@ -136,5 +138,38 @@ describe('message details', () => {
     expect(iconColorHex(null)).toBeNull();
     expect(iconColorHex(-1)).toBeNull();
     expect(iconColorHex(0x1000000)).toBeNull();
+  });
+
+  it('lists a message with its favorite flag and tags', () => {
+    const row: MessageSummaryRow = {
+      id: 'm1',
+      channelId: 'c1',
+      telegramMessageId: 7,
+      type: 'TEXT',
+      text: 'Candles',
+      caption: null,
+      entities: null,
+      telegramDate: new Date('2026-01-02T03:04:05.000Z'),
+      editDate: null,
+      replyToMessageId: null,
+      mediaGroupId: null,
+      threadId: null,
+      forwardInfo: null,
+      views: null,
+      telegramMeta: null,
+      isFavorite: true,
+      favoritedAt: new Date('2026-02-01T00:00:00.000Z'),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      channel: { id: 'c1', title: 'Charts', isForum: false },
+      media: [],
+      tags: [{ tag: { id: 't1', name: 'Important', color: '#e53935' } }],
+    };
+    expect(toMessageSummaryDto(row, new Map())).toMatchObject({
+      isFavorite: true,
+      tags: [{ id: 't1', name: 'Important', color: '#e53935' }],
+      excerpt: 'Candles',
+      media: null,
+    });
   });
 });

@@ -20,15 +20,11 @@ import { finalize } from 'rxjs';
 import { Notice } from '../../shared/components/notice/notice';
 import { Skeleton } from '../../shared/components/skeleton/skeleton';
 import { type ForumTopicDto, type ForumTopicListDto, toApiError } from '../../shared/models';
+import { searchable } from '../../shared/text/searchable';
 import { TOPICS_WAIT_POLL_MS, TopicsApi } from './topics-api';
 
 /** Topics shown before "Show all". */
 export const TOPIC_PREVIEW_COUNT = 12;
-
-/** Lower case without accents, so "bai hoc" finds "Bài học". */
-export function searchable(text: string): string {
-  return text.normalize('NFD').replace(/\p{M}/gu, '').replace(/[đĐ]/g, 'd').toLowerCase();
-}
 
 /** "12 videos · 3 documents · 20 messages": what a topic holds, empty kinds left out. */
 export function topicCounts(topic: Pick<ForumTopicDto, 'counts'>): string {

@@ -9,14 +9,17 @@ import { ChannelsModule } from './channels/channels.module.js';
 import { createValidationPipe } from './common/validation/validation.pipe.js';
 import { configModuleOptions } from './config/config-module.js';
 import type { Env } from './config/env.js';
+import { FavoritesModule } from './favorites/favorites.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ImportsModule } from './imports/imports.module.js';
 import { MediaModule } from './media/media.module.js';
 import { MessagesModule } from './messages/messages.module.js';
 import { RedisModule } from './redis/redis.module.js';
+import { SearchModule } from './search/search.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { StatsModule } from './stats/stats.module.js';
 import { StorageModule } from './storage/storage.module.js';
+import { TagsModule } from './tags/tags.module.js';
 import { TelegramModule } from './telegram/telegram.module.js';
 
 /** Requests per client IP and minute on every route (login is much stricter). */
@@ -40,12 +43,15 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     AuthModule,
     HealthModule,
     ChannelsModule,
+    FavoritesModule,
     ImportsModule,
     MediaModule,
     MessagesModule,
+    SearchModule,
     SettingsModule,
     StatsModule,
     StorageModule,
+    TagsModule,
     TelegramModule,
   ],
   providers: [

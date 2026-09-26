@@ -61,9 +61,8 @@ export class Header {
         takeUntilDestroyed(),
       )
       .subscribe(() => {
-        const url = this.router.parseUrl(this.router.url);
-        const onSearchPage = url.root.children['primary']?.segments[0]?.path === 'search';
-        this.searchQuery.set(onSearchPage ? (url.queryParamMap.get('q') ?? '') : '');
+        const q = this.router.parseUrl(this.router.url).queryParamMap.get('q');
+        this.searchQuery.set(this.onSearchPage() ? (q ?? '') : '');
       });
   }
 
@@ -71,8 +70,17 @@ export class Header {
     event.preventDefault();
     const q = this.searchQuery().trim();
     if (q) {
-      void this.router.navigate(['/search'], { queryParams: { q } });
+      // A new search on the search page keeps the filters chosen there.
+      void this.router.navigate(['/search'], {
+        queryParams: { q },
+        queryParamsHandling: this.onSearchPage() ? 'merge' : undefined,
+      });
     }
+  }
+
+  private onSearchPage(): boolean {
+    const url = this.router.parseUrl(this.router.url);
+    return url.root.children['primary']?.segments[0]?.path === 'search';
   }
 
   protected async logOut(): Promise<void> {

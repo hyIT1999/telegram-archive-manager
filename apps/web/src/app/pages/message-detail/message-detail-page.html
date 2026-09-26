@@ -31,6 +31,12 @@
       <mat-icon>arrow_back</mat-icon>
       Back
     </button>
+    <app-favorite-button
+      pageActions
+      variant="button"
+      [messageId]="item.id"
+      [favorite]="item.isFavorite"
+    />
     @if (item.telegramUrl; as link) {
       <a pageActions matButton="tonal" [href]="link" target="_blank" rel="noopener noreferrer">
         <mat-icon>open_in_new</mat-icon>
@@ -208,6 +214,10 @@
     </div>
 
     <aside class="side">
+      <section class="surface-card panel" aria-labelledby="tags-title">
+        <h2 id="tags-title" class="section-title">Tags</h2>
+        <app-tag-editor [messageId]="item.id" [tags]="item.tags" />
+      </section>
       <section class="surface-card panel" aria-labelledby="telegram-title">
         <h2 id="telegram-title" class="section-title">Telegram</h2>
         <dl class="details">

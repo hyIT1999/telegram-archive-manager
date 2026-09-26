@@ -98,6 +98,15 @@ export const DownloadErrorCode = {
 } as const;
 export type DownloadErrorCode = (typeof DownloadErrorCode)[keyof typeof DownloadErrorCode];
 
+/** Outcomes of tag requests. */
+export const TagErrorCode = {
+  /** Another tag has this name (compared without regard to case). */
+  TAG_NAME_TAKEN: 'TAG_NAME_TAKEN',
+  /** The archive holds MAX_TAGS tags already. */
+  TAG_LIMIT_REACHED: 'TAG_LIMIT_REACHED',
+} as const;
+export type TagErrorCode = (typeof TagErrorCode)[keyof typeof TagErrorCode];
+
 /** One entry of ApiErrorBody.details for a 400 VALIDATION_FAILED response. */
 export interface ValidationIssue {
   /** Dotted path of the offending field, e.g. `email` or `items.0.id`; empty for the whole value. */

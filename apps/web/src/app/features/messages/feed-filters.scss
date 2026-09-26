@@ -3,6 +3,31 @@
   gap: 12px;
 }
 
+.search {
+  width: min(100%, 480px);
+
+  // The field has its own clear button.
+  input::-webkit-search-cancel-button {
+    display: none;
+  }
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--mat-sys-outline);
+}
+
 .fields {
   display: flex;
   flex-wrap: wrap;
@@ -17,6 +42,11 @@
   &.wide {
     flex-basis: 240px;
   }
+
+  // Wide enough for "Recently favorited".
+  &.order {
+    flex-basis: 210px;
+  }
 }
 
 .clear {
@@ -25,7 +55,8 @@
 
 // Phones: two small fields per row, channel and topic on their own.
 @media (max-width: 599.98px) {
-  .field {
+  .field,
+  .field.order {
     flex: 1 1 calc(50% - 6px);
     min-width: 0;
   }

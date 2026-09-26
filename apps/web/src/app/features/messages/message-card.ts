@@ -2,23 +2,33 @@ import { DatePipe } from '@angular/common';
 import { Component, computed, input } from '@angular/core';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
-import type { MessageSummaryDto } from '../../shared/models';
+import { HighlightedText } from '../../shared/components/highlighted-text/highlighted-text';
+import type { MessageSummaryDto, TagRefDto } from '../../shared/models';
 import { BytesPipe } from '../../shared/pipes/bytes-pipe';
+import { FavoriteButton } from '../favorites/favorite-button';
 import { MEDIA_ENDPOINTS } from '../media/media-api';
 import { durationLabel } from '../media/media-labels';
+import { TagChip } from '../tags/tag-chip';
 import type { FeedEntry } from './feed-groups';
-import { mediaStatusLabel, messageTitle, typeIcon, typeLabel } from './message-labels';
+import {
+  mediaStatusLabel,
+  messageTitle,
+  titleMatches,
+  typeIcon,
+  typeLabel,
+} from './message-labels';
 
 /** Previews shown for an album; the rest is summed up as "+N". */
 const ALBUM_PREVIEWS = 6;
 
 /**
- * A message in a feed: channel, topic and date, then its text, file or album. Everything links to
- * the message page (and the channel and topic to theirs).
+ * A message in a feed: channel, topic and date, then its text, file or album, its tags and a heart
+ * to favorite it. Everything links to the message page (and the channel, topic and tags to theirs).
+ * Search results mark the words found.
  */
 @Component({
   selector: 'app-message-card',
-  imports: [BytesPipe, DatePipe, MatIcon, RouterLink],
+  imports: [BytesPipe, DatePipe, FavoriteButton, HighlightedText, MatIcon, RouterLink, TagChip],
   templateUrl: './message-card.html',
   styleUrl: './message-card.scss',
 })
@@ -47,6 +57,20 @@ export class MessageCard {
     const first = this.first();
     return first.media ? messageTitle(first) : null;
   });
+  protected readonly titleRanges = computed(() => titleMatches(this.first()));
+  /** The tags of the message, or of any file of the album. */
+  protected readonly tags = computed<readonly TagRefDto[]>(() => {
+    const byId = new Map<string, TagRefDto>();
+    for (const item of this.items()) {
+      for (const tag of item.tags) {
+        byId.set(tag.id, tag);
+      }
+    }
+    return [...byId.values()];
+  });
+  protected readonly favorites = computed(
+    () => this.items().filter((item) => item.isFavorite).length,
+  );
 
   protected thumbnail(item: MessageSummaryDto): string | null {
     return item.media?.hasThumbnail ? MEDIA_ENDPOINTS.thumbnail(item.media.id) : null;

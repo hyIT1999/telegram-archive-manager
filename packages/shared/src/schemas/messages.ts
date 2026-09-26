@@ -2,9 +2,14 @@ import { z } from 'zod';
 import { MessageType } from '../enums.js';
 import { type Page, csvList, cursorQuerySchema, isoDateOrDateTimeSchema } from './common.js';
 import type { MediaDto, MediaSummaryDto } from './media.js';
+import type { TagRefDto } from './tags.js';
 
-export const messageSortSchema = z.enum(['newest', 'oldest']);
+/** `favorited`: most recently favorited first (favorites only). */
+export const messageSortSchema = z.enum(['newest', 'oldest', 'favorited']);
 export type MessageSort = z.infer<typeof messageSortSchema>;
+
+/** Tags one filter may combine. */
+export const MAX_FILTER_TAGS = 10;
 
 /** Topic id of a forum's General topic: its messages carry no thread id. */
 export const GENERAL_TOPIC_ID = 1;
@@ -27,33 +32,74 @@ export function rangeEnd(value: string): Date {
     : new Date(value);
 }
 
+/** The filters of GET /api/messages and GET /api/search. */
+export const messageFilterShape = {
+  /** Messages of this channel and of the old basic group it was upgraded from. */
+  channelId: z.uuid().optional(),
+  /** Messages of one forum topic of that channel (1 = General). */
+  topicId: z.coerce.number().int().min(1).max(2_147_483_647).optional(),
+  /** Message types; without it, every type but SERVICE. */
+  types: csvList(z.enum(MessageType)).optional(),
+  from: isoDateOrDateTimeSchema.optional(),
+  to: isoDateOrDateTimeSchema.optional(),
+  /** true: only messages whose file is downloaded; false: only files not downloaded yet. */
+  downloaded: z.stringbool().optional(),
+  /** Messages carrying every one of these tags. */
+  tagIds: csvList(z.uuid())
+    .refine((ids) => ids.length <= MAX_FILTER_TAGS, `At most ${MAX_FILTER_TAGS} tags`)
+    .optional(),
+  /** true: only favorites; false: only messages that are not. */
+  favorite: z.stringbool().optional(),
+};
+
+/** What the filters parse to (both queries carry them). */
+export interface MessageFilters {
+  channelId?: string;
+  topicId?: number;
+  types?: MessageType[];
+  from?: string;
+  to?: string;
+  downloaded?: boolean;
+  tagIds?: string[];
+  favorite?: boolean;
+}
+
+/** Checks that the filters make sense together: a topic needs its channel, dates run forward. */
+export function withFilterRules<T extends z.ZodType<MessageFilters>>(schema: T): T {
+  return schema
+    .refine((query) => query.topicId === undefined || query.channelId !== undefined, {
+      message: 'A topic needs its channel (channelId)',
+      path: ['topicId'],
+    })
+    .refine(
+      (query) =>
+        query.from === undefined ||
+        query.to === undefined ||
+        rangeStart(query.from).getTime() <= rangeEnd(query.to).getTime(),
+      { message: '"from" must not be after "to"', path: ['from'] },
+    );
+}
+
 /** GET /api/messages */
-export const messageListQuerySchema = cursorQuerySchema
-  .extend({
-    /** Messages of this channel and of the old basic group it was upgraded from. */
-    channelId: z.uuid().optional(),
-    /** Messages of one forum topic of that channel (1 = General). */
-    topicId: z.coerce.number().int().min(1).max(2_147_483_647).optional(),
-    /** Message types; without it, every type but SERVICE. */
-    types: csvList(z.enum(MessageType)).optional(),
-    from: isoDateOrDateTimeSchema.optional(),
-    to: isoDateOrDateTimeSchema.optional(),
-    /** true: only messages whose file is downloaded; false: only files not downloaded yet. */
-    downloaded: z.stringbool().optional(),
+export const messageListQuerySchema = withFilterRules(
+  cursorQuerySchema.extend({
+    ...messageFilterShape,
     sort: messageSortSchema.default('newest'),
-  })
-  .refine((query) => query.topicId === undefined || query.channelId !== undefined, {
-    message: 'A topic needs its channel (channelId)',
-    path: ['topicId'],
-  })
-  .refine(
-    (query) =>
-      query.from === undefined ||
-      query.to === undefined ||
-      rangeStart(query.from).getTime() <= rangeEnd(query.to).getTime(),
-    { message: '"from" must not be after "to"', path: ['from'] },
-  );
+  }),
+).refine((query) => query.sort !== 'favorited' || query.favorite === true, {
+  message: 'Sorting by favorite date lists favorites only (favorite=true)',
+  path: ['sort'],
+});
 export type MessageListQuery = z.infer<typeof messageListQuerySchema>;
+
+/** Where a search matched in a string: [offset, length] in UTF-16 code units, like JavaScript. */
+export type TextRange = readonly [offset: number, length: number];
+
+/** Search results only: what matched in the file name and in the excerpt. */
+export interface MessageMatchesDto {
+  fileName: TextRange[];
+  excerpt: TextRange[];
+}
 
 /** The channel of a message, as lists show it. */
 export interface MessageChannelRefDto {
@@ -85,6 +131,11 @@ export interface MessageSummaryDto {
   topic: MessageTopicRefDto | null;
   /** The message's file, if it has one. */
   media: MediaSummaryDto | null;
+  isFavorite: boolean;
+  /** By name. */
+  tags: TagRefDto[];
+  /** GET /api/search only: where the search words were found. */
+  matches?: MessageMatchesDto;
 }
 
 export interface MessagePageDto extends Page<MessageSummaryDto> {
@@ -173,4 +224,12 @@ export interface MessageDto extends MessageSummaryDto {
   nextId: string | null;
   /** The message in Telegram, for people who can read the chat. */
   telegramUrl: string | null;
+  /** When it became a favorite. */
+  favoritedAt: string | null;
+}
+
+/** POST and DELETE /api/messages/:id/favorite */
+export interface FavoriteDto {
+  isFavorite: boolean;
+  favoritedAt: string | null;
 }

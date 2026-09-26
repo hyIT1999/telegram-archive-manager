@@ -1,23 +1,18 @@
 import { Component } from '@angular/core';
-import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
+import { MessageFeed } from '../messages/message-feed';
 
+/** The messages marked with ♥, the most recently favorited first. */
 @Component({
   selector: 'app-favorites-page',
-  imports: [EmptyState, PageHeader],
+  imports: [MessageFeed, PageHeader],
   template: `
     <app-page-header
       eyebrow="Collections"
       title="Favorites"
-      subtitle="Messages you starred to find again quickly."
+      subtitle="Messages you marked with ♥, the most recently added first."
     />
-    <app-empty-state
-      class="surface-card"
-      icon="star"
-      note="Arrives in Phase 6"
-      title="Favorites are on their way"
-      message="Starring messages and browsing your favorites arrives in Phase 6."
-    />
+    <app-message-feed [favorite]="true" defaultSort="favorited" />
   `,
 })
 export class FavoritesPage {}

@@ -14,6 +14,8 @@ export * from './schemas/imports.js';
 export * from './schemas/media.js';
 export * from './schemas/settings.js';
 export * from './schemas/messages.js';
+export * from './schemas/search.js';
+export * from './schemas/tags.js';
 export * from './schemas/topics.js';
 export * from './schemas/stats.js';
 export * from './schemas/events.js';

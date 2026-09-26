@@ -10,14 +10,18 @@ import {
   makeMediaSummary,
   makeMessage,
   makeMessageDetail,
+  makeTag,
+  tagRef,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
 import { MemoryStorage } from '../../../testing/memory-storage';
 import { DOWNLOAD_ENDPOINTS, DOWNLOAD_POLLING } from '../../features/downloads/downloads-api';
+import { FAVORITE_ENDPOINTS } from '../../features/favorites/favorites-api';
 import { ImageViewer } from '../../features/media/image-viewer/image-viewer';
 import { MEDIA_ENDPOINTS } from '../../features/media/media-api';
 import { PLAYBACK_STORAGE } from '../../features/media/playback-memory';
 import { MESSAGE_ENDPOINTS } from '../../features/messages/messages-api';
+import { TAG_ENDPOINTS } from '../../features/tags/tags-api';
 import type { MessageDto } from '../../shared/models';
 import { MessageDetailPage } from './message-detail-page';
 
@@ -201,6 +205,35 @@ describe('MessageDetailPage', () => {
       page.querySelector(`a[href="/messages/${message.replyTo?.messageId}"]`)?.textContent,
     ).toContain('#7');
     expect(page.textContent).toContain('Any homework?');
+  });
+
+  it('favorites the message and takes a tag off it', async () => {
+    const optics = tagRef(makeTag({ name: 'Optics' }));
+    const message = makeMessageDetail({
+      type: 'TEXT',
+      media: null,
+      text: 'Lenses',
+      tags: [optics],
+    });
+    const { harness, page } = await open(message);
+
+    const heart = page.querySelector<HTMLButtonElement>('app-favorite-button button');
+    expect(heart?.textContent).toContain('Favorite');
+    heart?.click();
+    harness.fixture.detectChanges();
+    expect(heart?.textContent).toContain('Favorited');
+    http.expectOne(FAVORITE_ENDPOINTS.favorite(message.id)).flush({
+      isFavorite: true,
+      favoritedAt: '2026-09-26T00:00:00.000Z',
+    });
+
+    expect(page.querySelector('app-tag-editor mat-chip-row')?.textContent).toContain('Optics');
+    page.querySelector<HTMLButtonElement>('app-tag-editor button[matChipRemove]')?.click();
+    http.expectOne(TAG_ENDPOINTS.messageTag(message.id, optics.id)).flush({ tags: [] });
+    await harness.fixture.whenStable();
+    expect(page.querySelector('app-tag-editor mat-chip-row')).toBeNull();
+    // The heart stays as chosen when the tags change.
+    expect(heart?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('shows "not found" for unknown messages and a retry for other failures', async () => {

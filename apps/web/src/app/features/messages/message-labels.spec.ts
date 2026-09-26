@@ -11,6 +11,7 @@ import {
   mediaStatusLabel,
   messageTitle,
   serviceActionLabel,
+  titleMatches,
 } from './message-labels';
 
 describe('message labels', () => {
@@ -41,6 +42,41 @@ describe('message labels', () => {
     expect(
       messageTitle(makeMessage({ type: 'TEXT', media: null, excerpt: 'x'.repeat(200) })),
     ).toHaveLength(120);
+  });
+
+  it('finds where a search matched in the title', () => {
+    const named = makeMessage({
+      media: makeMediaSummary({ fileName: '  Wave zone.mp4' }),
+      matches: { fileName: [[7, 4]], excerpt: [] },
+    });
+    // The title is trimmed: the range moves with it.
+    expect(messageTitle(named)).toBe('Wave zone.mp4');
+    expect(titleMatches(named)).toEqual([[5, 4]]);
+
+    const text = makeMessage({
+      type: 'TEXT',
+      media: null,
+      excerpt: '\n  Needle here\nand a needle there',
+      matches: {
+        fileName: [],
+        excerpt: [
+          [3, 6],
+          [19, 6],
+        ],
+      },
+    });
+    // Only the first line names the message.
+    expect(titleMatches(text)).toEqual([[0, 6]]);
+
+    const long = makeMessage({
+      type: 'TEXT',
+      media: null,
+      excerpt: `${'x'.repeat(118)}needle`,
+      matches: { fileName: [], excerpt: [[118, 6]] },
+    });
+    // Cut away with the end of a long line.
+    expect(titleMatches(long)).toEqual([]);
+    expect(titleMatches(makeMessage())).toEqual([]);
   });
 
   it('describes service messages and download states', () => {

@@ -1,9 +1,10 @@
 import { DatePipe, DecimalPipe, Location } from '@angular/common';
 import { Component, computed, inject, input, linkedSignal } from '@angular/core';
-import { rxResource } from '@angular/core/rxjs-interop';
+import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
+import { FavoriteButton } from '../../features/favorites/favorite-button';
 import { ImageViewer } from '../../features/media/image-viewer/image-viewer';
 import { viewerImages } from '../../features/media/image-viewer/viewer-image';
 import { MEDIA_ENDPOINTS } from '../../features/media/media-api';
@@ -19,8 +20,10 @@ import {
   typeIcon,
   typeLabel,
 } from '../../features/messages/message-labels';
+import { MessageChanges } from '../../features/messages/message-changes';
 import { MessageText } from '../../features/messages/message-text';
 import { MessagesApi } from '../../features/messages/messages-api';
+import { TagEditor } from '../../features/tags/tag-editor';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
 import { Notice } from '../../shared/components/notice/notice';
@@ -45,7 +48,8 @@ const MEDIA_TYPES = new Set([
 /**
  * One message: its file in the right viewer (video and audio player, image viewer, PDF preview,
  * file card), or a Download button while the file is not in the archive yet; its album, formatted
- * text, where it sits in Telegram, and the previous and next message of the same topic and kind.
+ * text, favorite heart and tags, where it sits in Telegram, and the previous and next message of
+ * the same topic and kind.
  */
 @Component({
   selector: 'app-message-detail-page',
@@ -55,6 +59,7 @@ const MEDIA_TYPES = new Set([
     DecimalPipe,
     EmptyState,
     ErrorState,
+    FavoriteButton,
     MatButton,
     MatIcon,
     MediaDownloadControl,
@@ -64,6 +69,7 @@ const MEDIA_TYPES = new Set([
     PdfPreview,
     RouterLink,
     Skeleton,
+    TagEditor,
     VideoPlayer,
   ],
   templateUrl: './message-detail-page.html',
@@ -83,14 +89,20 @@ export class MessageDetailPage {
     params: () => this.messageId(),
     stream: ({ params }) => this.api.get(params),
   });
-  protected readonly data = computed<MessageDto | undefined>(() =>
+  /** The message as loaded, with favorite and tag changes applied since. */
+  protected readonly data = linkedSignal<MessageDto | undefined>(() =>
     this.message.hasValue() ? this.message.value() : undefined,
   );
   protected readonly notFound = computed(() => isNotFoundError(this.message.error()));
   protected readonly errorMessage = computed(() => toApiError(this.message.error()).message);
 
-  /** The file as last seen; the download control keeps it current. */
-  protected readonly media = linkedSignal<MediaDto | null>(() => this.data()?.media ?? null);
+  /**
+   * The file as last seen; the download control keeps it current. It starts over only when the
+   * message is loaded again, not when a favorite or tag changes.
+   */
+  protected readonly media = linkedSignal<MediaDto | null>(() =>
+    this.message.hasValue() ? this.message.value().media : null,
+  );
   protected readonly title = computed(() => {
     const data = this.data();
     return data ? messageTitle(data) : 'Message';
@@ -166,6 +178,12 @@ export class MessageDetailPage {
     const data = this.data();
     return data?.type === 'SERVICE' ? serviceActionLabel(data.serviceAction) : null;
   });
+
+  constructor() {
+    inject(MessageChanges)
+      .updates.pipe(takeUntilDestroyed())
+      .subscribe((update) => this.data.update((data) => (data ? update(data) : data)));
+  }
 
   protected mediaChanged(media: MediaDto): void {
     this.media.set(media);

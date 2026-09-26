@@ -24,15 +24,14 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 3 | Import lịch sử message, import jobs (pause/resume/cancel), BullMQ, reconciler | ✅ Hoàn thành |
 | 4 | Tải media (resume/retry/dedup/checksum) vào nơi lưu đã chọn, thumbnail | ✅ Hoàn thành |
 | 5 | Dashboard đầy đủ, Channels (kèm forum topic), Messages, trình xem media | ✅ Hoàn thành |
-| 6 | Search, Tags, Favorites, Filters | ⏳ Tiếp theo |
-| 7 | Tiến trình realtime (SSE), sync message mới | Kế hoạch |
+| 6 | Search, Tags, Favorites, Filters | ✅ Hoàn thành |
+| 7 | Tiến trình realtime (SSE), sync message mới | ⏳ Tiếp theo |
 | 8 | Test bổ sung, bảo mật, hiệu năng, Docker production | Kế hoạch |
 
 Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ được thay bằng dữ liệu thật ở phase tương ứng:
 
 | Trang | Phase |
 |---|---|
-| Search, Tags, Favorites | 6 |
 | Settings → lịch sync | 7 |
 
 Đã dùng được:
@@ -40,6 +39,7 @@ Các trang web đang hiển thị trạng thái "Arrives in Phase N" sẽ đư�
 - Phase 3: bước 5–7 của wizard (chọn import toàn bộ hoặc từ một ngày, bắt đầu, theo dõi tiến trình), trang **Import Jobs** (`/imports`), chi tiết job `imports/:id` với Pause/Resume/Cancel, mục **Import** trên trang channel. Tiến trình được cập nhật bằng polling vài giây một lần; SSE realtime đến ở Phase 7.
 - Phase 4: mục **Media downloads** trên trang channel (công tắc tải tự động, tiến độ, file đang tải, **Retry failed**), **Settings → Media downloads**, công tắc tải ở bước Start của wizard, số file đã tải trên trang import job, và API xem/tải file `/api/media/*`.
 - Phase 5: **All Messages**, **Videos/Images/Documents/Audio** (bộ lọc channel, topic, loại, ngày, file đã tải, thứ tự), trang message với trình phát video/audio, trình xem ảnh, xem trước PDF và nút tải khi cần; trang channel có **Topics** (forum) và **Library**; trang topic đọc như một khóa học; Dashboard có **Continue watching** và **Latest media** (mục "Xem archive" ở §9).
+- Phase 6: ô tìm trên header và trang **Search** (text, caption và **tên file**, không dấu), ô tìm trong mọi danh sách; nút ♥ và trang **Favorites**; gắn tag ở trang message, trang **Tags** và trang từng tag; bộ lọc tag và favorite (mục "Tìm kiếm, tag và yêu thích" ở §9).
 
 ## Kiến trúc tổng quan
 
@@ -68,6 +68,7 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
   - Worker đọc lại trạng thái job trước mỗi trang và ghi mỗi trang bằng compare-and-set theo `status` + số run. Nhờ vậy Pause, Cancel hay một run mới hơn luôn thắng một run cũ, kể cả khi hai bên chạy cùng lúc.
 - **Tải media:** scheduler trong worker lấy file đang chờ từ `download_jobs` (file được yêu cầu trước, rồi file nhỏ trước) và mỗi lần chỉ đưa vào queue `media-download` số file được phép tải cùng lúc, nên Redis luôn nhỏ dù archive lớn tới đâu. Lượt thử, lỗi và thời điểm thử lại đều nằm trong PostgreSQL; mỗi job BullMQ chỉ là một lượt thử.
 - **Binary media không bao giờ nằm trong PostgreSQL.** File nằm ở nơi lưu mà channel đã chọn, theo cấu trúc dễ đọc: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`.
+- **Tìm kiếm** dùng full-text search của PostgreSQL trên cột `search_vector` (chữ, caption và tên file; trigger tự cập nhật). Phần này nằm sau lớp `SearchProvider` của API, nên sau này có thể thay bằng OpenSearch mà không phải sửa phần còn lại.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
 
@@ -452,6 +453,40 @@ API xem archive (đều cần đăng nhập web):
 | `GET /api/channels/:id/topics` | Topic của forum theo thứ tự tạo, với số message theo loại và khoảng ngày; `forum:false` nếu không phải forum |
 | `POST /api/channels/:id/topics/refresh` | Đọc lại tên topic từ Telegram qua worker. `422 NOT_A_FORUM`; `503`/`504`/`429` như các lệnh Telegram khác |
 
+### Tìm kiếm, tag và yêu thích
+
+- **Tìm kiếm:** gõ vào ô trên header (phím `/`) rồi Enter để tìm trong cả archive (trang `/search`), hoặc gõ vào ô **Search this list** của một danh sách (Videos, trang channel, topic, Favorites, trang tag…) để tìm trong đúng danh sách đó.
+  - Tìm trong **chữ, caption và tên file**. Trong archive này tên file quan trọng nhất: phần lớn video không có chữ.
+  - Mỗi từ gõ vào khớp với **đầu một từ**, không phân biệt dấu và hoa thường: `phuong phap` tìm ra "Phương_Pháp_Học_Tập…", `quang` tìm ra "Quang học".
+  - Tên file được tách từ ở dấu `.` và `_`, nên `zone` tìm ra "…_Time_Zone.mp4".
+  - Mặc định xếp theo **Best match**: đủ các từ đứng liền nhau theo thứ tự gõ, rồi khớp nguyên từ, và tên ngắn đứng trước. Ví dụ `buoi 10` cho "Buổi 10.mp4" trước "Buổi 100". Có thể đổi sang mới nhất/cũ nhất.
+  - Kết quả tô sáng từ tìm thấy. Mỗi kết quả là một thẻ riêng (không gộp album). Dùng được cùng mọi bộ lọc.
+- **Yêu thích (♥):** bấm ♥ trên ô video, dòng tài liệu, thẻ message hoặc ở trang message.
+  - Trang **Favorites** liệt kê theo thứ tự thích gần nhất. Mọi danh sách có chip **Favorites** để chỉ hiện message đã thích.
+  - Favorites và tag thuộc về **archive**, không thuộc từng tài khoản: ai đăng nhập web cũng thấy chung.
+- **Tag:** gõ tên vào ô **Tags** ở trang message.
+  - Enter chọn tag gợi ý, hoặc **tạo tag mới** nếu chưa có tên đó. Gợi ý khớp đầu từ, không dấu.
+  - Tag hiện dưới thẻ và dòng trong danh sách; bấm vào tag để mở trang của tag (`/tags/:id`).
+  - Trang **Tags**: số message của từng tag, tạo tag, đổi tên, đổi màu, xoá. Xoá tag chỉ gỡ tag khỏi message; message vẫn còn.
+  - Tên tag dài 1–40 ký tự và không được trùng (không phân biệt hoa thường). Archive có tối đa 500 tag.
+  - Bộ lọc **Tags** trong danh sách: chọn nhiều tag thì chỉ giữ message có **đủ mọi tag** đã chọn.
+- **Cách hoạt động:** cột `messages.search_vector` gồm chữ, caption và tên các file của message. Trigger PostgreSQL tự cập nhật cột này khi import, sửa message hoặc đổi tên file; migration `phase6_search_file_names` đã điền cho message có sẵn.
+  - API tìm qua lớp `SearchProvider` (`apps/api/src/search`). Bản hiện tại là `PostgresSearchProvider` (full-text search với cấu hình `tam_simple`).
+  - Muốn dùng Elasticsearch/OpenSearch: viết class kế thừa `SearchProvider` (trả về id message theo thứ tự, tổng số và vị trí trang), giữ index cập nhật khi message, file hoặc tag thay đổi, rồi đổi `useClass` trong `search.module.ts`. Phần tô sáng và DTO không phải sửa.
+
+API tìm kiếm, tag và yêu thích (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `GET /api/search` | `q` (bắt buộc, ≤ 200 ký tự, có chữ hoặc số; tối đa 8 từ) cùng mọi bộ lọc của `GET /api/messages`. `sort=relevance` (mặc định) / `newest` / `oldest`. Mỗi item có `matches.fileName` và `matches.excerpt`: các cặp `[offset, length]` để tô sáng; `excerpt` là đoạn quanh chỗ khớp đầu tiên |
+| `GET /api/messages` (thêm) | `tagIds=a,b` (có đủ mọi tag, tối đa 10), `favorite=true/false`, `sort=favorited` (mới thích trước; cần `favorite=true`). Item có `isFavorite` và `tags` |
+| `POST` / `DELETE /api/messages/:id/favorite` | Thích / bỏ thích; gọi lại không đổi gì. Trả `{isFavorite, favoritedAt}` |
+| `GET /api/tags` | Mọi tag theo tên, kèm `messageCount` |
+| `POST /api/tags` | `{name, color?}` (`#rrggbb`). `409 TAG_NAME_TAKEN`, `422 TAG_LIMIT_REACHED` |
+| `PATCH /api/tags/:id` / `DELETE /api/tags/:id` | Đổi tên hoặc màu (`409` nếu trùng tên); xoá (`204`) |
+| `POST /api/messages/:id/tags` | `{tagId}` hoặc `{name, color?}` (tên mới thì tạo tag). Trả các tag của message |
+| `DELETE /api/messages/:id/tags/:tagId` | Gỡ tag khỏi message. Trả các tag còn lại |
+
 ### Nơi lưu (storage locations)
 
 Mỗi channel lưu media vào một nơi lưu. Quản lý ở **Settings → Storage locations**, hoặc ngay tại bước 4 của wizard.
@@ -577,4 +612,8 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | PDF không hiện trong trang (nhất là trên iPhone/iPad) | Trình duyệt di động chỉ hiện trang đầu hoặc không nhúng PDF. Dùng **Open in a new tab** |
 | Topic chỉ hiện "Topic #123" | Worker chưa đọc tên topic từ Telegram (worker chưa chạy, chưa kết nối, hoặc tài khoản bị đăng xuất). Tên tự có trong vòng một phút sau khi worker kết nối; hoặc bấm **Refresh topics** trên trang channel |
 | "Continue watching" trống trên máy khác | Vị trí xem được nhớ riêng trong từng trình duyệt (localStorage), không lưu trên server |
+| Tìm không ra một phần ở giữa từ (vd. `0101` trong "20240101", `tics` trong "Optics") | Search chỉ khớp **đầu từ**. Hãy gõ từ đầu của từ: `2024`, `opt` |
+| Tìm ra quá nhiều kết quả với từ rất ngắn (`2`, `a`) | Mỗi từ khớp mọi từ bắt đầu bằng nó. Gõ thêm từ hoặc để **Best match**: kết quả khớp đúng từ và tên ngắn đứng đầu |
+| Không tạo được tag "toán" khi đã có "Toán" | Tên tag không phân biệt hoa thường. Dùng tag có sẵn, hoặc đổi tên tag cũ ở trang **Tags** |
+| Tag hoặc ♥ ở tài khoản này cũng hiện ở tài khoản khác | Đúng thiết kế: favorites và tag thuộc về archive, dùng chung cho mọi tài khoản web |
 | Dev: sau `npm run db:migrate`, API/worker báo `Unknown argument …` | `tsc -b -w` trong `npm run dev` không build lại Prisma client vừa generate. Dừng `npm run dev`, chạy `npm run build:packages`, rồi chạy lại `npm run dev` |

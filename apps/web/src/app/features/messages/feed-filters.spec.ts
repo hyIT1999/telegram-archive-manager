@@ -6,15 +6,27 @@ import { type ComponentFixture, TestBed } from '@angular/core/testing';
 import { MatChipListboxHarness } from '@angular/material/chips/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { MatSelectHarness } from '@angular/material/select/testing';
-import { makeChannel, makePage, makeTopic, makeTopicList } from '../../../testing/fixtures';
+import {
+  makeChannel,
+  makePage,
+  makeTag,
+  makeTagList,
+  makeTopic,
+  makeTopicList,
+} from '../../../testing/fixtures';
+import { nextRequest } from '../../../testing/http';
+import { TAG_ENDPOINTS } from '../tags/tags-api';
 import { TOPIC_ENDPOINTS } from '../topics/topics-api';
-import { FeedFiltersBar } from './feed-filters';
+import { FeedFiltersBar, SEARCH_DEBOUNCE_MS } from './feed-filters';
 import type { FeedFilters, FeedScope } from './feed-query';
 
 const DEFAULTS: FeedFilters = {
+  q: '',
   channelId: null,
   topicId: null,
   category: null,
+  tagIds: [],
+  favorite: false,
   from: null,
   to: null,
   sort: 'newest',
@@ -26,6 +38,7 @@ const DEFAULTS: FeedFilters = {
     [filters]="filters()"
     [scope]="scope()"
     [forumChannel]="forum()"
+    [searchField]="searchField()"
     (filtersChange)="changes.push($event); filters.set($event)"
   />`,
   imports: [FeedFiltersBar],
@@ -34,6 +47,7 @@ class Host {
   readonly filters = signal<FeedFilters>(DEFAULTS);
   readonly scope = signal<FeedScope>({});
   readonly forum = signal(false);
+  readonly searchField = signal(true);
   readonly changes: FeedFilters[] = [];
 }
 
@@ -54,6 +68,7 @@ describe('FeedFiltersBar', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: MATERIAL_ANIMATIONS, useValue: { animationsDisabled: true } },
+        { provide: SEARCH_DEBOUNCE_MS, useValue: 5 },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -78,6 +93,7 @@ describe('FeedFiltersBar', () => {
   }
 
   const last = () => fixture.componentInstance.changes.at(-1);
+  const element = () => fixture.nativeElement as HTMLElement;
 
   it('picks the kind of message with the chips', async () => {
     const loader = await render();
@@ -129,22 +145,24 @@ describe('FeedFiltersBar', () => {
 
   it('shows only what the page does not fix', async () => {
     const loader = await render((host) => {
-      host.scope.set({ channelId: forum.id, category: 'videos' });
-      host.filters.set({ ...DEFAULTS, channelId: forum.id, category: 'videos' });
+      host.scope.set({ channelId: forum.id, category: 'videos', favorite: true, tagId: 'tag' });
+      host.filters.set({ ...DEFAULTS, channelId: forum.id, category: 'videos', favorite: true });
       host.forum.set(true);
+      host.searchField.set(false);
     });
 
     expect(await loader.getAllHarnesses(MatChipListboxHarness)).toHaveLength(0);
-    const element = fixture.nativeElement as HTMLElement;
-    expect(element.textContent).not.toContain('Channel');
-    expect(element.textContent).toContain('Topic');
-    expect(element.textContent).toContain('Files');
+    const text = element().textContent ?? '';
+    expect(text).not.toContain('Channel');
+    expect(text).not.toContain('Tags');
+    expect(text).not.toContain('Search this list');
+    expect(text).toContain('Topic');
+    expect(text).toContain('Files');
   });
 
-  it('sets dates and clears every filter at once', async () => {
-    await render();
-    const element = fixture.nativeElement as HTMLElement;
-    const from = element.querySelector<HTMLInputElement>('input[type="date"]');
+  it('sets dates and clears every filter at once, keeping the search', async () => {
+    await render((host) => host.filters.set({ ...DEFAULTS, q: 'lens', sort: 'relevance' }));
+    const from = element().querySelector<HTMLInputElement>('input[type="date"]');
     if (from) {
       from.value = '2026-01-15';
       from.dispatchEvent(new Event('change'));
@@ -152,10 +170,74 @@ describe('FeedFiltersBar', () => {
     expect(last()?.from).toBe('2026-01-15');
     await fixture.whenStable();
 
-    const clear = Array.from(element.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
-      button.textContent?.includes('Clear filters'),
+    Array.from(element().querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.includes('Clear filters'))
+      ?.click();
+    expect(last()).toEqual({ ...DEFAULTS, q: 'lens', sort: 'relevance' });
+  });
+
+  it('searches once typing pauses, at once on Enter, and orders by best match', async () => {
+    await render();
+    const field = element().querySelector<HTMLInputElement>('input[type="search"]');
+    if (!field) {
+      throw new Error('no search field');
+    }
+    field.value = 'opt';
+    field.dispatchEvent(new Event('input'));
+    field.value = ' optics ';
+    field.dispatchEvent(new Event('input'));
+    expect(fixture.componentInstance.changes).toHaveLength(0);
+    await vi.waitFor(() => expect(last()).toMatchObject({ q: 'optics', sort: 'relevance' }));
+    expect(fixture.componentInstance.changes).toHaveLength(1);
+
+    // Refining a search keeps the order chosen for it.
+    fixture.componentInstance.filters.set({ ...DEFAULTS, q: 'optics', sort: 'oldest' });
+    await fixture.whenStable();
+    field.value = 'optics 2';
+    field.dispatchEvent(new Event('input'));
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(last()).toMatchObject({ q: 'optics 2', sort: 'oldest' });
+
+    // Ending the search returns to the page's order.
+    await fixture.whenStable();
+    Array.from(element().querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.getAttribute('aria-label') === 'Clear the search')
+      ?.click();
+    expect(last()).toMatchObject({ q: '', sort: 'newest' });
+  });
+
+  it('filters by favorites and by tags, loading the tags when the list opens', async () => {
+    const loader = await render();
+    const [, favorites] = await loader.getAllHarnesses(MatChipListboxHarness);
+    await favorites?.selectChips({ text: /Favorites/ });
+    expect(last()?.favorite).toBe(true);
+    await fixture.whenStable();
+
+    const selects = await loader.getAllHarnesses(MatSelectHarness);
+    const orders = selects.at(-1);
+    await orders?.open();
+    const sorts = await Promise.all(((await orders?.getOptions()) ?? []).map((o) => o.getText()));
+    expect(sorts).toEqual(['Newest first', 'Oldest first', 'Recently favorited']);
+    await orders?.close();
+
+    // The tag list is only asked for now.
+    http.expectNone(TAG_ENDPOINTS.list);
+    const red = makeTag({ name: 'Red' });
+    const blue = makeTag({ name: 'Blue' });
+    // Opened by clicking: the harness would wait for the tag request this starts.
+    Array.from(element().querySelectorAll<HTMLElement>('mat-select'))
+      .find((select) => select.closest('mat-form-field')?.textContent?.includes('Tags'))
+      ?.querySelector<HTMLElement>('.mat-mdc-select-trigger')
+      ?.click();
+    (await nextRequest(http, TAG_ENDPOINTS.list)).flush(makeTagList([red, blue]));
+    await fixture.whenStable();
+    const names = Array.from(document.querySelectorAll('mat-option')).map((option) =>
+      option.textContent?.trim(),
     );
-    clear?.click();
-    expect(last()).toEqual(DEFAULTS);
+    expect(names).toEqual(['Blue', 'Red']);
+    Array.from(document.querySelectorAll<HTMLElement>('mat-option'))
+      .find((option) => option.textContent?.includes('Red'))
+      ?.click();
+    expect(last()?.tagIds).toEqual([red.id]);
   });
 });

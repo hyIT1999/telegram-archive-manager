@@ -12,6 +12,9 @@
       }
     }
     <time class="date" [attr.datetime]="head.postedAt">{{ head.postedAt | date: 'medium' }}</time>
+    @if (!album()) {
+      <app-favorite-button class="favorite" [messageId]="head.id" [favorite]="head.isFavorite" />
+    }
   </header>
 
   @if (album()) {
@@ -33,6 +36,9 @@
             @if (length(item); as text) {
               <span class="badge">{{ text }}</span>
             }
+            @if (item.isFavorite) {
+              <mat-icon class="loved" aria-label="Favorite">favorite</mat-icon>
+            }
             @if (last && hiddenCount() > 0) {
               <span class="more">+{{ hiddenCount() }}</span>
             }
@@ -46,6 +52,9 @@
     <p class="meta">
       <mat-icon aria-hidden="true">collections</mat-icon>
       Album · {{ items().length }} files
+      @if (favorites() > 0) {
+        · {{ favorites() }} {{ favorites() === 1 ? 'favorite' : 'favorites' }}
+      }
     </p>
   } @else {
     <a class="body" [routerLink]="['/messages', head.id]">
@@ -63,10 +72,12 @@
       }
       <span class="text">
         @if (title(); as name) {
-          <span class="title">{{ name }}</span>
+          <span class="title"><app-highlighted-text [text]="name" [ranges]="titleRanges()" /></span>
         }
         @if (head.excerpt; as text) {
-          <span class="excerpt">{{ text }}</span>
+          <span class="excerpt"
+            ><app-highlighted-text [text]="text" [ranges]="head.matches?.excerpt"
+          /></span>
         } @else if (!head.media) {
           <span class="excerpt empty">{{ label(head) }} without text</span>
         }
@@ -82,5 +93,13 @@
         </span>
       </span>
     </a>
+  }
+
+  @if (tags().length > 0) {
+    <ul class="tags" aria-label="Tags">
+      @for (tag of tags(); track tag.id) {
+        <li><app-tag-chip [tag]="tag" /></li>
+      }
+    </ul>
   }
 </article>

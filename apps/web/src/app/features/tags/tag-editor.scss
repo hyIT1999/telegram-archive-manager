@@ -1,0 +1,49 @@
+:host {
+  display: grid;
+  gap: 4px;
+}
+
+.field {
+  width: 100%;
+}
+
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--mat-sys-outline);
+  vertical-align: middle;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+
+  mat-icon {
+    margin-right: 4px;
+  }
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  margin-left: auto;
+  padding-left: 12px;
+  font: var(--mat-sys-label-small);
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.error {
+  margin: 0;
+  font: var(--mat-sys-body-small);
+  color: var(--mat-sys-error);
+}

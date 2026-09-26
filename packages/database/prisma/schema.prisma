@@ -6,7 +6,7 @@
 //   (MTProto server message ids are int32). The API serializes BIGINT as strings.
 // - Every index is declared here (including GIN, trigram and partial indexes) so that
 //   `prisma migrate dev` never drops them. Hand-written SQL in migrations is limited to
-//   extensions, the `tam_simple` text search configuration and the search_vector trigger.
+//   extensions, the `tam_simple` text search configuration and the search_vector triggers.
 // - Binary media never lives in PostgreSQL; `media.storage_key` points into object storage.
 
 generator client {
@@ -332,7 +332,8 @@ model Message {
   telegramMeta      Json?                    @map("telegram_meta")
   isFavorite        Boolean                  @default(false) @map("is_favorite")
   favoritedAt       DateTime?                @map("favorited_at") @db.Timestamptz(3)
-  /// Maintained by the messages_search_vector_update trigger (see migrations).
+  /// Text (weight A), caption (B) and the names of the message's files (A); maintained by the
+  /// messages_search_vector_trg and media_search_vector_trg triggers (see migrations).
   searchVector      Unsupported("tsvector")? @map("search_vector")
   createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)

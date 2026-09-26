@@ -1,17 +1,61 @@
 @let current = filters();
-@if (!categoryFixed()) {
-  <mat-chip-listbox
-    class="kinds"
-    aria-label="Kind of message"
-    hideSingleSelectionIndicator
-    [value]="current.category ?? 'all'"
-    (change)="setCategory($event.value)"
-  >
-    <mat-chip-option value="all">All</mat-chip-option>
-    @for (option of categories; track option.category) {
-      <mat-chip-option [value]="option.category">{{ option.label }}</mat-chip-option>
+@if (searchField()) {
+  <mat-form-field class="search" subscriptSizing="dynamic">
+    <mat-icon matPrefix aria-hidden="true">search</mat-icon>
+    <mat-label>Search this list</mat-label>
+    <input
+      matInput
+      type="search"
+      autocomplete="off"
+      enterkeyhint="search"
+      [maxLength]="maxQuery"
+      [value]="query()"
+      (input)="typing($event)"
+      (keydown.enter)="applyQuery()"
+    />
+    @if (query()) {
+      <button
+        matIconSuffix
+        matIconButton
+        type="button"
+        aria-label="Clear the search"
+        (click)="clearQuery()"
+      >
+        <mat-icon>close</mat-icon>
+      </button>
     }
-  </mat-chip-listbox>
+  </mat-form-field>
+}
+
+@if (!categoryFixed() || favoriteVisible()) {
+  <div class="chips">
+    @if (!categoryFixed()) {
+      <mat-chip-listbox
+        aria-label="Kind of message"
+        hideSingleSelectionIndicator
+        [value]="current.category ?? 'all'"
+        (change)="setCategory($event.value)"
+      >
+        <mat-chip-option value="all">All</mat-chip-option>
+        @for (option of categories; track option.category) {
+          <mat-chip-option [value]="option.category">{{ option.label }}</mat-chip-option>
+        }
+      </mat-chip-listbox>
+    }
+    @if (favoriteVisible()) {
+      <mat-chip-listbox
+        aria-label="Favorites"
+        hideSingleSelectionIndicator
+        [value]="current.favorite ? 'on' : null"
+        (change)="setFavorite($event.value === 'on')"
+      >
+        <mat-chip-option value="on">
+          <mat-icon matChipAvatar aria-hidden="true">favorite</mat-icon>
+          Favorites
+        </mat-chip-option>
+      </mat-chip-listbox>
+    }
+  </div>
 }
 
 <div class="fields">
@@ -37,6 +81,31 @@
           >
         }
       </mat-select>
+    </mat-form-field>
+  }
+  @if (tagsVisible()) {
+    <mat-form-field class="field wide">
+      <mat-label>Tags</mat-label>
+      <mat-select
+        multiple
+        [value]="current.tagIds"
+        (openedChange)="$event && tagStore.load()"
+        (selectionChange)="setTags($event.value)"
+      >
+        @for (tag of tagStore.tags(); track tag.id) {
+          <mat-option [value]="tag.id">
+            <span class="dot" aria-hidden="true" [style.background]="tag.color"></span>
+            {{ tag.name }}
+          </mat-option>
+        } @empty {
+          <mat-option disabled>{{
+            tagStore.loaded() ? 'No tags yet' : 'Loading tags…'
+          }}</mat-option>
+        }
+      </mat-select>
+      @if (current.tagIds.length > 1) {
+        <mat-hint>Messages with all of them</mat-hint>
+      }
     </mat-form-field>
   }
   <mat-form-field class="field">
@@ -69,11 +138,12 @@
       </mat-select>
     </mat-form-field>
   }
-  <mat-form-field class="field">
+  <mat-form-field class="field order">
     <mat-label>Order</mat-label>
     <mat-select [value]="current.sort" (selectionChange)="setSort($event.value)">
-      <mat-option value="newest">Newest first</mat-option>
-      <mat-option value="oldest">Oldest first</mat-option>
+      @for (option of sortOptions(); track option.value) {
+        <mat-option [value]="option.value">{{ option.label }}</mat-option>
+      }
     </mat-select>
   </mat-form-field>
   @if (narrowed()) {

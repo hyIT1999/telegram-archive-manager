@@ -33,17 +33,19 @@ import { MediaRow } from '../media/media-row';
 import { MediaTile } from '../media/media-tile';
 import { type FeedSnapshot, FeedStateCache } from './feed-cache';
 import { FeedFiltersBar } from './feed-filters';
-import { groupAlbums } from './feed-groups';
+import { type FeedEntry, groupAlbums } from './feed-groups';
 import {
   type FeedFilters,
+  type FeedRequest,
   type FeedScope,
   clearedFilters,
+  feedRequest,
   filterParams,
   isNarrowed,
-  listParams,
   readFilters,
 } from './feed-query';
 import { MessageCard } from './message-card';
+import { MessageChanges } from './message-changes';
 import { MessagesApi } from './messages-api';
 
 /** Messages per page; a gallery row holds 3–6 tiles. */
@@ -58,10 +60,18 @@ const NOUNS: Readonly<Record<MessageCategory | 'all', [string, string]>> = {
   audio: ['audio file', 'audio files'],
 };
 
+/** One page for a feed request: a search, or a plain list. */
+function fetchPage(api: MessagesApi, request: FeedRequest, limit: number, cursor?: string) {
+  return request.kind === 'search'
+    ? api.search({ ...request.params, limit, cursor })
+    : api.list({ ...request.params, limit, cursor });
+}
+
 /**
- * A list of archived messages with its filters: galleries for videos and images, rows for documents
- * and audio, cards (albums grouped) for everything else. The filters live in the URL; the next page
- * loads as the reader nears the end, and Back shows the list as it was left.
+ * A list of archived messages with its filters and search: galleries for videos and images, rows
+ * for documents and audio, cards (albums grouped, except in search results) for everything else.
+ * The filters live in the URL; the next page loads as the reader nears the end, Back shows the list
+ * as it was left, and favorites and tags changed elsewhere show at once.
  */
 @Component({
   selector: 'app-message-feed',
@@ -92,13 +102,21 @@ export class MessageFeed {
   readonly topicId = input<number | null>(null);
   /** A media section the page is about. */
   readonly category = input<MessageCategory | null>(null);
+  /** A tag the page is about. */
+  readonly tagId = input<string | null>(null);
+  /** The page lists favorites only. */
+  readonly favorite = input(false);
+  /** The order without a search. */
   readonly defaultSort = input<MessageSort>('newest');
   /** Whether the page's channel is a forum, so its topics can be chosen. */
   readonly forum = input(false);
+  /** Off where the page has its own search box (the search page). */
+  readonly searchField = input(true);
   readonly pageSize = input(FEED_PAGE_SIZE);
 
   private readonly api = inject(MessagesApi);
   private readonly cache = inject(FeedStateCache);
+  private readonly changes = inject(MessageChanges);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly viewer = inject(ImageViewer);
@@ -113,6 +131,8 @@ export class MessageFeed {
     channelId: this.channelId(),
     topicId: this.topicId(),
     category: this.category(),
+    tagId: this.tagId(),
+    favorite: this.favorite() || undefined,
     defaultSort: this.defaultSort(),
   }));
   protected readonly filters = computed<FeedFilters>(
@@ -135,7 +155,7 @@ export class MessageFeed {
       this.restoring = false;
       return cached
         ? of(cached)
-        : this.api.list({ ...listParams(params.filters), limit: params.limit }).pipe(
+        : fetchPage(this.api, feedRequest(params.filters), params.limit).pipe(
             map((page): FeedSnapshot => ({
               items: page.items,
               nextCursor: page.nextCursor,
@@ -170,22 +190,65 @@ export class MessageFeed {
     return category === 'documents' || category === 'audio' ? 'rows' : 'cards';
   });
   protected readonly images = computed(() => this.filters().category === 'images');
-  protected readonly entries = computed(() => groupAlbums(this.items()));
+  protected readonly searching = computed(() => this.filters().q !== '');
+  /**
+   * Albums are grouped while browsing. Search results, favorites and tagged messages were picked
+   * one by one, so each keeps its own card (with the file name found, its heart and its tags).
+   */
+  protected readonly entries = computed<FeedEntry[]>(() => {
+    const { q, favorite, tagIds } = this.filters();
+    return q || favorite || tagIds.length > 0
+      ? this.items().map((item) => ({ kind: 'single', key: item.id, item }))
+      : groupAlbums(this.items());
+  });
   protected readonly showChannel = computed(() => this.filters().channelId === null);
   /** A topic's own page needs no topic on every card. */
   protected readonly showTopic = computed(() => this.topicId() === null);
   protected readonly narrowed = computed(() => isNarrowed(this.filters(), this.scope()));
   protected readonly noun = computed(() => {
-    const [one, many] = NOUNS[this.filters().category ?? 'all'];
+    const category = this.filters().category;
+    const [one, many] =
+      this.searching() && category === null ? ['result', 'results'] : NOUNS[category ?? 'all'];
     return this.total() === 1 ? one : many;
   });
-  protected readonly emptyTitle = computed(() =>
-    this.narrowed()
-      ? 'Nothing matches these filters'
-      : `No ${NOUNS[this.filters().category ?? 'all'][1]} yet`,
+  protected readonly emptyTitle = computed(() => {
+    const { q, category } = this.filters();
+    if (q) {
+      return `No results for “${q}”`;
+    }
+    if (this.narrowed()) {
+      return 'Nothing matches these filters';
+    }
+    if (this.favorite()) {
+      return 'No favorites yet';
+    }
+    return this.tagId() ? 'No message carries this tag' : `No ${NOUNS[category ?? 'all'][1]} yet`;
+  });
+  protected readonly emptyMessage = computed(() => {
+    if (this.searching()) {
+      return 'Words match the start of words in file names, text and captions, with or without accents.';
+    }
+    if (this.narrowed()) {
+      return '';
+    }
+    if (this.favorite()) {
+      return 'Press ♥ on a message to keep it here.';
+    }
+    return this.tagId() ? 'Add the tag from the Tags panel of a message.' : '';
+  });
+  /** Only plain lists suggest importing: favorites, tags and searches do not come from imports. */
+  protected readonly suggestImport = computed(
+    () => !this.channelId() && !this.favorite() && !this.tagId() && !this.searching(),
   );
 
   constructor() {
+    // Favorites and tags changed on this screen or another one.
+    this.changes.updates.pipe(takeUntilDestroyed()).subscribe((update) => {
+      this.items.update((items) => {
+        const next = items.map((item) => update(item));
+        return next.some((item, index) => item !== items[index]) ? next : items;
+      });
+    });
     // Whatever is on screen is what Back brings back.
     effect(() => {
       const page = this.loaded();
@@ -231,8 +294,7 @@ export class MessageFeed {
     this.loadingMore.set(true);
     this.loadMoreError.set(null);
     const request = this.request();
-    this.api
-      .list({ ...listParams(request.filters), limit: request.limit, cursor })
+    fetchPage(this.api, feedRequest(request.filters), request.limit, cursor)
       .pipe(
         finalize(() => this.loadingMore.set(false)),
         takeUntilDestroyed(this.destroyRef),

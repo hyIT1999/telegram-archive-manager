@@ -157,6 +157,56 @@ describe('accent-insensitive full-text search', () => {
   });
 });
 
+describe('file names in the search document', () => {
+  function fileRow(messageId: string, filename: string, uniqueId: string) {
+    return { messageId, telegramFileId: 'f', telegramFileUniqueId: uniqueId, type: 'VIDEO' as const, filename };
+  }
+
+  it('finds a message by the words of its file name, split at dots and underscores', async () => {
+    const channel = await newChannel();
+    const message = await prisma.message.create({ data: { ...messageRow(channel.id, 500), type: 'VIDEO' } });
+    expect(await searchIds('zone')).not.toContain(message.id);
+
+    // Stored after the message, as imports do.
+    await prisma.media.create({ data: fileRow(message.id, 'Phương_Pháp_02_Time_Zone.mp4', 'doc-500') });
+
+    expect(await searchIds('zone')).toContain(message.id);
+    expect(await searchIds('phuong phap 02')).toContain(message.id);
+    expect(await searchIds('mp4')).toContain(message.id);
+  });
+
+  it('keeps file names when the caption changes, and follows a renamed file', async () => {
+    const channel = await newChannel();
+    const message = await prisma.message.create({ data: { ...messageRow(channel.id, 501), type: 'PHOTO' } });
+    const media = await prisma.media.create({ data: fileRow(message.id, 'IMG_20240101.jpg', 'doc-501') });
+    expect(await searchIds('20240101')).toContain(message.id);
+
+    await prisma.message.update({ where: { id: message.id }, data: { caption: 'Harbour at dawn' } });
+    expect(await searchIds('harbour 20240101')).toContain(message.id);
+
+    await prisma.media.update({ where: { id: media.id }, data: { filename: 'sunrise.jpg' } });
+    expect(await searchIds('sunrise harbour')).toContain(message.id);
+    expect(await searchIds('20240101')).not.toContain(message.id);
+  });
+
+  it('computes what the triggers store, and leaves updated_at alone', async () => {
+    const channel = await newChannel();
+    const message = await prisma.message.create({
+      data: { ...messageRow(channel.id, 502, { caption: 'Lecture notes' }), type: 'DOCUMENT' },
+    });
+    await prisma.media.create({ data: fileRow(message.id, 'week_3.pdf', 'doc-502') });
+
+    // The migration backfills older messages with this same function.
+    const [row] = await prisma.$queryRaw<{ same: boolean; vector: string }[]>`
+      SELECT search_vector = messages_search_document(id, text, caption) AS same, search_vector::text AS vector
+      FROM messages WHERE id = ${message.id}::uuid`;
+    expect(row?.same).toBe(true);
+    expect(row?.vector).toContain("'week':3A");
+    const after = await prisma.message.findUniqueOrThrow({ where: { id: message.id } });
+    expect(after.updatedAt).toEqual(message.updatedAt);
+  });
+});
+
 describe('filename search', () => {
   it('matches filenames by substring through the trigram index', async () => {
     const channel = await newChannel();

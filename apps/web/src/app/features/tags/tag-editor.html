@@ -1,0 +1,52 @@
+<mat-form-field class="field" subscriptSizing="dynamic">
+  <mat-chip-grid #grid aria-label="Tags of this message">
+    @for (tag of current(); track tag.id) {
+      <mat-chip-row (removed)="remove(tag)">
+        <span class="dot" aria-hidden="true" [style.background]="tag.color"></span>
+        {{ tag.name }}
+        <button matChipRemove type="button" [attr.aria-label]="'Remove the tag ' + tag.name">
+          <mat-icon>cancel</mat-icon>
+        </button>
+      </mat-chip-row>
+    }
+    <input
+      #field
+      placeholder="Add a tag…"
+      [maxLength]="maxLength"
+      [matChipInputFor]="grid"
+      [matChipInputSeparatorKeyCodes]="separators"
+      [matAutocomplete]="auto"
+      (input)="typing($event)"
+      (focus)="store.load()"
+      (matChipInputTokenEnd)="submit($event)"
+    />
+  </mat-chip-grid>
+  <mat-autocomplete
+    #auto="matAutocomplete"
+    autoActiveFirstOption
+    [displayWith]="showNothing"
+    (optionSelected)="chosen($event)"
+  >
+    @for (tag of options(); track tag.id) {
+      <mat-option [value]="tag">
+        <span class="option">
+          <span class="dot" aria-hidden="true" [style.background]="tag.color"></span>
+          <span class="name">{{ tag.name }}</span>
+          <span class="count">{{ tag.messageCount }}</span>
+        </span>
+      </mat-option>
+    }
+    @if (newName(); as name) {
+      <mat-option [value]="create">
+        <span class="option">
+          <mat-icon aria-hidden="true">add</mat-icon>
+          <span class="name">Create “{{ name }}”</span>
+        </span>
+      </mat-option>
+    }
+  </mat-autocomplete>
+  <mat-hint>Enter adds the tag; a new name creates one.</mat-hint>
+</mat-form-field>
+@if (error(); as message) {
+  <p class="error" role="alert">{{ message }}</p>
+}

@@ -18,6 +18,9 @@ import type {
   StorageCheckDto,
   StorageLocationDto,
   StorageLocationListDto,
+  TagDto,
+  TagListDto,
+  TagRefDto,
   TelegramDialogDto,
   TelegramDialogListDto,
   TelegramStatusDto,
@@ -334,6 +337,8 @@ export function makeMessage(overrides: Partial<MessageSummaryDto> = {}): Message
     mediaGroupId: null,
     topic: null,
     media: makeMediaSummary(),
+    isFavorite: false,
+    tags: [],
     ...overrides,
   };
 }
@@ -359,6 +364,7 @@ export function makeMessageDetail(overrides: Partial<MessageDto> = {}): MessageD
     previousId: null,
     nextId: null,
     telegramUrl: null,
+    favoritedAt: null,
     ...overrides,
   };
 }
@@ -394,6 +400,29 @@ export function makeTopicList(
   overrides: Partial<ForumTopicListDto> = {},
 ): ForumTopicListDto {
   return { forum: true, refreshedAt: '2026-09-24T08:00:00.000Z', topics, ...overrides };
+}
+
+let tagSequence = 0;
+
+export function makeTag(overrides: Partial<TagDto> = {}): TagDto {
+  tagSequence += 1;
+  return {
+    id: `0199a0b1-0000-7000-8000-e${String(tagSequence).padStart(11, '0')}`,
+    name: `Tag ${tagSequence}`,
+    color: '#1e88e5',
+    messageCount: 3,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeTagList(tags: TagDto[]): TagListDto {
+  return { items: tags };
+}
+
+/** A tag as messages carry it. */
+export function tagRef(tag: TagDto): TagRefDto {
+  return { id: tag.id, name: tag.name, color: tag.color };
 }
 
 /** Answers a pending request with an error body shaped like the API's. */

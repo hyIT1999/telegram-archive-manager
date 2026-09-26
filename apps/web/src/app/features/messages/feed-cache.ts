@@ -49,4 +49,12 @@ export class FeedStateCache {
   delete(key: string): void {
     this.feeds.delete(key);
   }
+
+  /** Updates the messages of every kept feed (a favorite or tag changed); they keep their age. */
+  patch(update: (message: MessageSummaryDto) => MessageSummaryDto): void {
+    // Snapshots are replaced, never changed in place: a feed may still hold the old one.
+    for (const entry of this.feeds.values()) {
+      entry.snapshot = { ...entry.snapshot, items: entry.snapshot.items.map(update) };
+    }
+  }
 }

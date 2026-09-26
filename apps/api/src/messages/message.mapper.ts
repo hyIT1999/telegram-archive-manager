@@ -9,16 +9,19 @@ import {
   type MessageTopicRefDto,
 } from '@tam/shared';
 import { toMediaSummaryDto } from '../media/media.mapper.js';
+import { MESSAGE_TAGS_INCLUDE, type TagRef, toTagRefDto } from '../tags/tag.mapper.js';
 
 /** What list queries load next to each message. A message has at most one file. */
 export const MESSAGE_SUMMARY_INCLUDE = {
   channel: { select: { id: true, title: true, isForum: true } },
   media: { orderBy: { createdAt: 'asc' }, take: 1 },
+  tags: MESSAGE_TAGS_INCLUDE,
 } as const;
 
 export type MessageSummaryRow = Message & {
   channel: Pick<Channel, 'id' | 'title' | 'isForum'>;
   media: Media[];
+  tags: { tag: TagRef }[];
 };
 
 /** Names of forum topics, by topicKey(). */
@@ -45,16 +48,18 @@ function topicRef(row: MessageSummaryRow, titles: TopicTitles): MessageTopicRefD
   return { id, title: topicTitle(id, titles.get(topicKey(row.channel.id, id))) };
 }
 
-/** The start of a text for lists, never cutting a character in two. */
-export function excerptOf(text: string | null): string | null {
-  if (text === null || text.length === 0) {
-    return null;
-  }
-  if (text.length <= MESSAGE_EXCERPT_LENGTH) {
+/** At most `length` UTF-16 units of the start of a text, never cutting a character in two. */
+export function cutText(text: string, length: number): string {
+  if (text.length <= length) {
     return text;
   }
-  const cut = text.slice(0, MESSAGE_EXCERPT_LENGTH);
-  return /[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut;
+  const start = text.slice(0, length);
+  return /[\uD800-\uDBFF]$/.test(start) ? start.slice(0, -1) : start;
+}
+
+/** The start of a text for lists. */
+export function excerptOf(text: string | null): string | null {
+  return text === null || text.length === 0 ? null : cutText(text, MESSAGE_EXCERPT_LENGTH);
 }
 
 export function toMessageSummaryDto(
@@ -72,6 +77,8 @@ export function toMessageSummaryDto(
     mediaGroupId: row.mediaGroupId === null ? null : row.mediaGroupId.toString(),
     topic: topicRef(row, titles),
     media: file ? toMediaSummaryDto(file) : null,
+    isFavorite: row.isFavorite,
+    tags: row.tags.map(({ tag }) => toTagRefDto(tag)),
   };
 }
 

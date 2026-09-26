@@ -1,8 +1,9 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { Channel, Message, Prisma, PrismaClient } from '@tam/database';
+import type { PrismaClient } from '@tam/database';
 import type { ForumTopicListDto, MessageDto, MessagePageDto, MessageSummaryDto } from '@tam/shared';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { archiveRows, postedAt } from './support/archive-rows.js';
 import { createTestPrisma, insertUser } from './support/database.js';
 import { FakeWorker } from './support/fake-worker.js';
 import { expectApiError, nextClientIp, sessionCookie } from './support/http.js';
@@ -10,19 +11,6 @@ import { createTestApp } from './support/test-app.js';
 
 const EMAIL = 'messages-reader@example.test';
 const PASSWORD = 'correct horse battery staple';
-const SIX_HOURS = 6 * 3_600_000;
-
-/** Message `id` is posted 6 hours after message `id - 1`, starting at 2026-01-01 00:00 UTC. */
-function at(id: number): Date {
-  return new Date(Date.UTC(2026, 0, 1) + id * SIX_HOURS);
-}
-
-interface FileSpec {
-  type?: 'VIDEO' | 'PHOTO' | 'DOCUMENT' | 'AUDIO';
-  status?: 'PENDING' | 'DOWNLOADED' | 'FAILED';
-  fileName?: string | null;
-  thumbnail?: boolean;
-}
 
 describe('messages and topics (e2e)', () => {
   let app: NestExpressApplication;
@@ -66,59 +54,7 @@ describe('messages and topics (e2e)', () => {
     await prisma.$disconnect();
   });
 
-  let chatSequence = 0;
-  async function addChannel(
-    data: Partial<Prisma.ChannelUncheckedCreateInput> = {},
-  ): Promise<Channel> {
-    chatSequence += 1;
-    return prisma.channel.create({
-      data: {
-        telegramChatId: BigInt(-1_004_000_000_000 - chatSequence),
-        title: `Course ${chatSequence}`,
-        type: 'SUPERGROUP',
-        ...data,
-      },
-    });
-  }
-
-  async function addMessage(
-    channel: Channel,
-    id: number,
-    data: Partial<Prisma.MessageUncheckedCreateInput> = {},
-    file?: FileSpec,
-  ): Promise<Message> {
-    const message = await prisma.message.create({
-      data: {
-        channelId: channel.id,
-        telegramMessageId: id,
-        type: file?.type ?? 'TEXT',
-        telegramDate: at(id),
-        ...(file ? {} : { text: `Message ${id}` }),
-        ...data,
-      },
-    });
-    if (file) {
-      await prisma.media.create({
-        data: {
-          messageId: message.id,
-          telegramFileId: `${channel.telegramChatId}:${id}:file${id}`,
-          telegramFileUniqueId: `file-${channel.id}-${id}`,
-          type: file.type ?? 'VIDEO',
-          filename: file.fileName === undefined ? `lesson-${id}.mp4` : file.fileName,
-          mimeType: 'video/mp4',
-          size: BigInt(1_000 * id),
-          duration: 60,
-          width: 1280,
-          height: 720,
-          downloadStatus: file.status ?? 'PENDING',
-          thumbnailKey: file.thumbnail
-            ? `aa/${'0'.repeat(8)}-0000-7000-8000-${String(id).padStart(12, '0')}.jpg`
-            : null,
-        },
-      });
-    }
-    return message;
-  }
+  const { addChannel, addMessage } = archiveRows(() => prisma);
 
   it.each(['/api/messages', '/api/messages/0199a0b1-0000-7000-8000-000000000001'])(
     'GET %s requires a session',
@@ -409,7 +345,7 @@ describe('messages and topics (e2e)', () => {
             topicId: 20,
             title: 'Module 1',
             isPinned: true,
-            telegramDate: at(20),
+            telegramDate: postedAt(20),
           },
           { channelId: forum.id, topicId: 40, title: 'Empty module' },
         ],
@@ -438,10 +374,10 @@ describe('messages and topics (e2e)', () => {
         iconColor: null,
         isClosed: false,
         isPinned: true,
-        createdAt: at(20).toISOString(),
+        createdAt: postedAt(20).toISOString(),
         counts: { messages: 3, videos: 1, images: 0, documents: 1, audio: 0 },
-        firstPostedAt: at(21).toISOString(),
-        lastPostedAt: at(23).toISOString(),
+        firstPostedAt: postedAt(21).toISOString(),
+        lastPostedAt: postedAt(23).toISOString(),
       });
       expect(body.topics[1]).toMatchObject({
         iconColor: '#ff93b2',

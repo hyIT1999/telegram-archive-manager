@@ -2,6 +2,7 @@
   [filters]="filters()"
   [scope]="scope()"
   [forumChannel]="forum()"
+  [searchField]="searchField()"
   (filtersChange)="changeFilters($event)"
 />
 
@@ -38,15 +39,16 @@
 } @else if (items().length === 0) {
   <app-empty-state
     class="surface-card"
-    [icon]="narrowed() ? 'filter_alt_off' : 'inbox'"
+    [icon]="searching() ? 'search_off' : narrowed() ? 'filter_alt_off' : 'inbox'"
     [title]="emptyTitle()"
+    [message]="emptyMessage()"
   >
     @if (narrowed()) {
       <button matButton="tonal" type="button" (click)="clearFilters()">
         <mat-icon>filter_alt_off</mat-icon>
         Clear filters
       </button>
-    } @else if (!channelId()) {
+    } @else if (suggestImport()) {
       <a matButton="tonal" routerLink="/imports">
         <mat-icon>download</mat-icon>
         Import a channel
