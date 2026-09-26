@@ -16,7 +16,7 @@ import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { SettingsPage } from './settings-page';
 
 describe('SettingsPage', () => {
-  it('shows the Telegram account, storage locations and download settings next to the appearance', async () => {
+  it('shows the Telegram account, storage locations, download and sync settings, and the appearance', async () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -31,7 +31,12 @@ describe('SettingsPage', () => {
     const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
     http.expectOne(TELEGRAM_ENDPOINTS.status).flush(makeReadyStatus());
     http.expectOne(STORAGE_ENDPOINTS.locations).flush(makeStorageList([computer]));
-    http.expectOne(SETTINGS_ENDPOINT).flush(makeSettings());
+    // The download and the sync settings each read them.
+    const settings = http.match(SETTINGS_ENDPOINT);
+    expect(settings).toHaveLength(2);
+    for (const request of settings) {
+      request.flush(makeSettings());
+    }
     (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${computer.id}/check`)).flush(
       makeStorageCheck(computer),
     );
@@ -43,9 +48,12 @@ describe('SettingsPage', () => {
       'Telegram account',
       'Storage locations',
       'Media downloads',
+      'Sync',
       'Appearance',
-      'The sync schedule is on its way',
     ]);
+    expect(page.querySelector('app-sync-settings mat-select')?.textContent).toContain(
+      'Every 15 minutes',
+    );
     expect(page.querySelector('app-download-settings')?.textContent).toContain(
       'Pause all downloads',
     );

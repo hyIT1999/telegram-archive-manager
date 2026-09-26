@@ -4,7 +4,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Prisma } from '@tam/database';
+import { type Channel, type Prisma, insertImportJob, isUniqueViolation } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   ACTIVE_JOB_STATUSES,
@@ -15,6 +15,7 @@ import {
   ImportJobType,
   ImportMode,
   type ImportRequest,
+  JobOrigin,
   JobStatus,
   type Page,
   TELEGRAM_ACCOUNT_KEY,
@@ -24,6 +25,7 @@ import {
 } from '@tam/shared';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor } from '../common/pagination/cursor.js';
+import { activeFilesOf } from '../downloads/active-downloads.js';
 import {
   IMPORT_JOB_INCLUDE,
   type ImportJobWithChannel,
@@ -37,16 +39,17 @@ const jobCursorSchema = z
   .transform(([createdAt, id]) => ({ createdAt: new Date(createdAt), id }));
 type JobCursor = z.output<typeof jobCursorSchema>;
 
-export interface StartedImport {
+export interface StartedJob {
   job: ImportJobDto;
-  /** False when the same import was already queued or running (the request is idempotent). */
+  /** False when the same job was already queued or running (the request is idempotent). */
   created: boolean;
 }
 
 /**
- * Import jobs. PostgreSQL holds their state and every change is a compare-and-set on the status
- * (and run number), so two clicks, two tabs or a click racing the worker can never both win. The
- * worker reads the status before every page it stores; BullMQ only carries the runs.
+ * Import and sync jobs. PostgreSQL holds their state and every change is a compare-and-set on
+ * the status (and run number), so two clicks, two tabs, the sync scheduler or a click racing the
+ * worker can never both win. The worker reads the status before every page it stores; BullMQ only
+ * carries the runs.
  */
 @Injectable()
 export class ImportJobsService {
@@ -58,54 +61,93 @@ export class ImportJobsService {
   /**
    * Starts importing a channel's history (all of it, or since a date). Repeating the request
    * while that import is unfinished returns it; a different import of the channel is a conflict.
+   * A sync on its way gives way: the import reads the new messages first.
    */
-  async start(channelId: string, request: ImportRequest): Promise<StartedImport> {
-    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
-    if (!channel) {
-      throw new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
-    }
-    if (channel.isProtected) {
-      throw new UnprocessableEntityException({
-        code: TelegramErrorCode.CHAT_PROTECTED,
-        message: 'This chat has content protection enabled, so it cannot be archived.',
-      });
-    }
-    if (channel.migratedToChannelId !== null) {
-      throw new UnprocessableEntityException({
-        code: ImportErrorCode.CHANNEL_MIGRATED,
-        message:
-          'This group was upgraded to a supergroup. Import the supergroup: its import includes this history.',
-      });
-    }
+  async start(channelId: string, request: ImportRequest): Promise<StartedJob> {
+    await this.archivable(channelId);
     await this.requireTelegramReady();
 
     const fromDate = request.mode === ImportMode.FROM_DATE ? new Date(request.fromDate) : null;
     const active = await this.activeJob(channelId);
-    if (active) {
+    if (active && active.type === ImportJobType.IMPORT) {
       return this.sameImportOrConflict(active, request.mode, fromDate);
     }
     let job: ImportJobWithChannel;
     try {
       job = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.importJob.create({
-          data: { channelId, type: ImportJobType.IMPORT, mode: request.mode, fromDate, runSeq: 1 },
-        });
-        return tx.importJob.update({
+        if (active) {
+          await this.giveWay(tx, active);
+        }
+        const created = await insertImportJob(
+          tx,
+          { channelId, type: ImportJobType.IMPORT, mode: request.mode, fromDate },
+          jobIds.importRun,
+        );
+        return tx.importJob.findUniqueOrThrow({
           where: { id: created.id },
-          data: { bullJobId: jobIds.importRun(created.id, 1) },
           include: IMPORT_JOB_INCLUDE,
         });
       });
     } catch (error) {
-      // Another request created the channel's unfinished job first (one per channel).
+      // Another request (or the sync scheduler) created the channel's unfinished job first.
       const raced = isUniqueViolation(error) ? await this.activeJob(channelId) : null;
       if (raced) {
         return this.sameImportOrConflict(raced, request.mode, fromDate);
       }
       throw error;
     }
-    await this.queue.enqueue(job.id, job.runSeq);
+    if (active) {
+      await this.queue.discard(active, active.runSeq);
+    }
+    await this.queue.enqueue(job, job.runSeq);
     return { job: toImportJobDto(job), created: true };
+  }
+
+  /**
+   * Reads the messages posted since the archive's newest one. Repeating the request while a
+   * sync is on its way returns it; while an import runs it is a conflict (sync once it is done).
+   */
+  async sync(channelId: string): Promise<StartedJob> {
+    const channel = await this.archivable(channelId);
+    if (channel.headMessageId === null) {
+      throw new ConflictException({
+        code: ImportErrorCode.SYNC_NEEDS_IMPORT,
+        message: 'Nothing of this chat is archived yet: import its history first.',
+      });
+    }
+    await this.requireTelegramReady();
+
+    let active = await this.activeJob(channelId);
+    if (!active) {
+      try {
+        const created = await this.prisma.$transaction((tx) =>
+          insertImportJob(
+            tx,
+            { channelId, type: ImportJobType.SYNC, origin: JobOrigin.MANUAL },
+            jobIds.importRun,
+          ),
+        );
+        const job = await this.find(created.id);
+        await this.queue.enqueue(job, job.runSeq);
+        return { job: toImportJobDto(job), created: true };
+      } catch (error) {
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
+        active = await this.activeJob(channelId);
+        if (!active) {
+          throw error;
+        }
+      }
+    }
+    if (active.type !== ImportJobType.SYNC) {
+      throw new ConflictException({
+        code: ImportErrorCode.IMPORT_ACTIVE,
+        message: 'An import of this channel is unfinished. Sync once it is done.',
+        details: { jobId: active.id },
+      });
+    }
+    return { job: await this.withActiveFiles(active), created: false };
   }
 
   async list(query: ImportJobListQuery): Promise<Page<ImportJobDto>> {
@@ -116,6 +158,7 @@ export class ImportJobsService {
         AND: [
           query.channelId === undefined ? {} : { channelId: query.channelId },
           query.status === undefined ? {} : { status: { in: query.status } },
+          query.type === undefined ? {} : { type: query.type },
           afterCursor(cursor),
         ],
       },
@@ -127,27 +170,48 @@ export class ImportJobsService {
     const page = hasMore ? rows.slice(0, query.limit) : rows;
     const last = page.at(-1);
     return {
-      items: page.map(toImportJobDto),
+      items: await this.toDtos(page),
       nextCursor: hasMore && last ? encodeCursor([last.createdAt.toISOString(), last.id]) : null,
     };
   }
 
   async get(id: string): Promise<ImportJobDto> {
-    return toImportJobDto(await this.find(id));
+    return this.withActiveFiles(await this.find(id));
   }
 
-  /** A queued or running job stops at its next page; nothing it stored is lost. */
+  /** Jobs as the api returns them, with the files each downloads now (one query for all). */
+  async toDtos(jobs: readonly ImportJobWithChannel[]): Promise<ImportJobDto[]> {
+    const files = await activeFilesOf(
+      this.prisma,
+      jobs.map((job) => job.id),
+    );
+    return jobs.map((job) => toImportJobDto(job, files.get(job.id)));
+  }
+
+  /**
+   * A queued or running import stops at its next page; nothing it stored is lost. A sync cannot
+   * pause: it would hold the channel's single slot, and it is short anyway.
+   */
   async pause(id: string): Promise<ImportJobDto> {
     const { count } = await this.prisma.importJob.updateMany({
-      where: { id, status: { in: [JobStatus.PENDING, JobStatus.RUNNING] } },
+      where: {
+        id,
+        type: ImportJobType.IMPORT,
+        status: { in: [JobStatus.PENDING, JobStatus.RUNNING] },
+      },
       data: { status: JobStatus.PAUSED, statusDetail: null },
     });
     const job = await this.find(id);
     if (count === 0) {
-      throw invalidState(job, 'Only a queued or running import can be paused.');
+      throw invalidState(
+        job,
+        job.type === ImportJobType.SYNC
+          ? 'A sync cannot be paused; cancel it instead.'
+          : 'Only a queued or running import can be paused.',
+      );
     }
-    await this.queue.discard(job.id, job.runSeq);
-    return toImportJobDto(job);
+    await this.queue.discard(job, job.runSeq);
+    return this.withActiveFiles(job);
   }
 
   /** Queues a new run of a paused job; it continues where the archive stands. */
@@ -167,8 +231,8 @@ export class ImportJobsService {
     if (count === 0) {
       throw invalidState(await this.find(id), 'Only a paused import can be resumed.');
     }
-    await this.queue.enqueue(id, runSeq);
-    return toImportJobDto(await this.find(id));
+    await this.queue.enqueue(current, runSeq);
+    return this.get(id);
   }
 
   /**
@@ -199,10 +263,15 @@ export class ImportJobsService {
     });
     const job = await this.find(id);
     if (!cancelled) {
-      throw invalidState(job, 'This import has already ended.');
+      throw invalidState(job, `This ${noun(job)} has already ended.`);
     }
-    await this.queue.discard(job.id, job.runSeq);
-    return toImportJobDto(job);
+    await this.queue.discard(job, job.runSeq);
+    return this.withActiveFiles(job);
+  }
+
+  private async withActiveFiles(job: ImportJobWithChannel): Promise<ImportJobDto> {
+    const [dto] = await this.toDtos([job]);
+    return dto as ImportJobDto;
   }
 
   private async find(id: string): Promise<ImportJobWithChannel> {
@@ -219,6 +288,28 @@ export class ImportJobsService {
     return job;
   }
 
+  /** The channel, if this archive may read it: not protected, not an upgraded group. */
+  private async archivable(channelId: string): Promise<Channel> {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) {
+      throw new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
+    }
+    if (channel.isProtected) {
+      throw new UnprocessableEntityException({
+        code: TelegramErrorCode.CHAT_PROTECTED,
+        message: 'This chat has content protection enabled, so it cannot be archived.',
+      });
+    }
+    if (channel.migratedToChannelId !== null) {
+      throw new UnprocessableEntityException({
+        code: ImportErrorCode.CHANNEL_MIGRATED,
+        message:
+          'This group was upgraded to a supergroup. Import the supergroup: its import includes this history.',
+      });
+    }
+    return channel;
+  }
+
   private activeJob(channelId: string): Promise<ImportJobWithChannel | null> {
     return this.prisma.importJob.findFirst({
       where: { channelId, status: { in: [...ACTIVE_JOB_STATUSES] } },
@@ -226,11 +317,19 @@ export class ImportJobsService {
     });
   }
 
-  private sameImportOrConflict(
+  /** A sync on its way is cancelled for an import, which reads the new messages first. */
+  private async giveWay(tx: Prisma.TransactionClient, sync: ImportJobWithChannel): Promise<void> {
+    await tx.importJob.updateMany({
+      where: { id: sync.id, runSeq: sync.runSeq, status: { in: [...ACTIVE_JOB_STATUSES] } },
+      data: { status: JobStatus.CANCELLED, completedAt: new Date(), statusDetail: null },
+    });
+  }
+
+  private async sameImportOrConflict(
     active: ImportJobWithChannel,
     mode: ImportMode,
     fromDate: Date | null,
-  ): StartedImport {
+  ): Promise<StartedJob> {
     const same =
       active.type === ImportJobType.IMPORT &&
       active.mode === mode &&
@@ -243,10 +342,10 @@ export class ImportJobsService {
         details: { jobId: active.id },
       });
     }
-    return { job: toImportJobDto(active), created: false };
+    return { job: await this.withActiveFiles(active), created: false };
   }
 
-  /** Imports read Telegram with the account; without a login they could never run. */
+  /** Imports and syncs read Telegram with the account; without a login they could never run. */
   private async requireTelegramReady(): Promise<void> {
     const account = await this.prisma.telegramAccount.findUnique({
       where: { accountKey: TELEGRAM_ACCOUNT_KEY },
@@ -261,16 +360,16 @@ export class ImportJobsService {
   }
 }
 
+function noun(job: ImportJobWithChannel): string {
+  return job.type === ImportJobType.SYNC ? 'sync' : 'import';
+}
+
 function invalidState(job: ImportJobWithChannel, message: string): ConflictException {
   return new ConflictException({
     code: ImportErrorCode.INVALID_JOB_STATE,
     message,
     details: { status: job.status },
   });
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
 function afterCursor(cursor: JobCursor | undefined): Prisma.ImportJobWhereInput {

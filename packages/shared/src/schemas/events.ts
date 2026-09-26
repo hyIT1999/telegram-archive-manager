@@ -1,53 +1,31 @@
-import { z } from 'zod';
-import { ImportJobPhase, JobStatus, TelegramAuthState } from '../enums.js';
+import type { ImportJobDto } from './imports.js';
+
+/** The live updates stream (server-sent events, GET). */
+export const LIVE_EVENTS_PATH = '/api/events';
 
 /**
- * Events published by the worker on Redis (REDIS_KEYS.eventsChannel) and relayed
- * by the api over SSE (GET /api/events). Payload numbers are plain JSON numbers.
+ * What the live updates stream sends, one event per SSE message (JSON data). The api relays the
+ * change notifications of PostgreSQL, so everything announced is committed.
+ * - `ready`: the stream is open (always the first event);
+ * - `ping`: sent every half minute, so a client notices a stream that went silent (a proxy may
+ *   keep a dead connection open) and reconnects;
+ * - `resync`: changes may have been missed (the api lost its database listener, or too much
+ *   changed at once), so pages read again what they show;
+ * - `session.ended`: the session was revoked or expired; the stream ends;
+ * - `import.job`: an import or sync job as `GET /api/import-jobs/:id` returns it, after any
+ *   change (progress, status, its downloads);
+ * - `channel.changed`: a channel changed (settings, sync, the archived range);
+ * - `downloads.changed`: downloads of a channel (or of its old basic group) changed.
  */
-export const importProgressEventSchema = z.object({
-  type: z.literal('import.progress'),
-  jobId: z.uuid(),
-  channelId: z.uuid(),
-  status: z.enum(JobStatus),
-  phase: z.enum(ImportJobPhase),
-  processedMessages: z.number().int().nonnegative(),
-  totalMessages: z.number().int().nonnegative().nullable(),
-  /** FROM_DATE imports only know an estimate of the total. */
-  totalIsEstimate: z.boolean(),
-  /** Grows while history is still being read (UI shows "+"). */
-  totalMedia: z.number().int().nonnegative(),
-  downloadedFiles: z.number().int().nonnegative(),
-  failedFiles: z.number().int().nonnegative(),
-  skippedFiles: z.number().int().nonnegative(),
-  downloadedBytes: z.number().nonnegative(),
-  totalBytes: z.number().nonnegative(),
-  currentFile: z.string().nullable(),
-  ts: z.iso.datetime(),
-});
-export type ImportProgressEvent = z.infer<typeof importProgressEventSchema>;
+export type LiveEvent =
+  | { type: 'ready' }
+  | { type: 'ping' }
+  | { type: 'resync' }
+  | { type: 'session.ended' }
+  | { type: 'import.job'; job: ImportJobDto }
+  | { type: 'channel.changed'; channelId: string }
+  | { type: 'downloads.changed'; channelId: string };
 
-export const mediaProgressEventSchema = z.object({
-  type: z.literal('media.progress'),
-  mediaId: z.uuid(),
-  importJobId: z.uuid().nullable(),
-  downloadedBytes: z.number().nonnegative(),
-  totalBytes: z.number().nonnegative().nullable(),
-  progress: z.number().int().min(0).max(100),
-  ts: z.iso.datetime(),
-});
-export type MediaProgressEvent = z.infer<typeof mediaProgressEventSchema>;
+export type LiveEventType = LiveEvent['type'];
 
-export const telegramAuthEventSchema = z.object({
-  type: z.literal('telegram.auth'),
-  state: z.enum(TelegramAuthState),
-  ts: z.iso.datetime(),
-});
-export type TelegramAuthEvent = z.infer<typeof telegramAuthEventSchema>;
-
-export const appEventSchema = z.discriminatedUnion('type', [
-  importProgressEventSchema,
-  mediaProgressEventSchema,
-  telegramAuthEventSchema,
-]);
-export type AppEvent = z.infer<typeof appEventSchema>;
+export type LiveEventOf<T extends LiveEventType> = Extract<LiveEvent, { type: T }>;

@@ -11,7 +11,7 @@
   <mat-progress-bar
     [mode]="barMode()"
     [value]="percent() ?? 0"
-    [attr.aria-label]="'Import of ' + item.channel.title"
+    [attr.aria-label]="(noun() === 'sync' ? 'Sync of ' : 'Import of ') + item.channel.title"
   />
   <p class="bar-text">
     @if (percent(); as value) {
@@ -30,6 +30,12 @@
     <div>
       <dt>Downloaded</dt>
       <dd>{{ downloads }}</dd>
+    </div>
+  }
+  @if (currentFileText(); as current) {
+    <div>
+      <dt>{{ item.activeFiles.length > 1 ? 'Current files' : 'Current file' }}</dt>
+      <dd class="current-file">{{ current }}</dd>
     </div>
   }
   <div>
@@ -57,7 +63,7 @@
     <p class="hint">Paused. Everything read so far is saved; resuming continues from there.</p>
   }
   @case ('FAILED') {
-    <app-notice tone="error" title="The import stopped">{{ item.error }}</app-notice>
+    <app-notice tone="error" [title]="'The ' + noun() + ' stopped'">{{ item.error }}</app-notice>
   }
   @case ('CANCELLED') {
     <p class="hint">Cancelled. The messages read before stay in the archive.</p>
@@ -111,7 +117,7 @@
       [showProgress]="busy() === 'cancel'"
       (click)="emit('cancel')"
     >
-      Cancel import
+      Cancel {{ noun() }}
       <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
     </button>
   </div>

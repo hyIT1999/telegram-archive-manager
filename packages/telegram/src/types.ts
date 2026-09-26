@@ -167,9 +167,14 @@ export interface DownloadedFile {
   fileName: string | null;
 }
 
+/**
+ * What Telegram announced, by id only: the archive reads messages through history, where content
+ * protection and auto-delete timers are checked. `chatId` is the marked id ("-100…" for channels);
+ * deletions in basic groups and private chats carry no chat (null).
+ */
 export type UpdateEvent =
-  | { kind: 'new_message'; message: Message }
-  | { kind: 'edit_message'; message: Message }
+  | { kind: 'new_message'; chatId: string; messageId: string }
+  | { kind: 'edit_message'; chatId: string; messageId: string }
   | { kind: 'delete_messages'; chatId: string | null; messageIds: string[] };
 
 export type UpdateHandler = (event: UpdateEvent) => void | Promise<void>;

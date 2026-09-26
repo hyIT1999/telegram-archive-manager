@@ -26,12 +26,18 @@ export function toChannelDto(channel: ChannelWithStorage, stats: ChannelStatsDto
     isForum: channel.isForum,
     memberCount: channel.memberCount,
     syncEnabled: channel.syncEnabled,
+    syncNote: channel.syncNote,
     headMessageId: channel.headMessageId,
     backfillComplete: channel.backfillComplete,
     lastSyncedAt: channel.lastSyncedAt?.toISOString() ?? null,
     migratedToChannelId: channel.migratedToChannelId,
     storageLocation: location
-      ? { id: location.id, kind: location.kind, name: location.name, displayPath: location.displayPath }
+      ? {
+          id: location.id,
+          kind: location.kind,
+          name: location.name,
+          displayPath: location.displayPath,
+        }
       : null,
     storageFolder: channel.storageFolder,
     downloadMedia: channel.downloadMedia,

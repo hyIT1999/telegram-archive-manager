@@ -6,6 +6,8 @@ import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { RouterTestingHarness } from '@angular/router/testing';
 import { flushError, makeImportJob } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
+import { FakeEventSources, provideFakeLiveEvents } from '../../../testing/live';
+import { LiveEvents } from '../../core/live/live-events';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { IMPORT_ENDPOINTS } from '../../features/imports/imports-api';
 import { IMPORT_POLLING } from '../../features/imports/import-job-watch';
@@ -17,12 +19,16 @@ describe('ImportJobPage', () => {
   const confirm = { ask: vi.fn<ConfirmService['ask']>() };
   /** Slow unless a test follows a job over time. */
   const polling = { jobMs: 60_000, listMs: 60_000 };
+  /** Live updates streams, opened only by tests that connect. */
+  let sources: FakeEventSources;
 
   beforeEach(() => {
     confirm.ask.mockReset();
     polling.jobMs = 60_000;
+    sources = new FakeEventSources();
     TestBed.configureTestingModule({
       providers: [
+        ...provideFakeLiveEvents(sources),
         provideRouter(
           [{ path: 'imports/:id', component: ImportJobPage }],
           withComponentInputBinding(),
@@ -178,6 +184,77 @@ describe('ImportJobPage', () => {
       'Content protection was turned on',
     );
     expect(page.querySelector('app-import-progress .actions')).toBeNull();
+  });
+
+  it('follows the job through live updates, without polling, with the files downloading now', async () => {
+    polling.jobMs = 20;
+    TestBed.inject(LiveEvents).connect();
+    sources.ready();
+    const job = makeImportJob();
+    const page = await open(job);
+
+    sources.latest.send({
+      type: 'import.job',
+      job: {
+        ...job,
+        processedMessages: 300,
+        totalMedia: 12,
+        downloadedFiles: 3,
+        skippedFiles: 2,
+        downloadedBytes: 12 * 1024 ** 2,
+        activeFiles: [
+          {
+            mediaId: '0199a0b1-0000-7000-8000-d00000000001',
+            name: 'lesson_01.mp4',
+            type: 'VIDEO',
+            size: 20 * 1024 ** 2,
+            downloadedBytes: 9 * 1024 ** 2,
+            progress: 45,
+            stage: 'FETCHING',
+            requested: false,
+            updatedAt: '2026-09-24T09:02:00.000Z',
+          },
+        ],
+      },
+    });
+    // Another job changes nothing here.
+    sources.latest.send({ type: 'import.job', job: makeImportJob({ processedMessages: 1 }) });
+    await vi.waitFor(() =>
+      expect(text(page.querySelector('.bar-text'))).toBe('60 % · 300 of about 500'),
+    );
+    expect(text(page)).toContain('30 % · 3 of 12 files · 12 MiB of 48 MiB · 2 skipped');
+    expect(text(page.querySelector('.current-file'))).toBe('lesson_01.mp4 · 45 %');
+
+    // Live: nothing is polled.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    http.expectNone(IMPORT_ENDPOINTS.job(job.id));
+  });
+
+  it('says when a few files of a large import are downloaded', async () => {
+    const page = await open(
+      makeImportJob({ status: 'COMPLETED', totalMedia: 3_433, downloadedFiles: 9 }),
+    );
+    expect(text(page)).toContain('<1 % · 9 of 3,433 files');
+  });
+
+  it('shows a sync as such: new messages, why it ran, cancel but no pause', async () => {
+    const job = makeImportJob({
+      type: 'SYNC',
+      origin: 'TELEGRAM_UPDATE',
+      processedMessages: 2,
+      totalMessages: 5,
+    });
+    const page = await open(job);
+    expect(page.querySelector('.status')?.textContent).toContain('Syncing');
+    expect(page.textContent).toContain('New messages');
+    expect(page.textContent).toContain('Sync job');
+    expect(page.textContent).toContain('New messages on Telegram');
+    expect(button(page, 'Pause')).toBeUndefined();
+
+    confirm.ask.mockResolvedValueOnce(false);
+    button(page, 'Cancel sync')?.click();
+    await vi.waitFor(() => expect(confirm.ask).toHaveBeenCalledTimes(1));
+    expect(confirm.ask.mock.calls[0]?.[0]).toMatchObject({ confirmLabel: 'Cancel sync' });
   });
 
   it('shows "not found" for unknown jobs', async () => {

@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import type { Prisma } from '@tam/database';
+import type { Channel, Prisma } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   ApiErrorCode,
   type ChannelDto,
   type ChannelListQuery,
+  ImportErrorCode,
   type Page,
   TelegramErrorCode,
   type UpdateChannelRequest,
@@ -50,7 +51,10 @@ export class ChannelsService {
   }
 
   async get(id: string): Promise<ChannelDto> {
-    const channel = await this.prisma.channel.findUnique({ where: { id }, include: CHANNEL_INCLUDE });
+    const channel = await this.prisma.channel.findUnique({
+      where: { id },
+      include: CHANNEL_INCLUDE,
+    });
     if (!channel) {
       throw channelNotFound();
     }
@@ -58,12 +62,14 @@ export class ChannelsService {
   }
 
   /**
-   * Chooses where the channel's media is saved, and whether it downloads automatically.
+   * Chooses where the channel's media is saved, whether it downloads automatically, and whether
+   * it syncs.
    *
    * The channel's folder name is fixed the first time a location is chosen, so a later rename in
    * Telegram does not split its files over two folders. The old basic group of an upgraded
-   * supergroup follows the switch; switching off stops running downloads nobody asked for (they
-   * keep their partial files and go on when switched on again).
+   * supergroup follows the download switch; switching off stops running downloads nobody asked
+   * for (they keep their partial files and go on when switched on again). Protected chats and old
+   * groups never sync; switching sync on clears why it had stopped by itself.
    */
   async update(id: string, request: UpdateChannelRequest): Promise<ChannelDto> {
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -85,17 +91,33 @@ export class ChannelsService {
         }
         data.storageLocationId = location.id;
         data.storageFolder =
-          channel.storageFolder ?? channelFolderName(channel.title, channel.telegramChatId.toString());
+          channel.storageFolder ??
+          channelFolderName(channel.title, channel.telegramChatId.toString());
       }
       if (request.downloadMedia !== undefined) {
-        const oldGroups = await tx.channel.findMany({ where: { migratedToChannelId: id }, select: { id: true } });
+        const oldGroups = await tx.channel.findMany({
+          where: { migratedToChannelId: id },
+          select: { id: true },
+        });
         const ids = [id, ...oldGroups.map((group) => group.id)];
         await tx.channel.updateMany({
           where: { id: { in: ids } },
-          data: { downloadMedia: request.downloadMedia, ...(request.downloadMedia ? { downloadNote: null } : {}) },
+          data: {
+            downloadMedia: request.downloadMedia,
+            ...(request.downloadMedia ? { downloadNote: null } : {}),
+          },
         });
         if (!request.downloadMedia) {
           await stopRunningDownloads(tx, ids);
+        }
+      }
+      if (request.syncEnabled !== undefined) {
+        if (request.syncEnabled) {
+          assertSyncable(channel);
+        }
+        data.syncEnabled = request.syncEnabled;
+        if (request.syncEnabled) {
+          data.syncNote = null;
         }
       }
       return tx.channel.update({ where: { id }, data, include: CHANNEL_INCLUDE });
@@ -108,9 +130,13 @@ export class ChannelsService {
    * chat again (even concurrently) returns the existing channel. Everything but the id comes from
    * the cache the worker filled from Telegram, so a client cannot bypass content protection.
    */
-  async createFromDialog(telegramChatId: string): Promise<{ channel: ChannelDto; created: boolean }> {
+  async createFromDialog(
+    telegramChatId: string,
+  ): Promise<{ channel: ChannelDto; created: boolean }> {
     const chatId = BigInt(telegramChatId);
-    const dialog = await this.prisma.telegramDialog.findUnique({ where: { telegramChatId: chatId } });
+    const dialog = await this.prisma.telegramDialog.findUnique({
+      where: { telegramChatId: chatId },
+    });
     if (!dialog) {
       throw new NotFoundException({
         code: TelegramErrorCode.DIALOG_NOT_FOUND,
@@ -170,6 +196,22 @@ export class ChannelsService {
 
 function channelNotFound(): NotFoundException {
   return new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
+}
+
+/** Protected chats are never archived, and an upgraded group gets no new messages. */
+function assertSyncable(channel: Channel): void {
+  if (channel.isProtected) {
+    throw new UnprocessableEntityException({
+      code: TelegramErrorCode.CHAT_PROTECTED,
+      message: 'This chat has content protection enabled, so it cannot be synced.',
+    });
+  }
+  if (channel.migratedToChannelId !== null) {
+    throw new UnprocessableEntityException({
+      code: ImportErrorCode.CHANNEL_MIGRATED,
+      message: 'This group was upgraded to a supergroup, which gets its new messages: sync that.',
+    });
+  }
 }
 
 function searchFilter(q: string | undefined): Prisma.ChannelWhereInput {

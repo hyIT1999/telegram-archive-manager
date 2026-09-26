@@ -1,8 +1,9 @@
-import { Component, ElementRef, inject, linkedSignal, viewChild } from '@angular/core';
+import { Component, DestroyRef, ElementRef, inject, linkedSignal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatSidenav, MatSidenavContainer, MatSidenavContent } from '@angular/material/sidenav';
 import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
+import { LiveEvents } from '../../core/live/live-events';
 import { LayoutService } from '../../core/services/layout-service';
 import { Header } from '../header/header';
 import { Sidebar } from '../sidebar/sidebar';
@@ -30,6 +31,10 @@ export class Shell {
   private readonly main = viewChild.required<ElementRef<HTMLElement>>('main');
 
   constructor() {
+    // Live updates flow while the signed-in layout is shown.
+    const disconnect = inject(LiveEvents).connect();
+    inject(DestroyRef).onDestroy(disconnect);
+
     inject(Router)
       .events.pipe(
         filter((event) => event instanceof NavigationEnd),

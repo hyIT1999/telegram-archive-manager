@@ -3,18 +3,15 @@ import { ConfigService } from '@nestjs/config';
 import { type StorageLocation, refreshMediaCountersOf } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
-  type ActiveDownloadDto,
   ApiErrorCode,
   type ChannelDownloadsDto,
   type DownloadCountsDto,
   DownloadJobStatus,
   type DownloadLocationDto,
-  type DownloadStage,
-  type MediaType,
   type RetryDownloadsDto,
 } from '@tam/shared';
-import { extensionFor, mediaFileName } from '@tam/storage';
 import type { Env } from '../config/env.js';
+import { type ActiveDownloadRow, toActiveDownloadDto } from '../downloads/active-downloads.js';
 import { loadDownloadSettings } from '../downloads/download-rules.js';
 import { StorageDrivers } from '../storage/storage-drivers.js';
 
@@ -27,20 +24,6 @@ interface StatusRow {
   status: DownloadJobStatus;
   files: number;
   bytes: string;
-}
-
-interface ActiveRow {
-  id: string;
-  filename: string | null;
-  mime_type: string | null;
-  type: MediaType;
-  size: string | null;
-  downloaded_bytes: string;
-  progress: number;
-  stage: DownloadStage | null;
-  requested: boolean;
-  updated_at: Date;
-  telegram_message_id: number;
 }
 
 const COUNT_KEYS: Readonly<Record<DownloadJobStatus, keyof DownloadCountsDto>> = {
@@ -85,7 +68,7 @@ export class ChannelDownloadsService {
         JOIN messages g ON g.id = m.message_id
         WHERE g.channel_id = ANY(${ids}::uuid[])
         GROUP BY d.status`,
-      this.prisma.$queryRaw<ActiveRow[]>`
+      this.prisma.$queryRaw<ActiveDownloadRow[]>`
         SELECT m.id, m.filename, m.mime_type, m.type, m.size::text AS size,
                m.downloaded_bytes::text AS downloaded_bytes, d.progress, d.stage,
                d.requested_at IS NOT NULL AS requested, d.updated_at, g.telegram_message_id
@@ -129,7 +112,7 @@ export class ChannelDownloadsService {
       paused: settings.paused,
       files,
       bytes,
-      active: active.map(toActiveDto),
+      active: active.map(toActiveDownloadDto),
       location: where,
       fits:
         where === null || where.freeBytes === null
@@ -206,23 +189,4 @@ export class ChannelDownloadsService {
     this.space.set(location.id, { at: Date.now(), freeBytes });
     return freeBytes;
   }
-}
-
-function toActiveDto(row: ActiveRow): ActiveDownloadDto {
-  return {
-    mediaId: row.id,
-    name:
-      row.filename ??
-      mediaFileName({
-        telegramMessageId: row.telegram_message_id,
-        extension: extensionFor(row.mime_type, row.type),
-      }),
-    type: row.type,
-    size: row.size === null ? null : Number(row.size),
-    downloadedBytes: Number(row.downloaded_bytes),
-    progress: row.progress,
-    stage: row.stage,
-    requested: row.requested,
-    updatedAt: row.updated_at.toISOString(),
-  };
 }

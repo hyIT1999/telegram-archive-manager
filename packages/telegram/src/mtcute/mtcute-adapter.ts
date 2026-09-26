@@ -1,6 +1,7 @@
 import { constants as fsConstants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import {
+  type DeleteMessageUpdate,
   type Chat as MtChat,
   type Message as MtMessage,
   type Photo as MtPhoto,
@@ -8,6 +9,7 @@ import {
   type SentCode,
   Thumbnail,
   User as MtUser,
+  getMarkedPeerId,
   tl,
 } from '@mtcute/core';
 import type { TelegramClient as MtTelegramClient } from '@mtcute/core/client.js';
@@ -24,7 +26,11 @@ import {
 } from '../errors.js';
 import { type FileIdParts, decodeFileId } from '../file-id.js';
 import type { SendCodeResult, SignInResult, TelegramLoginApi } from '../login-api.js';
-import type { TelegramClient, TelegramHistoryReader, TelegramMediaReader } from '../telegram-client.js';
+import type {
+  TelegramClient,
+  TelegramHistoryReader,
+  TelegramMediaReader,
+} from '../telegram-client.js';
 import type {
   AuthState,
   Chat,
@@ -38,6 +44,8 @@ import type {
   TelegramUser,
   ThumbnailOptions,
   ThumbnailRequest,
+  UpdateEvent,
+  UpdateHandler,
 } from '../types.js';
 import { toTelegramError, translateErrors } from './error-mapping.js';
 import { mapChat, mapForumTopic, mapMessage, mapUser, sizeOf } from './mappers.js';
@@ -86,18 +94,54 @@ function alignDown(offset: number): number {
 /**
  * The real Telegram adapter, on top of mtcute. It is stateless: the pending-login state lives in
  * the worker's database, and mtcute's session storage holds the (encrypted) auth key.
- *
- * Realtime updates (Phase 7) complete the TelegramClient interface later; until then the adapter
- * implements the parts the worker uses.
  */
 export class MtcuteTelegramAdapter
-  implements
-    TelegramLoginApi,
-    TelegramHistoryReader,
-    TelegramMediaReader,
-    Pick<TelegramClient, 'authenticate' | 'getChats' | 'getChatHistory' | 'downloadFile'>
+  implements TelegramLoginApi, TelegramHistoryReader, TelegramMediaReader, TelegramClient
 {
+  /** Whether update handlers are registered on this client (once per client). */
+  private listening = false;
+
   constructor(private readonly tg: MtTelegramClient) {}
+
+  /**
+   * Delivers the ids of new, edited and deleted messages of every chat to `handler`, and starts
+   * receiving updates (the account must be logged in). A handler that throws never stops the
+   * update loop.
+   */
+  async subscribeUpdates(handler?: UpdateHandler): Promise<void> {
+    if (handler) {
+      this.onUpdate(handler);
+    }
+    await this.startUpdates();
+  }
+
+  /**
+   * Registers `handler` without receiving anything yet: a sign-in, or startUpdates(), starts the
+   * update loop. Only the first handler of a client is kept.
+   */
+  onUpdate(handler: UpdateHandler): void {
+    if (this.listening) {
+      return;
+    }
+    this.listening = true;
+    const deliver = (event: UpdateEvent) => {
+      try {
+        void Promise.resolve(handler(event)).catch(() => undefined);
+      } catch {
+        // The handler's own problem: the next update still arrives.
+      }
+    };
+    this.tg.onNewMessage.add((message) => deliver({ kind: 'new_message', ...messageRef(message) }));
+    this.tg.onEditMessage.add((message) =>
+      deliver({ kind: 'edit_message', ...messageRef(message) }),
+    );
+    this.tg.onDeleteMessage.add((update) => deliver(deletedMessages(update)));
+  }
+
+  /** Starts (or keeps) receiving updates; idempotent. Needs a logged-in account. */
+  async startUpdates(): Promise<void> {
+    await translateErrors(() => this.tg.startUpdatesLoop());
+  }
 
   async authenticate(): Promise<AuthState> {
     const user = await this.getAuthorizedUser();
@@ -125,7 +169,9 @@ export class MtcuteTelegramAdapter
 
   async sendCode(phoneNumber: string): Promise<SendCodeResult> {
     const result = await translateErrors(() => this.tg.sendCode({ phone: phoneNumber }));
-    return result instanceof MtUser ? { kind: 'authorized', user: mapUser(result) } : fromSentCode(result);
+    return result instanceof MtUser
+      ? { kind: 'authorized', user: mapUser(result) }
+      : fromSentCode(result);
   }
 
   async resendCode(phoneNumber: string, phoneCodeHash: string): Promise<SendCodeResult> {
@@ -177,7 +223,9 @@ export class MtcuteTelegramAdapter
     const full = await translateErrors(() => this.tg.getFullChat(toPeerId(chatId)));
     const chat = mapChat(full);
     if (!chat) {
-      throw new ChatUnavailableError(`Chat ${chatId} is no longer a channel or group this account can read`);
+      throw new ChatUnavailableError(
+        `Chat ${chatId} is no longer a channel or group this account can read`,
+      );
     }
     const migratedFrom = full.migratedFrom;
     return { ...chat, migratedFromChatId: migratedFrom ? String(-migratedFrom.chatId) : null };
@@ -222,7 +270,9 @@ export class MtcuteTelegramAdapter
           limit: FORUM_TOPICS_PAGE,
         }),
       );
-      const found = result.topics.filter((topic): topic is tl.RawForumTopic => topic._ === 'forumTopic');
+      const found = result.topics.filter(
+        (topic): topic is tl.RawForumTopic => topic._ === 'forumTopic',
+      );
       for (const topic of found) {
         topics.set(topic.id, mapForumTopic(topic));
       }
@@ -232,7 +282,9 @@ export class MtcuteTelegramAdapter
       }
       // Topics come by creation date or by their last message; the next page starts after `last`.
       offset = {
-        offsetDate: result.orderByCreateDate ? last.date : (messageDate(result.messages, last.topMessage) ?? last.date),
+        offsetDate: result.orderByCreateDate
+          ? last.date
+          : (messageDate(result.messages, last.topMessage) ?? last.date),
         offsetId: last.topMessage,
         offsetTopic: last.id,
       };
@@ -241,7 +293,11 @@ export class MtcuteTelegramAdapter
   }
 
   /** Newest → oldest, strictly older than `fromMessageId`; empty when history is exhausted. */
-  async getChatHistory(chatId: string, fromMessageId?: string, limit = MAX_HISTORY_PAGE): Promise<Message[]> {
+  async getChatHistory(
+    chatId: string,
+    fromMessageId?: string,
+    limit = MAX_HISTORY_PAGE,
+  ): Promise<Message[]> {
     const page = await this.getHistoryPage(chatId, {
       ...(fromMessageId === undefined ? {} : { beforeMessageId: fromMessageId }),
       limit,
@@ -250,7 +306,8 @@ export class MtcuteTelegramAdapter
   }
 
   async getHistoryPage(chatId: string, options: HistoryPageOptions = {}): Promise<HistoryPage> {
-    const before = options.beforeMessageId === undefined ? undefined : toMessageId(options.beforeMessageId);
+    const before =
+      options.beforeMessageId === undefined ? undefined : toMessageId(options.beforeMessageId);
     const offset =
       before !== undefined
         ? { id: before, date: 0 }
@@ -273,7 +330,11 @@ export class MtcuteTelegramAdapter
   }
 
   /** Oldest → newest, strictly newer than `afterMessageId`. */
-  async getNewerMessages(chatId: string, afterMessageId: string, limit = MAX_HISTORY_PAGE): Promise<Message[]> {
+  async getNewerMessages(
+    chatId: string,
+    afterMessageId: string,
+    limit = MAX_HISTORY_PAGE,
+  ): Promise<Message[]> {
     const after = toMessageId(afterMessageId);
     const messages = await translateErrors(() =>
       this.tg.getHistory(toPeerId(chatId), {
@@ -344,11 +405,19 @@ export class MtcuteTelegramAdapter
               TelegramErrorCode.TELEGRAM_ERROR,
             );
           }
-          return { path: destPath, size: position, mimeType: mimeTypeOf(file), fileName: fileNameOf(file) };
+          return {
+            path: destPath,
+            size: position,
+            mimeType: mimeTypeOf(file),
+            fileName: fileNameOf(file),
+          };
         } catch (error) {
           signal?.throwIfAborted();
           const translated = toTelegramError(error);
-          if (!(translated instanceof FileReferenceExpiredError) || refreshes >= MAX_REFERENCE_REFRESHES) {
+          if (
+            !(translated instanceof FileReferenceExpiredError) ||
+            refreshes >= MAX_REFERENCE_REFRESHES
+          ) {
             throw translated;
           }
           // Read the message again for a fresh reference and go on from the last whole MiB.
@@ -374,18 +443,27 @@ export class MtcuteTelegramAdapter
     if (files.length === 0) {
       return thumbnails;
     }
-    const ids = [...new Set(files.map((file) => toMessageId(file.messageId)))].slice(0, MAX_HISTORY_PAGE);
+    const ids = [...new Set(files.map((file) => toMessageId(file.messageId)))].slice(
+      0,
+      MAX_HISTORY_PAGE,
+    );
     const messages = await translateErrors(() => this.tg.getMessages(toPeerId(chatId), ids));
-    const byId = new Map(messages.flatMap((message) => (message ? [[message.id, message] as const] : [])));
+    const byId = new Map(
+      messages.flatMap((message) => (message ? [[message.id, message] as const] : [])),
+    );
     for (const request of files) {
       options.signal?.throwIfAborted();
       const message = byId.get(Number(request.messageId));
       const file = message && !message.isContentProtected ? fileOf(message) : null;
       const thumbnail =
         file?.uniqueFileId === request.fileUniqueId
-          ? (file.getThumbnail(Thumbnail.THUMB_320x320_BOX) ?? file.getThumbnail(Thumbnail.THUMB_100x100_BOX))
+          ? (file.getThumbnail(Thumbnail.THUMB_320x320_BOX) ??
+            file.getThumbnail(Thumbnail.THUMB_100x100_BOX))
           : null;
-      thumbnails.set(request.fileUniqueId, thumbnail ? await this.thumbnailBytes(thumbnail, options) : null);
+      thumbnails.set(
+        request.fileUniqueId,
+        thumbnail ? await this.thumbnailBytes(thumbnail, options) : null,
+      );
     }
     return thumbnails;
   }
@@ -413,11 +491,19 @@ export class MtcuteTelegramAdapter
    * batch. A hard time limit applies: Telegram may answer "-503 Timeout" for a file forever, and
    * mtcute keeps retrying small files without a stall timeout of its own.
    */
-  private async thumbnailBytes(thumbnail: Thumbnail, options: ThumbnailOptions): Promise<Uint8Array | null> {
+  private async thumbnailBytes(
+    thumbnail: Thumbnail,
+    options: ThumbnailOptions,
+  ): Promise<Uint8Array | null> {
     const limit = options.timeoutMs ?? DEFAULT_THUMBNAIL_TIMEOUT_MS;
     const timeout = new AbortController();
-    const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
-    const download = this.tg.downloadAsBuffer(thumbnail, { abortSignal: signal, stallTimeout: limit });
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, timeout.signal])
+      : timeout.signal;
+    const download = this.tg.downloadAsBuffer(thumbnail, {
+      abortSignal: signal,
+      stallTimeout: limit,
+    });
     // Settled either way below; a late rejection after the time limit must not go unhandled.
     download.catch(() => undefined);
     let timer: NodeJS.Timeout | undefined;
@@ -487,6 +573,19 @@ function messageDate(messages: readonly tl.TypeMessage[], id: number): number | 
     }
   }
   return null;
+}
+
+/** The chat is read from the raw peer: the chat object needs the peer cached, which may not be. */
+function messageRef(message: MtMessage): { chatId: string; messageId: string } {
+  return { chatId: String(getMarkedPeerId(message.raw.peerId)), messageId: String(message.id) };
+}
+
+function deletedMessages(update: DeleteMessageUpdate): UpdateEvent {
+  return {
+    kind: 'delete_messages',
+    chatId: update.channelId === null ? null : String(update.channelId),
+    messageIds: update.messageIds.map(String),
+  };
 }
 
 function toPeerId(chatId: string): number {

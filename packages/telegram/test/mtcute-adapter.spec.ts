@@ -1,8 +1,14 @@
-import { Long, tl } from '@mtcute/core';
+import { Long, PeersIndex, tl } from '@mtcute/core';
 import { TelegramClient } from '@mtcute/core/client.js';
 import { StubTelegramClient, createStub } from '@mtcute/test';
-import { describe, expect, it } from 'vitest';
-import { LoginStepError, MtcuteTelegramAdapter, NotAForumError, decodeFileId } from '../src/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  LoginStepError,
+  MtcuteTelegramAdapter,
+  NotAForumError,
+  type UpdateEvent,
+  decodeFileId,
+} from '../src/index.js';
 
 const CHANNEL_ID = 1_234_567_890;
 const MARKED_CHANNEL_ID = String(-1_000_000_000_000 - CHANNEL_ID);
@@ -66,7 +72,9 @@ describe('MtcuteTelegramAdapter — login primitives', () => {
       }),
     );
     await stub.with(async () => {
-      await expect(adapter.sendCode('+84912345678')).rejects.toMatchObject({ code: 'EMAIL_REQUIRED' });
+      await expect(adapter.sendCode('+84912345678')).rejects.toMatchObject({
+        code: 'EMAIL_REQUIRED',
+      });
     });
   });
 
@@ -116,7 +124,10 @@ describe('MtcuteTelegramAdapter — login primitives', () => {
     });
     await stub.with(async () => {
       await expect(adapter.getAuthorizedUser()).resolves.toBeNull();
-      await expect(adapter.authenticate()).resolves.toMatchObject({ state: 'LOGGED_OUT', user: null });
+      await expect(adapter.authenticate()).resolves.toMatchObject({
+        state: 'LOGGED_OUT',
+        user: null,
+      });
     });
   });
 });
@@ -143,7 +154,10 @@ describe('MtcuteTelegramAdapter — chats', () => {
       }
       return createStub('messages.dialogs', {
         dialogs: [
-          createStub('dialog', { peer: { _: 'peerChannel', channelId: CHANNEL_ID }, topMessage: 1 }),
+          createStub('dialog', {
+            peer: { _: 'peerChannel', channelId: CHANNEL_ID },
+            topMessage: 1,
+          }),
           createStub('dialog', { peer: { _: 'peerChat', chatId: 200 }, topMessage: 1 }),
           createStub('dialog', { peer: { _: 'peerUser', userId: 300 }, topMessage: 1 }),
           createStub('dialog', { peer: { _: 'peerChannel', channelId: 400 }, topMessage: 1 }),
@@ -275,7 +289,9 @@ describe('MtcuteTelegramAdapter — history', () => {
               fromId: { _: 'peerChannel', channelId: 42 },
               channelPost: 99,
             },
-            entities: [{ _: 'messageEntityTextUrl', offset: 0, length: 5, url: 'https://example.com' }],
+            entities: [
+              { _: 'messageEntityTextUrl', offset: 0, length: 5, url: 'https://example.com' },
+            ],
           }),
         ],
         chats: [channel],
@@ -324,7 +340,9 @@ describe('MtcuteTelegramAdapter — history', () => {
         caption: null,
         media: [],
         replyToMessageId: '1',
-        entities: [{ kind: 'textUrl', offset: 0, length: 5, params: { url: 'https://example.com' } }],
+        entities: [
+          { kind: 'textUrl', offset: 0, length: 5, params: { url: 'https://example.com' } },
+        ],
         forward: {
           fromChatId: String(-1_000_000_000_000 - 42),
           fromMessageId: '99',
@@ -359,10 +377,17 @@ describe('MtcuteTelegramAdapter — imports', () => {
 
       const before = new Date('2026-09-01T00:00:00Z');
       await adapter.getHistoryPage(MARKED_CHANNEL_ID, { beforeDate: before, limit: 1 });
-      expect(requests[1]).toMatchObject({ offsetId: 0, offsetDate: before.getTime() / 1000, limit: 1 });
+      expect(requests[1]).toMatchObject({
+        offsetId: 0,
+        offsetDate: before.getTime() / 1000,
+        limit: 1,
+      });
 
       // The id cursor wins over the date, and stays exclusive.
-      const older = await adapter.getHistoryPage(MARKED_CHANNEL_ID, { beforeMessageId: '9', beforeDate: before });
+      const older = await adapter.getHistoryPage(MARKED_CHANNEL_ID, {
+        beforeMessageId: '9',
+        beforeDate: before,
+      });
       expect(requests[2]).toMatchObject({ offsetId: 9, offsetDate: 0, limit: 100 });
       expect(older.messages.map((item) => item.id)).toEqual(['8', '7']);
     });
@@ -408,7 +433,9 @@ describe('MtcuteTelegramAdapter — imports', () => {
       throw rpcError(406, 'CHANNEL_PRIVATE');
     });
     await stub.with(async () => {
-      await expect(adapter.refreshChat(MARKED_CHANNEL_ID)).rejects.toMatchObject({ code: 'CHAT_UNAVAILABLE' });
+      await expect(adapter.refreshChat(MARKED_CHANNEL_ID)).rejects.toMatchObject({
+        code: 'CHAT_UNAVAILABLE',
+      });
     });
   });
 
@@ -418,7 +445,12 @@ describe('MtcuteTelegramAdapter — imports', () => {
       createStub('messages.chats', {
         chats: request.id.map((id) =>
           Number(id) === 200
-            ? createStub('chat', { id: 200, title: 'Study group (before upgrade)', deactivated: true, noforwards: true })
+            ? createStub('chat', {
+                id: 200,
+                title: 'Study group (before upgrade)',
+                deactivated: true,
+                noforwards: true,
+              })
             : createStub('chatForbidden', { id: Number(id), title: 'Hidden' }),
         ),
       }),
@@ -463,7 +495,9 @@ describe('MtcuteTelegramAdapter — imports', () => {
     stub.respondWith('messages.getForumTopics', (request) => {
       requests.push(request);
       const start =
-        request.offsetTopic === 0 ? 0 : all.findIndex((item) => item.id === request.offsetTopic) + 1;
+        request.offsetTopic === 0
+          ? 0
+          : all.findIndex((item) => item.id === request.offsetTopic) + 1;
       const page = all.slice(start, start + request.limit);
       return createStub('messages.forumTopics', {
         count: all.length,
@@ -506,7 +540,90 @@ describe('MtcuteTelegramAdapter — imports', () => {
       throw rpcError(400, 'CHANNEL_FORUM_MISSING');
     });
     await stub.with(async () => {
-      await expect(adapter.getForumTopics(MARKED_CHANNEL_ID)).rejects.toBeInstanceOf(NotAForumError);
+      await expect(adapter.getForumTopics(MARKED_CHANNEL_ID)).rejects.toBeInstanceOf(
+        NotAForumError,
+      );
     });
+  });
+});
+
+describe('MtcuteTelegramAdapter — updates', () => {
+  function setupUpdates() {
+    const stub = new StubTelegramClient();
+    const client = new TelegramClient({ client: stub });
+    return { stub, client, adapter: new MtcuteTelegramAdapter(client) };
+  }
+
+  /** What Telegram pushes; the peers of an update are cached only when Telegram sent them along. */
+  function announce(stub: StubTelegramClient, update: tl.TypeUpdate, cached = true): void {
+    const peers = cached ? PeersIndex.from({ chats: [channel] }) : new PeersIndex();
+    stub.onRawUpdate.emit({ update, peers } as never);
+  }
+
+  it('passes on the ids of new, edited and deleted messages once it receives updates', async () => {
+    const { stub, client, adapter } = setupUpdates();
+    const start = vi.spyOn(client, 'startUpdatesLoop').mockResolvedValue();
+    const events: UpdateEvent[] = [];
+    await adapter.subscribeUpdates((event) => {
+      events.push(event);
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+
+    announce(stub, { _: 'updateNewChannelMessage', message: message(41), pts: 1, ptsCount: 1 });
+    announce(
+      stub,
+      { _: 'updateNewChannelMessage', message: message(42), pts: 2, ptsCount: 1 },
+      false,
+    );
+    announce(stub, {
+      _: 'updateEditChannelMessage',
+      message: message(40, { editDate: 1_700_000_100 }),
+      pts: 3,
+      ptsCount: 1,
+    });
+    announce(stub, {
+      _: 'updateDeleteChannelMessages',
+      channelId: CHANNEL_ID,
+      messages: [7, 8],
+      pts: 5,
+      ptsCount: 2,
+    });
+    announce(stub, { _: 'updateDeleteMessages', messages: [9], pts: 6, ptsCount: 1 });
+
+    expect(events).toEqual([
+      { kind: 'new_message', chatId: MARKED_CHANNEL_ID, messageId: '41' },
+      // The chat of a message comes from its raw peer, cached or not.
+      { kind: 'new_message', chatId: MARKED_CHANNEL_ID, messageId: '42' },
+      { kind: 'edit_message', chatId: MARKED_CHANNEL_ID, messageId: '40' },
+      { kind: 'delete_messages', chatId: MARKED_CHANNEL_ID, messageIds: ['7', '8'] },
+      { kind: 'delete_messages', chatId: null, messageIds: ['9'] },
+    ]);
+  });
+
+  it('keeps delivering when the handler fails, and keeps the first handler of a client', async () => {
+    const { stub, adapter } = setupUpdates();
+    const seen: string[] = [];
+    adapter.onUpdate(async (event) => {
+      seen.push(event.kind === 'new_message' ? event.messageId : event.kind);
+      if (seen.length === 1) {
+        throw new Error('broken handler');
+      }
+    });
+    adapter.onUpdate(() => {
+      seen.push('second handler');
+    });
+
+    announce(stub, { _: 'updateNewChannelMessage', message: message(1), pts: 1, ptsCount: 1 });
+    announce(stub, { _: 'updateNewChannelMessage', message: message(2), pts: 2, ptsCount: 1 });
+    await Promise.resolve();
+    expect(seen).toEqual(['1', '2']);
+  });
+
+  it('starts receiving again on request (after a reconnect)', async () => {
+    const { client, adapter } = setupUpdates();
+    const start = vi.spyOn(client, 'startUpdatesLoop').mockResolvedValue();
+    await adapter.startUpdates();
+    await adapter.startUpdates();
+    expect(start).toHaveBeenCalledTimes(2);
   });
 });

@@ -7,6 +7,7 @@ import {
   type DownloadStage,
   DownloadStatus,
 } from '@tam/shared';
+import { SYNC_NOTES } from '../common/sync-notes.js';
 import { MEDIA_SETTINGS, type MediaSettings } from './media-settings.js';
 
 /** One try of a download: the download_jobs row and the run number the scheduler gave it. */
@@ -287,7 +288,13 @@ export class DownloadStore {
       }
       await tx.channel.updateMany({
         where: { id: channelId },
-        data: { isProtected: true, syncEnabled: false, downloadMedia: false, downloadNote: error },
+        data: {
+          isProtected: true,
+          syncEnabled: false,
+          syncNote: SYNC_NOTES.protected,
+          downloadMedia: false,
+          downloadNote: error,
+        },
       });
     });
   }

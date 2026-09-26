@@ -40,7 +40,10 @@ export class ChannelsApi {
     return this.http.get<ChannelDto>(`/api/channels/${encodeURIComponent(id)}`);
   }
 
-  /** Chooses where the channel's media is saved (`PATCH /api/channels/:id`). */
+  /**
+   * Changes the channel's settings: where its media is saved, automatic downloads, sync
+   * (`PATCH /api/channels/:id`).
+   */
   update(id: string, request: UpdateChannelRequest): Observable<ChannelDto> {
     return this.http.patch<ChannelDto>(`/api/channels/${encodeURIComponent(id)}`, request, {
       context: new HttpContext().set(ERRORS_SHOWN_INLINE, true),

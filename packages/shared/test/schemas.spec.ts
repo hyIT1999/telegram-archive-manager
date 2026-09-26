@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ALL_QUEUES,
   IMPORT_RUN_ATTEMPTS,
+  QUEUES,
   SEARCH_QUERY_MAX_LENGTH,
+  SYNC_INTERVAL_MINUTES,
   TAG_NAME_MAX_LENGTH,
   addMessageTagRequestSchema,
-  appEventSchema,
   createTagRequestSchema,
   cursorQuerySchema,
+  defaultSyncSettings,
   importJobListQuerySchema,
   importRequestSchema,
   importRunJobOptions,
@@ -14,11 +17,15 @@ import {
   messageListQuerySchema,
   newPasswordSchema,
   normalizeTagName,
+  queueForJobType,
   rangeEnd,
   rangeStart,
+  readSyncSettings,
   searchQuerySchema,
   tagNameSchema,
   telegramIdSchema,
+  updateChannelRequestSchema,
+  updateSettingsRequestSchema,
   updateTagRequestSchema,
 } from '../src/index.js';
 
@@ -97,6 +104,56 @@ describe('importJobListQuerySchema', () => {
       },
     );
     expect(importJobListQuerySchema.safeParse({ status: 'STUCK' }).success).toBe(false);
+  });
+
+  it('filters by job type', () => {
+    expect(importJobListQuerySchema.parse({ type: 'SYNC' }).type).toBe('SYNC');
+    expect(importJobListQuerySchema.safeParse({ type: 'BACKUP' }).success).toBe(false);
+  });
+});
+
+describe('queueForJobType', () => {
+  it('keeps syncs out of the import queue', () => {
+    expect(queueForJobType('IMPORT')).toBe(QUEUES.telegramImport);
+    expect(queueForJobType('SYNC')).toBe(QUEUES.telegramSync);
+    expect(ALL_QUEUES).toContain(QUEUES.telegramSync);
+  });
+});
+
+describe('updateChannelRequestSchema', () => {
+  it('switches sync, downloads or the location, and needs something to change', () => {
+    expect(updateChannelRequestSchema.parse({ syncEnabled: false })).toEqual({
+      syncEnabled: false,
+    });
+    expect(updateChannelRequestSchema.parse({ downloadMedia: true })).toEqual({
+      downloadMedia: true,
+    });
+    expect(updateChannelRequestSchema.safeParse({}).success).toBe(false);
+    expect(updateChannelRequestSchema.safeParse({ syncEnabled: 'yes' }).success).toBe(false);
+  });
+});
+
+describe('settings schemas', () => {
+  it('checks every 15 minutes by default and reads bad stored values as the defaults', () => {
+    expect(defaultSyncSettings()).toEqual({ intervalMinutes: 15 });
+    expect(readSyncSettings({ intervalMinutes: 60 })).toEqual({ intervalMinutes: 60 });
+    expect(readSyncSettings({ intervalMinutes: 7 })).toEqual({ intervalMinutes: 15 });
+    expect(readSyncSettings(null)).toEqual({ intervalMinutes: 15 });
+    expect(SYNC_INTERVAL_MINUTES).toContain(1440);
+  });
+
+  it('changes downloads, sync or both, but not nothing', () => {
+    expect(updateSettingsRequestSchema.parse({ sync: { intervalMinutes: 180 } })).toEqual({
+      sync: { intervalMinutes: 180 },
+    });
+    expect(updateSettingsRequestSchema.parse({ downloads: { paused: true } })).toEqual({
+      downloads: { paused: true },
+    });
+    expect(updateSettingsRequestSchema.safeParse({}).success).toBe(false);
+    expect(updateSettingsRequestSchema.safeParse({ sync: {} }).success).toBe(false);
+    expect(updateSettingsRequestSchema.safeParse({ sync: { intervalMinutes: 5 } }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -244,29 +301,5 @@ describe('tag schemas', () => {
     });
     expect(addMessageTagRequestSchema.safeParse({}).success).toBe(false);
     expect(addMessageTagRequestSchema.safeParse({ tagId: 'nope' }).success).toBe(false);
-  });
-});
-
-describe('appEventSchema', () => {
-  it('discriminates import progress events', () => {
-    const event = appEventSchema.parse({
-      type: 'import.progress',
-      jobId: '0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f80',
-      channelId: '0199d6b2-7e4a-7c3e-9b1a-2f4c5d6e7f81',
-      status: 'RUNNING',
-      phase: 'HISTORY',
-      processedMessages: 1234,
-      totalMessages: 15000,
-      totalIsEstimate: false,
-      totalMedia: 3200,
-      downloadedFiles: 893,
-      failedFiles: 12,
-      skippedFiles: 0,
-      downloadedBytes: 1024,
-      totalBytes: 4096,
-      currentFile: 'video_001.mp4',
-      ts: '2026-09-24T10:00:00.000Z',
-    });
-    expect(event.type).toBe('import.progress');
   });
 });

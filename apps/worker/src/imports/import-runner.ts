@@ -13,6 +13,7 @@ import {
   type Message,
 } from '@tam/telegram';
 import { errorMessage } from '../common/error-message.js';
+import { SYNC_NOTES } from '../common/sync-notes.js';
 import { TelegramAuthService } from '../telegram/telegram-auth.service.js';
 import {
   TELEGRAM_API_PROVIDER,
@@ -46,7 +47,8 @@ interface Target {
 /**
  * Runs one import job against the channel's archived range [backfillCursorId … headMessageId]:
  *
- * 1. forward — messages newer than the range, oldest first, moving the head up page by page;
+ * 1. forward — messages newer than the range, oldest first, moving the head up page by page
+ *    (a SYNC job does only this);
  * 2. backfill — history older than the range, newest first, moving the cursor down, until the
  *    start of the chat (ALL) or the chosen date (FROM_DATE);
  * 3. the basic group a supergroup was upgraded from, into its own channel row (frozen: backfill
@@ -96,6 +98,7 @@ export class ImportRunner {
       const target: Target = { channel, chatId: channel.telegramChatId.toString() };
       if (channel.headMessageId !== null) {
         await this.forward(run, target);
+        await this.noteNewTopics(target.channel, channel.headMessageId);
       }
       if (job.type === ImportJobType.IMPORT) {
         await this.backfill(run, target);
@@ -180,7 +183,7 @@ export class ImportRunner {
         ...details,
         migratedFromChatId:
           chat.migratedFromChatId === null ? null : BigInt(chat.migratedFromChatId),
-        ...(chat.isProtected ? { syncEnabled: false } : {}),
+        ...(chat.isProtected ? { syncEnabled: false, syncNote: SYNC_NOTES.protected } : {}),
       },
     });
     await this.prisma.telegramDialog.updateMany({
@@ -197,14 +200,21 @@ export class ImportRunner {
    * Expected number of messages this job reads, from Telegram's count minus what the archive
    * already holds. FROM_DATE: message ids of channels and supergroups count up one by one, so the
    * id distance from the newest message to the last one before the date is close (deleted
-   * messages make it a little high). Basic groups share ids with the account's other chats, so
-   * they get no estimate. The exact number replaces it when the job completes.
+   * messages make it a little high). A sync reads what lies above the archive's newest message,
+   * estimated the same way. Basic groups share ids with the account's other chats, so they get no
+   * estimate from ids. The exact number replaces it when the job completes.
    */
   private async estimateTotal(run: Run, channel: Channel): Promise<void> {
     const chatId = channel.telegramChatId.toString();
     const newest = await this.api.getHistoryPage(chatId, { limit: 1 });
     let estimate: number | null;
-    if (run.keepFrom === null) {
+    if (run.job.type === ImportJobType.SYNC) {
+      const head = channel.headMessageId;
+      estimate =
+        head === null || channel.type === ChatType.GROUP
+          ? null
+          : Math.max(Number(newest.messages[0]?.id ?? head) - head, 0);
+    } else if (run.keepFrom === null) {
       const stored = await this.prisma.message.count({ where: { channelId: channel.id } });
       estimate = Math.max(newest.total - stored, 0) + (await this.oldGroupEstimate(channel));
     } else if (channel.type === ChatType.GROUP) {
@@ -261,6 +271,33 @@ export class ImportRunner {
       if (await this.write(run, target, page, range, { headMessageId: newestId })) {
         await this.pause(run);
       }
+    }
+  }
+
+  /**
+   * New messages of a forum may sit in topics created since the topic names were read: the
+   * ForumTopicsRefresher then reads them again within a minute.
+   */
+  private async noteNewTopics(channel: Channel, previousHead: number): Promise<void> {
+    if (!channel.isForum || channel.headMessageId === previousHead) {
+      return;
+    }
+    const [row] = await this.prisma.$queryRaw<{ unknown: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.channel_id = ${channel.id}::uuid
+          AND m.telegram_message_id > ${previousHead}
+          AND m.thread_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM forum_topics t
+            WHERE t.channel_id = m.channel_id AND t.topic_id = m.thread_id
+          )
+      ) AS unknown`;
+    if (row?.unknown) {
+      await this.prisma.channel.updateMany({
+        where: { id: channel.id, topicsRefreshedAt: { not: null } },
+        data: { topicsRefreshedAt: null },
+      });
     }
   }
 
@@ -349,6 +386,8 @@ export class ImportRunner {
           title: group.title,
           type: ChatType.GROUP,
           isProtected: group.isProtected,
+          // Frozen: an upgraded group gets no new messages.
+          syncEnabled: false,
           migratedToChannelId: channel.id,
           storageLocationId: channel.storageLocationId,
           storageFolder: channelFolderName(group.title, group.id),

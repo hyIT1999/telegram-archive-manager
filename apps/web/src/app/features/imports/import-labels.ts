@@ -1,4 +1,10 @@
-import type { ImportJobDto, ImportMode, ImportRequest, JobStatus } from '../../shared/models';
+import type {
+  ImportJobDto,
+  ImportMode,
+  ImportRequest,
+  JobOrigin,
+  JobStatus,
+} from '../../shared/models';
 
 /** How each job status reads in lists and on the job page. */
 export const JOB_STATUS_LABELS: Readonly<Record<JobStatus, string>> = {
@@ -19,6 +25,27 @@ export const JOB_STATUS_ICONS: Readonly<Record<JobStatus, string>> = {
   CANCELLED: 'cancel',
 };
 
+/** Why a job runs, as lists and the job page say it. */
+export const JOB_ORIGIN_LABELS: Readonly<Record<JobOrigin, string>> = {
+  MANUAL: 'Asked for',
+  SCHEDULE: 'Scheduled check',
+  TELEGRAM_UPDATE: 'New messages on Telegram',
+};
+
+export function isSync(job: Pick<ImportJobDto, 'type'>): boolean {
+  return job.type === 'SYNC';
+}
+
+/** "import" or "sync", for sentences. */
+export function jobNoun(job: Pick<ImportJobDto, 'type'>): string {
+  return isSync(job) ? 'sync' : 'import';
+}
+
+/** The status as a job of its type says it: a running sync is "Syncing". */
+export function statusLabel(job: Pick<ImportJobDto, 'type' | 'status'>): string {
+  return job.status === 'RUNNING' && isSync(job) ? 'Syncing' : JOB_STATUS_LABELS[job.status];
+}
+
 /** Jobs that still hold the channel's import slot (one per channel). */
 export const UNFINISHED_STATUSES: readonly JobStatus[] = ['PENDING', 'RUNNING', 'PAUSED'];
 
@@ -26,13 +53,14 @@ export function isUnfinished(job: Pick<ImportJobDto, 'status'>): boolean {
   return UNFINISHED_STATUSES.includes(job.status);
 }
 
-/** Queued or running: its numbers change, so pages showing it re-read it. */
+/** Queued or running: its numbers change, so pages showing it follow it. */
 export function isMoving(job: Pick<ImportJobDto, 'status'>): boolean {
   return job.status === 'PENDING' || job.status === 'RUNNING';
 }
 
-export function canPause(job: Pick<ImportJobDto, 'status'>): boolean {
-  return isMoving(job);
+/** Imports pause; a sync is short and would hold the channel's slot, so it can only be cancelled. */
+export function canPause(job: Pick<ImportJobDto, 'status' | 'type'>): boolean {
+  return isMoving(job) && !isSync(job);
 }
 
 export function canResume(job: Pick<ImportJobDto, 'status'>): boolean {
@@ -51,6 +79,15 @@ export function progressPercent(job: ImportJobDto): number | null {
     return null;
   }
   return Math.min(99, Math.floor((job.processedMessages / job.totalMessages) * 100));
+}
+
+/** Share of the job's wanted files (skipped ones aside) that are in the archive, or null. */
+export function downloadedPercent(job: ImportJobDto): number | null {
+  const wanted = job.totalMedia - job.skippedFiles;
+  if (wanted <= 0) {
+    return null;
+  }
+  return Math.floor((job.downloadedFiles / wanted) * 100);
 }
 
 /** A picked calendar day (YYYY-MM-DD) as the moment the day starts where the browser is. */

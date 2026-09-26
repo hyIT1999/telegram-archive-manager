@@ -18,7 +18,11 @@
     (retry)="watch.reload()"
   />
 } @else if (watch.job(); as job) {
-  <app-page-header eyebrow="Import job" [title]="job.channel.title" [subtitle]="subtitle()">
+  <app-page-header
+    [eyebrow]="job.type === 'SYNC' ? 'Sync job' : 'Import job'"
+    [title]="job.channel.title"
+    [subtitle]="subtitle()"
+  >
     <a pageActions matButton="outlined" routerLink="/imports">
       <mat-icon>arrow_back</mat-icon>
       Import Jobs

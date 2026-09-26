@@ -1,0 +1,87 @@
+@let item = channel();
+<h2 id="channel-sync-title" class="panel-title">Sync</h2>
+
+@if (item.isProtected) {
+  <p class="hint">Content protection is on for this chat, so its new messages are not archived.</p>
+} @else if (item.migratedToChannelId; as supergroupId) {
+  <p class="hint">This group became a supergroup: its new messages arrive there.</p>
+  <a matButton="tonal" [routerLink]="['/channels', supergroupId]">Open the supergroup</a>
+} @else {
+  <div class="switch">
+    <mat-slide-toggle
+      [checked]="item.syncEnabled"
+      [disabled]="switching()"
+      (change)="toggle($event)"
+    >
+      Keep this channel up to date
+    </mat-slide-toggle>
+    <p class="hint">
+      @if (item.syncEnabled) {
+        New messages are archived as Telegram announces them, and on the schedule of
+        <a routerLink="/settings">Settings</a>.
+      } @else {
+        New messages wait until you sync the channel.
+      }
+    </p>
+  </div>
+
+  @if (item.syncNote; as note) {
+    <app-notice tone="warning" title="Sync stopped by itself">{{ note }}</app-notice>
+  }
+
+  <dl class="facts">
+    <div>
+      <dt>Last synced</dt>
+      <dd [attr.title]="lastSyncedAt() ? (lastSyncedAt() | date: 'medium') : null">
+        {{ lastSynced() ?? 'Never' }}
+      </dd>
+    </div>
+  </dl>
+
+  @if (!imported()) {
+    <p class="hint">
+      Nothing of this chat is archived yet. Import its history first; sync then keeps it up to date.
+    </p>
+  }
+
+  @if (job(); as latest) {
+    <div class="latest" aria-label="Latest sync">
+      <span class="status" [attr.data-status]="latest.status">
+        <mat-icon aria-hidden="true">{{ statusIcons[latest.status] }}</mat-icon>
+        {{ statusLabel(latest) }}
+      </span>
+      <span class="summary">{{ summary(latest) }}</span>
+      <a class="details" [routerLink]="['/imports', latest.id]">Details</a>
+    </div>
+    @if (moving()) {
+      <mat-progress-bar
+        [mode]="percent(latest) === null ? 'indeterminate' : 'determinate'"
+        [value]="percent(latest) ?? 0"
+        [attr.aria-label]="'Sync of ' + item.title"
+      />
+    }
+  }
+
+  @if (actionError(); as message) {
+    <app-notice tone="error">
+      {{ message }}
+      @if (blockingJobId(); as jobId) {
+        <a [routerLink]="['/imports', jobId]">Open that job</a>
+      }
+    </app-notice>
+  }
+
+  <div class="actions">
+    <button
+      matButton="tonal"
+      type="button"
+      [disabled]="!imported() || syncing() || moving()"
+      [showProgress]="syncing()"
+      (click)="syncNow()"
+    >
+      <mat-icon>sync</mat-icon>
+      Sync now
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+    </button>
+  </div>
+}

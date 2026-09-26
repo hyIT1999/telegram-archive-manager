@@ -1,5 +1,6 @@
 import { getQueueToken } from '@nestjs/bullmq';
 import { Test, type TestingModule } from '@nestjs/testing';
+import { createImportJob } from '@tam/database';
 import type { PrismaService } from '@tam/database/nest';
 import {
   IMPORT_RUN_JOB_NAME,
@@ -26,6 +27,7 @@ import { IMPORT_SETTINGS, type ImportSettings } from '../../src/imports/import-s
 import { MEDIA_SETTINGS } from '../../src/media/media-settings.js';
 import { WAITING_DETAILS } from '../../src/imports/import.processor.js';
 import { ShutdownCoordinator } from '../../src/shutdown/index.js';
+import { SYNC_SCHEDULER_SETTINGS } from '../../src/sync/sync-settings.js';
 import { ACCOUNT_KEY } from '../../src/telegram/telegram-auth.service.js';
 import {
   TELEGRAM_API_PROVIDER,
@@ -34,6 +36,7 @@ import {
 import { WorkerModule } from '../../src/worker.module.js';
 import { FakeChats, chatInfo, history } from './support/fake-chats.js';
 import { IDLE_MEDIA_SETTINGS } from './support/media-fixtures.js';
+import { IDLE_SYNC_SETTINGS } from './support/sync-fixtures.js';
 import {
   createFakeTelegramApi,
   resetTelegramTables,
@@ -56,6 +59,10 @@ describe('import jobs through the queue', () => {
     connection: { url: inject('redisUrl') },
     prefix: TEST_BULLMQ_PREFIX,
   });
+  const syncInspector = new Queue<ImportJobData>(QUEUES.telegramSync, {
+    connection: { url: inject('redisUrl') },
+    prefix: TEST_BULLMQ_PREFIX,
+  });
   let app: TestingModule | undefined;
 
   beforeAll(() => {
@@ -69,9 +76,11 @@ describe('import jobs through the queue', () => {
     await app?.close();
     app = undefined;
     await inspector.obliterate({ force: true });
+    await syncInspector.obliterate({ force: true });
   });
   afterAll(async () => {
     await inspector.close();
+    await syncInspector.close();
     await resetTelegramTables(prisma);
     await prisma.$disconnect();
   });
@@ -88,6 +97,9 @@ describe('import jobs through the queue', () => {
       // Imported media stay PENDING here: downloads have tests of their own.
       .overrideProvider(MEDIA_SETTINGS)
       .useValue(IDLE_MEDIA_SETTINGS)
+      // Syncs start only when a test queues them.
+      .overrideProvider(SYNC_SCHEDULER_SETTINGS)
+      .useValue(IDLE_SYNC_SETTINGS)
       .setLogger({ log() {}, error() {}, warn() {}, debug() {}, verbose() {}, fatal() {} })
       .compile();
     await moduleRef.init();
@@ -123,10 +135,99 @@ describe('import jobs through the queue', () => {
     const workers = context.get(ShutdownCoordinator).workers();
     expect(workers.map((worker) => worker.name)).toEqual([
       QUEUES.telegramImport,
+      QUEUES.telegramSync,
       QUEUES.mediaDownload,
     ]);
-    expect(Reflect.get(workers[0]!, 'processorAcceptsSignal')).toBe(true);
-    expect(workers[0]!.opts).toMatchObject({ concurrency: 1, maxStalledCount: 10 });
+    for (const worker of workers.slice(0, 2)) {
+      expect(Reflect.get(worker, 'processorAcceptsSignal')).toBe(true);
+      expect(worker.opts).toMatchObject({ concurrency: 1, maxStalledCount: 10 });
+    }
+  });
+
+  it('syncs a channel in its own queue while a long import runs', async () => {
+    const fake = createFakeTelegramApi();
+    const chats = new FakeChats(fake.api);
+    chats.addChat(chatInfo(CHAT_ID), history(CHAT_ID, 1_000));
+    chats.addChat(chatInfo(OTHER_CHAT_ID), history(OTHER_CHAT_ID, 60));
+    const importing = await queuedJob();
+    const archived = await prisma.channel.create({
+      data: {
+        telegramChatId: BigInt(OTHER_CHAT_ID),
+        title: 'Archived',
+        type: 'CHANNEL',
+        headMessageId: 50,
+        backfillCursorId: 1,
+        backfillComplete: true,
+      },
+    });
+    const sync = await createImportJob(
+      prisma,
+      { channelId: archived.id, type: 'SYNC', origin: 'MANUAL' },
+      jobIds.importRun,
+    );
+    await boot(fake, { ...FAST, pageDelayMs: 300 });
+    await enqueue(importing);
+    await vi.waitFor(async () => expect(await statusOf(importing)).toBe('RUNNING'), {
+      timeout: 10_000,
+      interval: 20,
+    });
+    await syncInspector.add(
+      IMPORT_RUN_JOB_NAME,
+      { importJobId: sync!.id, runSeq: 1 },
+      importRunJobOptions(sync!.id, 1),
+    );
+
+    const done = { importJobId: sync!.id, runSeq: 1 };
+    await vi.waitFor(async () => expect(await statusOf(done)).toBe('COMPLETED'), {
+      timeout: 10_000,
+      interval: 50,
+    });
+    expect(await statusOf(importing)).toBe('RUNNING');
+    expect(await prisma.importJob.findUniqueOrThrow({ where: { id: sync!.id } })).toMatchObject({
+      processedMessages: 10,
+      totalMessages: 10,
+    });
+    expect(await prisma.message.count({ where: { channelId: archived.id } })).toBe(10);
+  });
+
+  it('the reconciler queues a sync run in the sync queue', async () => {
+    const fake = createFakeTelegramApi();
+    new FakeChats(fake.api).addChat(chatInfo(CHAT_ID), history(CHAT_ID, 20));
+    const context = await boot(fake);
+    const channel = await prisma.channel.create({
+      data: {
+        telegramChatId: BigInt(CHAT_ID),
+        title: 'Lessons',
+        type: 'CHANNEL',
+        headMessageId: 15,
+        backfillCursorId: 1,
+        backfillComplete: true,
+      },
+    });
+    const sync = await createImportJob(
+      prisma,
+      { channelId: channel.id, type: 'SYNC', origin: 'SCHEDULE' },
+      jobIds.importRun,
+    );
+    const importAdd = vi.spyOn(context.get<Queue>(getQueueToken(QUEUES.telegramImport)), 'add');
+    const syncAdd = vi.spyOn(context.get<Queue>(getQueueToken(QUEUES.telegramSync)), 'add');
+
+    await expect(context.get(ImportReconciler).reconcile()).resolves.toEqual({
+      enqueued: 1,
+      failed: 0,
+    });
+    const data = { importJobId: sync!.id, runSeq: 1 };
+    expect(syncAdd).toHaveBeenCalledExactlyOnceWith(
+      IMPORT_RUN_JOB_NAME,
+      data,
+      importRunJobOptions(sync!.id, 1),
+    );
+    expect(importAdd).not.toHaveBeenCalled();
+    await vi.waitFor(async () => expect(await statusOf(data)).toBe('COMPLETED'), {
+      timeout: 15_000,
+      interval: 100,
+    });
+    expect(await prisma.message.count({ where: { channelId: channel.id } })).toBe(5);
   });
 
   it('imports a queued job to completion', async () => {

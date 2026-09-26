@@ -11,6 +11,7 @@ import { TelegramLifecycle } from './telegram-lifecycle.js';
 import { TelegramRedisConnection } from './telegram-redis.connection.js';
 import { TelegramRpcServer } from './telegram-rpc.server.js';
 import { type TelegramSettings, telegramSettingsFrom } from './telegram-settings.js';
+import { TelegramUpdates } from './telegram-updates.js';
 import {
   SECRET_BOX,
   TELEGRAM_API_PROVIDER,
@@ -27,7 +28,9 @@ import {
         telegramSettingsFrom({
           TELEGRAM_API_ID: config.get('TELEGRAM_API_ID', { infer: true }),
           TELEGRAM_API_HASH: config.get('TELEGRAM_API_HASH', { infer: true }),
-          TELEGRAM_SESSION_DATABASE_URL: config.get('TELEGRAM_SESSION_DATABASE_URL', { infer: true }),
+          TELEGRAM_SESSION_DATABASE_URL: config.get('TELEGRAM_SESSION_DATABASE_URL', {
+            infer: true,
+          }),
           TELEGRAM_SESSION_KEY: config.get('TELEGRAM_SESSION_KEY', { infer: true }),
         }),
     },
@@ -44,6 +47,7 @@ import {
       useFactory: (connection: TelegramRedisConnection) => connection.client,
     },
     { provide: TelegramCooldown, useFactory: () => new TelegramCooldown() },
+    TelegramUpdates,
     TelegramConnection,
     { provide: TELEGRAM_API_PROVIDER, useExisting: TelegramConnection },
     TelegramAuthService,
@@ -52,8 +56,14 @@ import {
     TelegramRpcServer,
     TelegramLifecycle,
   ],
-  // Imports, downloads and topic refreshes use the same connection, check the login state first
-  // and respect Telegram's waits.
-  exports: [TELEGRAM_API_PROVIDER, TelegramAuthService, TelegramCooldown, ForumTopicsService],
+  // Imports, downloads, syncs and topic refreshes use the same connection, check the login state
+  // first and respect Telegram's waits.
+  exports: [
+    TELEGRAM_API_PROVIDER,
+    TelegramAuthService,
+    TelegramCooldown,
+    ForumTopicsService,
+    TelegramUpdates,
+  ],
 })
 export class TelegramModule {}

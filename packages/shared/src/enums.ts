@@ -107,6 +107,17 @@ export const ImportJobType = {
 } as const;
 export type ImportJobType = (typeof ImportJobType)[keyof typeof ImportJobType];
 
+/** Why a job runs. Imports are always asked for; syncs also start on their own. */
+export const JobOrigin = {
+  /** Someone asked for it. */
+  MANUAL: 'MANUAL',
+  /** The scheduled check found new messages. */
+  SCHEDULE: 'SCHEDULE',
+  /** Telegram announced new messages. */
+  TELEGRAM_UPDATE: 'TELEGRAM_UPDATE',
+} as const;
+export type JobOrigin = (typeof JobOrigin)[keyof typeof JobOrigin];
+
 export const ImportMode = {
   ALL: 'ALL',
   FROM_DATE: 'FROM_DATE',

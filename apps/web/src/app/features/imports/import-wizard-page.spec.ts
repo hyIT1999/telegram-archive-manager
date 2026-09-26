@@ -196,7 +196,10 @@ describe('ImportWizardPage', () => {
     await chooseAndContinue('Lessons');
     button('Add to archive')?.click();
     const channel = makeChannel({ id: CHANNEL_ID, title: 'Lessons', telegramChatId: '-1001234' });
-    (await nextRequest(http, '/api/channels')).flush(channel, { status: 201, statusText: 'Created' });
+    (await nextRequest(http, '/api/channels')).flush(channel, {
+      status: 201,
+      statusText: 'Created',
+    });
     await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
 
     button('Choose where to save')?.click();
@@ -208,7 +211,9 @@ describe('ImportWizardPage', () => {
       displayPath: 'My Drive › Unofficial Telegram Archive',
       accountEmail: 'teacher@example.com',
     });
-    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(makeStorageList([computer, drive]));
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(
+      makeStorageList([computer, drive]),
+    );
     for (const location of [computer, drive]) {
       (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${location.id}/check`)).flush(
         makeStorageCheck(location),
@@ -216,7 +221,10 @@ describe('ImportWizardPage', () => {
     }
 
     // The default location is picked until another is chosen.
-    const radios = () => Array.from(page().querySelectorAll<HTMLInputElement>('app-storage-location-list input[type="radio"]'));
+    const radios = () =>
+      Array.from(
+        page().querySelectorAll<HTMLInputElement>('app-storage-location-list input[type="radio"]'),
+      );
     await vi.waitFor(() => expect(radios().map((radio) => radio.checked)).toEqual([true, false]));
     radios()[1]?.click();
     await fixture.whenStable();
@@ -227,7 +235,12 @@ describe('ImportWizardPage', () => {
     expect(save.request.body).toEqual({ storageLocationId: drive.id });
     save.flush({
       ...channel,
-      storageLocation: { id: drive.id, kind: 'GOOGLE_DRIVE', name: 'Drive', displayPath: drive.displayPath },
+      storageLocation: {
+        id: drive.id,
+        kind: 'GOOGLE_DRIVE',
+        name: 'Drive',
+        displayPath: drive.displayPath,
+      },
       storageFolder: 'Lessons (-1001234)',
     });
 
@@ -246,10 +259,13 @@ describe('ImportWizardPage', () => {
     await signedInWith([makeDialog({ title: 'Lessons' })]);
     await chooseAndContinue('Lessons');
     button('Add to archive')?.click();
-    (await nextRequest(http, '/api/channels')).flush(makeChannel({ id: CHANNEL_ID, title: 'Lessons' }), {
-      status: 201,
-      statusText: 'Created',
-    });
+    (await nextRequest(http, '/api/channels')).flush(
+      makeChannel({ id: CHANNEL_ID, title: 'Lessons' }),
+      {
+        status: 201,
+        statusText: 'Created',
+      },
+    );
     await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
     button('Choose where to save')?.click();
 
@@ -261,9 +277,16 @@ describe('ImportWizardPage', () => {
     await vi.waitFor(() => expect(button('Save location')?.disabled).toBe(false));
 
     button('Save location')?.click();
-    flushError(await nextRequest(http, `/api/channels/${CHANNEL_ID}`), 404, 'Storage location not found', 'NOT_FOUND');
+    flushError(
+      await nextRequest(http, `/api/channels/${CHANNEL_ID}`),
+      404,
+      'Storage location not found',
+      'NOT_FOUND',
+    );
     await vi.waitFor(() =>
-      expect(page().querySelector('app-notice[role="alert"]')?.textContent).toContain('Storage location not found'),
+      expect(page().querySelector('app-notice[role="alert"]')?.textContent).toContain(
+        'Storage location not found',
+      ),
     );
     expect(button('Save location')?.disabled).toBe(false);
   });
@@ -293,7 +316,10 @@ describe('ImportWizardPage', () => {
       },
       storageFolder: 'Lessons (-1001234)',
     });
-    (await nextRequest(http, '/api/channels')).flush(channel, { status: 201, statusText: 'Created' });
+    (await nextRequest(http, '/api/channels')).flush(channel, {
+      status: 201,
+      statusText: 'Created',
+    });
     await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
     button('Choose where to save')?.click();
     (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(makeStorageList([location]));
@@ -382,7 +408,9 @@ describe('ImportWizardPage', () => {
 
   it('switches the automatic media downloads of the channel before starting', async () => {
     const channel = await toStart();
-    const toggle = page().querySelector<HTMLButtonElement>('.downloads-switch mat-slide-toggle button');
+    const toggle = page().querySelector<HTMLButtonElement>(
+      '.downloads-switch mat-slide-toggle button',
+    );
     expect(toggle?.getAttribute('aria-checked')).toBe('true');
     expect(text('.downloads-switch')).toContain('smallest first');
 
@@ -392,6 +420,19 @@ describe('ImportWizardPage', () => {
     expect(update.request.body).toEqual({ downloadMedia: false });
     update.flush({ ...channel, downloadMedia: false });
     await vi.waitFor(() => expect(text('.downloads-switch')).toContain('Files are only recorded'));
+  });
+
+  it('keeps the channel up to date after the import, unless switched off', async () => {
+    const channel = await toStart();
+    const toggle = page().querySelector<HTMLButtonElement>('.sync-switch mat-slide-toggle button');
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(text('.sync-switch')).toContain('new messages are archived as Telegram announces them');
+
+    toggle?.click();
+    const update = await nextRequest(http, `/api/channels/${CHANNEL_ID}`);
+    expect(update.request.body).toEqual({ syncEnabled: false });
+    update.flush({ ...channel, syncEnabled: false });
+    await vi.waitFor(() => expect(text('.sync-switch')).toContain('New messages wait'));
   });
 
   it('shows an import of the channel that was already under way', async () => {

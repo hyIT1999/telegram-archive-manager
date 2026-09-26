@@ -79,6 +79,7 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
     isForum: false,
     memberCount: 1_520,
     syncEnabled: true,
+    syncNote: null,
     headMessageId: 4_812,
     backfillComplete: true,
     lastSyncedAt: '2026-09-23T21:15:00.000Z',
@@ -103,7 +104,8 @@ let jobSequence = 0;
 /** A running import of the whole history, 120 of about 500 messages read. */
 export function makeImportJob(overrides: Partial<ImportJobDto> = {}): ImportJobDto {
   jobSequence += 1;
-  const channelId = overrides.channelId ?? `0199a0b1-0000-7000-8000-c${String(jobSequence).padStart(11, '0')}`;
+  const channelId =
+    overrides.channelId ?? `0199a0b1-0000-7000-8000-c${String(jobSequence).padStart(11, '0')}`;
   return {
     id: `0199a0b1-0000-7000-8000-a${String(jobSequence).padStart(11, '0')}`,
     channelId,
@@ -116,6 +118,7 @@ export function makeImportJob(overrides: Partial<ImportJobDto> = {}): ImportJobD
     },
     parentImportJobId: null,
     type: 'IMPORT',
+    origin: 'MANUAL',
     mode: 'ALL',
     fromDate: null,
     status: 'RUNNING',
@@ -128,7 +131,7 @@ export function makeImportJob(overrides: Partial<ImportJobDto> = {}): ImportJobD
     skippedFiles: 0,
     totalBytes: 48 * 1024 ** 2,
     downloadedBytes: 0,
-    currentFile: null,
+    activeFiles: [],
     statusDetail: null,
     error: null,
     startedAt: '2026-09-24T09:00:05.000Z',
@@ -142,7 +145,9 @@ export function makeImportJob(overrides: Partial<ImportJobDto> = {}): ImportJobD
 
 let locationSequence = 0;
 
-export function makeStorageLocation(overrides: Partial<StorageLocationDto> = {}): StorageLocationDto {
+export function makeStorageLocation(
+  overrides: Partial<StorageLocationDto> = {},
+): StorageLocationDto {
   locationSequence += 1;
   return {
     id: `0199a0b1-0000-7000-8000-5${String(locationSequence).padStart(11, '0')}`,
@@ -162,7 +167,9 @@ export function makeStorageLocation(overrides: Partial<StorageLocationDto> = {})
 }
 
 /** Downloads of a channel: some done, one running, room to spare in its location. */
-export function makeChannelDownloads(overrides: Partial<ChannelDownloadsDto> = {}): ChannelDownloadsDto {
+export function makeChannelDownloads(
+  overrides: Partial<ChannelDownloadsDto> = {},
+): ChannelDownloadsDto {
   return {
     channelId: '0199a0b1-0000-7000-8000-000000000001',
     downloadMedia: true,
@@ -185,16 +192,29 @@ export function makeChannelDownloads(overrides: Partial<ChannelDownloadsDto> = {
   };
 }
 
-/** The download settings as the server starts: everything, two at a time. */
-export function makeSettings(overrides: Partial<SettingsDto['downloads']> = {}): SettingsDto {
+/** The settings as the server starts: download everything, two at a time; check every 15 min. */
+export function makeSettings(
+  overrides: Partial<SettingsDto['downloads']> = {},
+  sync: Partial<SettingsDto['sync']> = {},
+): SettingsDto {
   return {
     downloads: {
       paused: false,
-      mediaTypes: ['PHOTO', 'VIDEO', 'DOCUMENT', 'AUDIO', 'VOICE', 'ANIMATION', 'VIDEO_NOTE', 'STICKER'],
+      mediaTypes: [
+        'PHOTO',
+        'VIDEO',
+        'DOCUMENT',
+        'AUDIO',
+        'VOICE',
+        'ANIMATION',
+        'VIDEO_NOTE',
+        'STICKER',
+      ],
       maxFileSizeMb: null,
       concurrency: 2,
       ...overrides,
     },
+    sync: { intervalMinutes: 15, ...sync },
     disk: { minFreeDiskMb: 2048 },
   };
 }

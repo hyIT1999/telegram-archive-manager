@@ -23,7 +23,10 @@ export interface ChannelDto {
   isProtected: boolean;
   isForum: boolean;
   memberCount: number | null;
+  /** New messages are read on a schedule and when Telegram announces them. */
   syncEnabled: boolean;
+  /** Why automatic sync switched itself off (e.g. content protection was turned on). */
+  syncNote: string | null;
   headMessageId: number | null;
   backfillComplete: boolean;
   lastSyncedAt: string | null;
@@ -48,15 +51,17 @@ export interface ChannelStorageLocationDto {
   displayPath: string;
 }
 
-/** PATCH /api/channels/:id — change one or both settings. */
+/** PATCH /api/channels/:id — change any of the channel's settings. */
 export const updateChannelRequestSchema = z
   .object({
     /** Where new media of the channel is saved. */
     storageLocationId: z.uuid().optional(),
     /** Download the channel's media automatically. */
     downloadMedia: z.boolean().optional(),
+    /** Keep the channel up to date with new messages. */
+    syncEnabled: z.boolean().optional(),
   })
-  .refine((value) => value.storageLocationId !== undefined || value.downloadMedia !== undefined, {
+  .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'Nothing to change',
   });
 export type UpdateChannelRequest = z.infer<typeof updateChannelRequestSchema>;

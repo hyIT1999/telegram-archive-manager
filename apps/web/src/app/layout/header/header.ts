@@ -11,6 +11,7 @@ import { filter, firstValueFrom } from 'rxjs';
 import { APP_NAME } from '../../core/app-info';
 import { AuthService } from '../../core/auth/auth-service';
 import { LOGIN_PATH } from '../../core/auth/return-url';
+import { LiveEvents } from '../../core/live/live-events';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { NotifyService } from '../../core/services/notify-service';
 import { THEME_OPTIONS, ThemeService } from '../../core/services/theme-service';
@@ -44,6 +45,7 @@ export class Header {
   private readonly notify = inject(NotifyService);
   private readonly router = inject(Router);
   protected readonly theme = inject(ThemeService);
+  protected readonly live = inject(LiveEvents);
 
   protected readonly appName = APP_NAME;
   protected readonly themeOptions = THEME_OPTIONS;

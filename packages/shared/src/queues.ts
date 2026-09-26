@@ -1,16 +1,25 @@
+import { ImportJobType } from './enums.js';
+
 /**
  * BullMQ queue names. BullMQ is transport only — PostgreSQL holds the authoritative state.
  * Interactive Telegram calls (login steps) do not use a queue: see telegram-rpc.ts.
  */
 export const QUEUES = {
   telegramImport: 'telegram-import',
+  /** Syncs have a queue of their own, so they never wait behind a long import. */
+  telegramSync: 'telegram-sync',
   mediaDownload: 'media-download',
 } as const;
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
 export const ALL_QUEUES: readonly QueueName[] = Object.values(QUEUES);
 
-/** Redis keys and channels shared between api and worker (BullMQ adds its own prefix to queue keys). */
+/** The queue that carries the runs of a job: every enqueue, removal and lookup goes through it. */
+export function queueForJobType(type: ImportJobType): QueueName {
+  return type === ImportJobType.SYNC ? QUEUES.telegramSync : QUEUES.telegramImport;
+}
+
+/** Redis keys shared between api and worker (BullMQ adds its own prefix to queue keys). */
 export const REDIS_KEYS = {
   /** Set by the worker with a TTL; the api reports worker liveness from it. */
   workerHeartbeat: 'tam:worker:heartbeat',
@@ -18,8 +27,6 @@ export const REDIS_KEYS = {
   telegramOwner: 'tam:tg:owner',
   /** Present (with a TTL) while the worker re-reads the chat list from Telegram. */
   telegramDialogsRefreshing: 'tam:tg:dialogs:refreshing',
-  /** Pub/sub channel for progress and state events (worker → api → SSE). */
-  eventsChannel: 'tam:events',
 } as const;
 
 export interface ImportJobData {
@@ -39,7 +46,7 @@ export const jobIds = {
   mediaDownload: (downloadJobId: string, runSeq: number) => `dl-${downloadJobId}-${runSeq}`,
 } as const;
 
-/** BullMQ job name of an import run (queue QUEUES.telegramImport). */
+/** BullMQ job name of an import or sync run (queueForJobType). */
 export const IMPORT_RUN_JOB_NAME = 'import';
 
 /** Tries of one run before its import job is marked FAILED (network trouble, Telegram errors). */

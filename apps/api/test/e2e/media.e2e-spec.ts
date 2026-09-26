@@ -198,6 +198,7 @@ describe('media, downloads and settings (e2e)', () => {
           maxFileSizeMb: null,
           concurrency: 2,
         },
+        sync: { intervalMinutes: 15 },
         disk: { minFreeDiskMb: 2048 },
       });
     });
@@ -216,6 +217,7 @@ describe('media, downloads and settings (e2e)', () => {
         400,
         'VALIDATION_FAILED',
       );
+      expectApiError(await send('patch', '/api/settings', {}), 400, 'VALIDATION_FAILED');
       expectApiError(
         await send('patch', '/api/settings', { downloads: { concurrency: 9 } }),
         400,
@@ -226,6 +228,32 @@ describe('media, downloads and settings (e2e)', () => {
         400,
         'VALIDATION_FAILED',
       );
+    });
+
+    it('changes how often channels are checked for new messages', async () => {
+      const body = (
+        await send('patch', '/api/settings', { sync: { intervalMinutes: 180 } }).expect(200)
+      ).body as SettingsDto;
+      expect(body.sync).toEqual({ intervalMinutes: 180 });
+      // The download settings stay as they were.
+      expect(body.downloads.concurrency).toBe(2);
+      expect(((await get('/api/settings').expect(200)).body as SettingsDto).sync).toEqual({
+        intervalMinutes: 180,
+      });
+
+      const both = (
+        await send('patch', '/api/settings', {
+          downloads: { concurrency: 1 },
+          sync: { intervalMinutes: 60 },
+        }).expect(200)
+      ).body as SettingsDto;
+      expect(both).toMatchObject({ downloads: { concurrency: 1 }, sync: { intervalMinutes: 60 } });
+      expectApiError(
+        await send('patch', '/api/settings', { sync: { intervalMinutes: 5 } }),
+        400,
+        'VALIDATION_FAILED',
+      );
+      expectApiError(await send('patch', '/api/settings', { sync: {} }), 400, 'VALIDATION_FAILED');
     });
 
     it('applies new types and sizes to files that wait, never to files someone asked for', async () => {
@@ -503,6 +531,50 @@ describe('media, downloads and settings (e2e)', () => {
         await send('patch', `/api/channels/${channel.id}`, { downloadMedia: true }).expect(200)
       ).body as ChannelDto;
       expect(on).toMatchObject({ downloadMedia: true, downloadNote: null });
+    });
+
+    it('switches sync, and never for protected chats or old groups', async () => {
+      const channel = await addChannel({
+        syncEnabled: false,
+        syncNote: 'This account can no longer read the chat',
+      });
+      expect(channel.syncEnabled).toBe(false);
+      const on = (
+        await send('patch', `/api/channels/${channel.id}`, { syncEnabled: true }).expect(200)
+      ).body as ChannelDto;
+      // Switched on again: why it had stopped no longer applies.
+      expect(on).toMatchObject({ syncEnabled: true, syncNote: null });
+      const off = (
+        await send('patch', `/api/channels/${channel.id}`, { syncEnabled: false }).expect(200)
+      ).body as ChannelDto;
+      expect(off).toMatchObject({ syncEnabled: false, syncNote: null });
+
+      const protectedChat = await addChannel({ isProtected: true, syncEnabled: false });
+      expectApiError(
+        await send('patch', `/api/channels/${protectedChat.id}`, { syncEnabled: true }),
+        422,
+        'CHAT_PROTECTED',
+      );
+      const oldGroup = await addChannel({
+        type: 'GROUP',
+        migratedToChannelId: channel.id,
+        syncEnabled: false,
+      });
+      expectApiError(
+        await send('patch', `/api/channels/${oldGroup.id}`, { syncEnabled: true }),
+        422,
+        'CHANNEL_MIGRATED',
+      );
+      await send('patch', `/api/channels/${oldGroup.id}`, { syncEnabled: false }).expect(200);
+      expectApiError(
+        await send('patch', `/api/channels/${channel.id}`, {}),
+        400,
+        'VALIDATION_FAILED',
+      );
+    });
+
+    it('syncs new channels by default', async () => {
+      expect((await addChannel()).syncEnabled).toBe(true);
     });
 
     it('sums up files, bytes, running downloads and room in the location', async () => {

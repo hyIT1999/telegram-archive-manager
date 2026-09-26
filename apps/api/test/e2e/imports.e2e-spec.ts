@@ -238,7 +238,8 @@ describe('import endpoints (e2e)', () => {
 
     it('still saves the job when Redis does not take the run in time', async () => {
       const channel = await addChannel();
-      const producer = Reflect.get(app.get(ImportQueue), 'queue') as Queue;
+      const producers = Reflect.get(app.get(ImportQueue), 'queues') as Record<string, Queue>;
+      const producer = producers[QUEUES.telegramImport]!;
       vi.spyOn(producer, 'add').mockReturnValue(new Promise(() => undefined));
 
       const response = await post(`/api/channels/${channel.id}/import`, { mode: 'ALL' }).expect(
@@ -420,6 +421,210 @@ describe('import endpoints (e2e)', () => {
       });
       expectApiError(await get(`/api/import-jobs/${randomUUID()}`), 404, 'NOT_FOUND');
       expectApiError(await get('/api/import-jobs/not-a-uuid'), 400, 'VALIDATION_FAILED');
+    });
+
+    it('filters by type and lists the files each job downloads now', async () => {
+      const channel = await addChannel();
+      const imported = await prisma.importJob.create({
+        data: {
+          channelId: channel.id,
+          status: 'COMPLETED',
+          createdAt: new Date(Date.UTC(2026, 8, 1)),
+        },
+      });
+      const synced = await prisma.importJob.create({
+        data: { channelId: channel.id, type: 'SYNC', origin: 'SCHEDULE', status: 'COMPLETED' },
+      });
+      const message = await prisma.message.create({
+        data: {
+          channelId: channel.id,
+          telegramMessageId: 7,
+          type: 'VIDEO',
+          telegramDate: new Date(),
+        },
+      });
+      const [lesson, photo] = await Promise.all([
+        prisma.media.create({
+          data: {
+            messageId: message.id,
+            telegramFileId: '-100:7:a',
+            telegramFileUniqueId: 'a',
+            type: 'VIDEO',
+            filename: 'lesson.mp4',
+            size: 1_000n,
+            downloadedBytes: 400n,
+            downloadStatus: 'DOWNLOADING',
+          },
+        }),
+        prisma.media.create({
+          data: {
+            messageId: message.id,
+            telegramFileId: '-100:7:b',
+            telegramFileUniqueId: 'b',
+            type: 'PHOTO',
+            mimeType: 'image/jpeg',
+          },
+        }),
+      ]);
+      await prisma.downloadJob.create({
+        data: {
+          mediaId: lesson.id,
+          importJobId: imported.id,
+          status: 'ACTIVE',
+          stage: 'FETCHING',
+          progress: 40,
+        },
+      });
+      await prisma.downloadJob.create({ data: { mediaId: photo.id, importJobId: imported.id } });
+
+      const syncs = (await get('/api/import-jobs?type=SYNC').expect(200))
+        .body as Page<ImportJobDto>;
+      expect(syncs.items).toEqual([
+        expect.objectContaining({
+          id: synced.id,
+          type: 'SYNC',
+          origin: 'SCHEDULE',
+          activeFiles: [],
+        }),
+      ]);
+      const all = (await get('/api/import-jobs').expect(200)).body as Page<ImportJobDto>;
+      const downloading = {
+        mediaId: lesson.id,
+        name: 'lesson.mp4',
+        type: 'VIDEO',
+        size: 1_000,
+        downloadedBytes: 400,
+        progress: 40,
+        stage: 'FETCHING',
+        requested: false,
+        updatedAt: expect.any(String),
+      };
+      expect(all.items.find((item) => item.id === imported.id)?.activeFiles).toEqual([downloading]);
+      expect(
+        ((await get(`/api/import-jobs/${imported.id}`).expect(200)).body as ImportJobDto)
+          .activeFiles,
+      ).toEqual([downloading]);
+      expectApiError(await get('/api/import-jobs?type=BACKUP'), 400, 'VALIDATION_FAILED');
+    });
+  });
+
+  describe('POST /api/channels/:id/sync', () => {
+    /** The sync queue as the worker sees it. */
+    const syncQueue = new Queue<ImportJobData>(QUEUES.telegramSync, {
+      connection: { url: inject('redisUrl') },
+      prefix: 'tamtest',
+    });
+
+    afterEach(async () => {
+      await syncQueue.obliterate({ force: true });
+    });
+    afterAll(async () => {
+      await syncQueue.close();
+    });
+
+    /** A channel whose history is in the archive up to message 500. */
+    const archived = (data: Partial<Channel> = {}) =>
+      addChannel({ headMessageId: 500, backfillCursorId: 1, backfillComplete: true, ...data });
+
+    it('requires a session', async () => {
+      expectApiError(
+        await http().post(`/api/channels/${randomUUID()}/sync`),
+        401,
+        'UNAUTHENTICATED',
+      );
+    });
+
+    it('queues a sync in the sync queue, and returns it while it is on its way', async () => {
+      const channel = await archived();
+      const first = await post(`/api/channels/${channel.id}/sync`).expect(202);
+      const job = first.body as ImportJobDto;
+      expect(job).toMatchObject({
+        channelId: channel.id,
+        type: 'SYNC',
+        origin: 'MANUAL',
+        status: 'PENDING',
+        totalMessages: null,
+        activeFiles: [],
+      });
+      const run = await syncQueue.getJob(jobIds.importRun(job.id, 1));
+      expect(run?.data).toEqual({ importJobId: job.id, runSeq: 1 });
+      expect(await queue.getJob(jobIds.importRun(job.id, 1))).toBeUndefined();
+
+      const again = await post(`/api/channels/${channel.id}/sync`).expect(200);
+      expect((again.body as ImportJobDto).id).toBe(job.id);
+      expect(await prisma.importJob.count()).toBe(1);
+    });
+
+    it('needs something archived, and waits for an unfinished import', async () => {
+      const fresh = await addChannel();
+      expectApiError(await post(`/api/channels/${fresh.id}/sync`), 409, 'SYNC_NEEDS_IMPORT');
+
+      const channel = await archived();
+      const imported = (
+        await post(`/api/channels/${channel.id}/import`, { mode: 'ALL' }).expect(202)
+      ).body as ImportJobDto;
+      const busy = expectApiError(
+        await post(`/api/channels/${channel.id}/sync`),
+        409,
+        'IMPORT_ACTIVE',
+      );
+      expect(busy.details).toEqual({ jobId: imported.id });
+    });
+
+    it('refuses protected chats, old groups, unknown channels and a logged-out Telegram', async () => {
+      const protectedChannel = await archived({ isProtected: true });
+      expectApiError(
+        await post(`/api/channels/${protectedChannel.id}/sync`),
+        422,
+        'CHAT_PROTECTED',
+      );
+      const supergroup = await archived({ type: 'SUPERGROUP' });
+      const oldGroup = await archived({ type: 'GROUP', migratedToChannelId: supergroup.id });
+      expectApiError(await post(`/api/channels/${oldGroup.id}/sync`), 422, 'CHANNEL_MIGRATED');
+      expectApiError(await post(`/api/channels/${randomUUID()}/sync`), 404, 'NOT_FOUND');
+
+      await prisma.telegramAccount.update({
+        where: { accountKey: TELEGRAM_ACCOUNT_KEY },
+        data: { authState: 'LOGGED_OUT' },
+      });
+      expectApiError(await post(`/api/channels/${supergroup.id}/sync`), 409, 'TELEGRAM_NOT_READY');
+      expect(await prisma.importJob.count()).toBe(0);
+    });
+
+    it('gives way to an import, which reads the new messages first', async () => {
+      const channel = await archived();
+      const sync = (await post(`/api/channels/${channel.id}/sync`).expect(202))
+        .body as ImportJobDto;
+      const imported = (
+        await post(`/api/channels/${channel.id}/import`, { mode: 'ALL' }).expect(202)
+      ).body as ImportJobDto;
+
+      expect(imported).toMatchObject({ type: 'IMPORT', status: 'PENDING' });
+      expect(await prisma.importJob.findUniqueOrThrow({ where: { id: sync.id } })).toMatchObject({
+        status: 'CANCELLED',
+      });
+      expect(await syncQueue.getJob(jobIds.importRun(sync.id, 1))).toBeUndefined();
+      expect(await queue.getJob(jobIds.importRun(imported.id, 1))).toBeDefined();
+    });
+
+    it('cancels a sync, but never pauses it', async () => {
+      const channel = await archived();
+      const sync = (await post(`/api/channels/${channel.id}/sync`).expect(202))
+        .body as ImportJobDto;
+      const refused = expectApiError(
+        await post(`/api/import-jobs/${sync.id}/pause`),
+        409,
+        'INVALID_JOB_STATE',
+      );
+      expect(refused.message).toBe('A sync cannot be paused; cancel it instead.');
+
+      const cancelled = await post(`/api/import-jobs/${sync.id}/cancel`).expect(200);
+      expect(cancelled.body).toMatchObject({ status: 'CANCELLED' });
+      expect(await syncQueue.getJob(jobIds.importRun(sync.id, 1))).toBeUndefined();
+      expect(
+        expectApiError(await post(`/api/import-jobs/${sync.id}/cancel`), 409, 'INVALID_JOB_STATE')
+          .message,
+      ).toBe('This sync has already ended.');
     });
   });
 });

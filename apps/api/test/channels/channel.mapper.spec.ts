@@ -18,6 +18,7 @@ const channel: ChannelWithStorage = {
   isProtected: false,
   memberCount: 1200,
   syncEnabled: true,
+  syncNote: null,
   headMessageId: 5321,
   backfillCursorId: 1,
   backfillComplete: true,
@@ -40,7 +41,11 @@ const drive: StorageLocation = {
   name: 'Drive',
   displayPath: 'My Drive › Unofficial Telegram Archive',
   target: 'drive-folder-id',
-  config: { folderId: 'drive-folder-id', folderName: 'Unofficial Telegram Archive', accountEmail: 'a@b.c' },
+  config: {
+    folderId: 'drive-folder-id',
+    folderName: 'Unofficial Telegram Archive',
+    accountEmail: 'a@b.c',
+  },
   secretEnc: new Uint8Array([1, 2, 3]),
   isDefault: false,
   builtIn: false,
@@ -69,6 +74,7 @@ describe('toChannelDto', () => {
       isForum: false,
       memberCount: 1200,
       syncEnabled: true,
+      syncNote: null,
       headMessageId: 5321,
       backfillComplete: true,
       lastSyncedAt: '2026-09-01T10:00:00.000Z',
@@ -94,7 +100,12 @@ describe('toChannelDto', () => {
 
   it('names the storage location and folder without its settings or credentials', () => {
     const dto = toChannelDto(
-      { ...channel, storageLocationId: drive.id, storageFolder: 'Lịch sử (-100)', storageLocation: drive },
+      {
+        ...channel,
+        storageLocationId: drive.id,
+        storageFolder: 'Lịch sử (-100)',
+        storageLocation: drive,
+      },
       EMPTY_CHANNEL_STATS,
     );
     expect(dto.storageLocation).toEqual({

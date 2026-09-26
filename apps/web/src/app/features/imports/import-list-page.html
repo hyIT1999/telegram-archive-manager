@@ -1,13 +1,25 @@
 <app-page-header
   eyebrow="Manage"
   title="Import Jobs"
-  subtitle="Imports of Telegram history into the archive, newest first."
+  subtitle="Imports of Telegram history, and syncs of new messages, newest first."
 >
   <a pageActions matButton="filled" routerLink="/imports/new">
     <mat-icon>add</mat-icon>
     New import
   </a>
 </app-page-header>
+
+<mat-button-toggle-group
+  class="kinds"
+  aria-label="Show"
+  hideSingleSelectionIndicator
+  [value]="kind()"
+  (change)="showKind($event.value)"
+>
+  @for (option of kinds; track option.value) {
+    <mat-button-toggle [value]="option.value">{{ option.label }}</mat-button-toggle>
+  }
+</mat-button-toggle-group>
 
 @if (hasError()) {
   <app-error-state
@@ -17,6 +29,17 @@
   />
 } @else if (!loaded()) {
   <app-skeleton variant="line" [count]="4" label="Loading import jobs…" />
+} @else if (jobs().length === 0 && kind() !== 'ALL') {
+  <app-empty-state
+    class="surface-card"
+    icon="filter_list_off"
+    [title]="kind() === 'SYNC' ? 'No syncs yet' : 'No imports yet'"
+    [message]="
+      kind() === 'SYNC'
+        ? 'Syncs start by themselves once a channel is imported, or with Sync now on its page.'
+        : 'Start one with New import.'
+    "
+  />
 } @else if (jobs().length === 0) {
   <app-empty-state
     class="surface-card"
@@ -30,22 +53,26 @@
     </a>
   </app-empty-state>
 } @else {
-  <ul class="jobs surface-card" aria-label="Import jobs">
+  <ul class="jobs surface-card" aria-label="Import and sync jobs">
     @for (job of jobs(); track job.id) {
       <li>
         <a class="job" [routerLink]="['/imports', job.id]">
           <span class="status" [attr.data-status]="job.status">
             <mat-icon aria-hidden="true">{{ statusIcons[job.status] }}</mat-icon>
-            {{ statusLabels[job.status] }}
+            {{ statusLabel(job) }}
           </span>
           <span class="main">
             <span class="title">{{ job.channel.title }}</span>
             <span class="meta">
-              {{
-                job.mode === 'ALL'
-                  ? 'Whole history'
-                  : 'Since ' + (job.fromDate | date: 'mediumDate')
-              }}
+              @if (isSync(job)) {
+                Sync · {{ originLabels[job.origin] }}
+              } @else {
+                {{
+                  job.mode === 'ALL'
+                    ? 'Whole history'
+                    : 'Since ' + (job.fromDate | date: 'mediumDate')
+                }}
+              }
               · started {{ job.createdAt | date: 'medium' }}
             </span>
             @if (isMoving(job)) {

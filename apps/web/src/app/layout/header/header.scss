@@ -98,7 +98,15 @@
 .actions {
   display: flex;
   flex: none;
+  align-items: center;
   gap: 4px;
+}
+
+.live-stalled {
+  display: inline-flex;
+  padding: 8px;
+  border-radius: 50%;
+  color: var(--mat-sys-error);
 }
 
 .is-selected {

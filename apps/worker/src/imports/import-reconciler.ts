@@ -10,10 +10,12 @@ import { PrismaService } from '@tam/database/nest';
 import {
   IMPORT_RUN_JOB_NAME,
   type ImportJobData,
+  type ImportJobType,
   JobStatus,
   QUEUES,
   importRunJobOptions,
   jobIds,
+  queueForJobType,
 } from '@tam/shared';
 import type { Queue } from 'bullmq';
 import { errorMessage } from '../common/error-message.js';
@@ -42,7 +44,8 @@ export class ImportReconciler implements OnApplicationBootstrap, OnModuleDestroy
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(QUEUES.telegramImport) private readonly queue: Queue<ImportJobData>,
+    @InjectQueue(QUEUES.telegramImport) private readonly importQueue: Queue<ImportJobData>,
+    @InjectQueue(QUEUES.telegramSync) private readonly syncQueue: Queue<ImportJobData>,
     private readonly runner: ImportRunner,
     @Inject(IMPORT_SETTINGS) private readonly settings: ImportSettings,
   ) {}
@@ -67,14 +70,16 @@ export class ImportReconciler implements OnApplicationBootstrap, OnModuleDestroy
     const report: ReconcileReport = { enqueued: 0, failed: 0 };
     const jobs = await this.prisma.importJob.findMany({
       where: { status: { in: [JobStatus.PENDING, JobStatus.RUNNING] } },
-      select: { id: true, runSeq: true },
+      select: { id: true, runSeq: true, type: true },
       orderBy: { createdAt: 'asc' },
     });
     for (const job of jobs) {
       const data: ImportJobData = { importJobId: job.id, runSeq: job.runSeq };
-      const run = await this.queue.getJob(jobIds.importRun(job.id, job.runSeq));
+      // A run in the wrong queue would read Telegram twice: the claim accepts a RUNNING job.
+      const queue = this.queueFor(job.type);
+      const run = await queue.getJob(jobIds.importRun(job.id, job.runSeq));
       if (!run) {
-        await this.queue.add(IMPORT_RUN_JOB_NAME, data, importRunJobOptions(job.id, job.runSeq));
+        await queue.add(IMPORT_RUN_JOB_NAME, data, importRunJobOptions(job.id, job.runSeq));
         report.enqueued += 1;
       } else if (await run.isFailed()) {
         const reason = run.failedReason || 'the run failed';
@@ -94,6 +99,10 @@ export class ImportReconciler implements OnApplicationBootstrap, OnModuleDestroy
       );
     }
     return report;
+  }
+
+  private queueFor(type: ImportJobType): Queue<ImportJobData> {
+    return queueForJobType(type) === QUEUES.telegramSync ? this.syncQueue : this.importQueue;
   }
 
   private tick(): void {

@@ -2,11 +2,14 @@ import { makeImportJob } from '../../../testing/fixtures';
 import {
   canPause,
   canResume,
+  downloadedPercent,
   importChoiceProblem,
   isMoving,
   isUnfinished,
+  jobNoun,
   localDayStart,
   progressPercent,
+  statusLabel,
   toImportRequest,
   todayInputValue,
 } from './import-labels';
@@ -20,6 +23,24 @@ describe('import labels', () => {
     expect([running, paused, done].map(isMoving)).toEqual([true, false, false]);
     expect([running, paused, done].map(canPause)).toEqual([true, false, false]);
     expect([running, paused, done].map(canResume)).toEqual([false, true, false]);
+  });
+
+  it('tells syncs apart: they sync, and never pause', () => {
+    const sync = makeImportJob({ type: 'SYNC', status: 'RUNNING' });
+    expect(statusLabel(sync)).toBe('Syncing');
+    expect(statusLabel(makeImportJob({ status: 'RUNNING' }))).toBe('Importing');
+    expect(statusLabel({ ...sync, status: 'COMPLETED' })).toBe('Completed');
+    expect(canPause(sync)).toBe(false);
+    expect(jobNoun(sync)).toBe('sync');
+    expect(jobNoun(makeImportJob())).toBe('import');
+  });
+
+  it('counts downloaded files against the wanted ones', () => {
+    expect(
+      downloadedPercent(makeImportJob({ totalMedia: 12, downloadedFiles: 3, skippedFiles: 2 })),
+    ).toBe(30);
+    expect(downloadedPercent(makeImportJob({ totalMedia: 2, skippedFiles: 2 }))).toBeNull();
+    expect(downloadedPercent(makeImportJob({ totalMedia: 0 }))).toBeNull();
   });
 
   it('computes progress from the expected total, never 100 % before the end', () => {

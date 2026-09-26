@@ -6,7 +6,8 @@
 //   (MTProto server message ids are int32). The API serializes BIGINT as strings.
 // - Every index is declared here (including GIN, trigram and partial indexes) so that
 //   `prisma migrate dev` never drops them. Hand-written SQL in migrations is limited to
-//   extensions, the `tam_simple` text search configuration and the search_vector triggers.
+//   extensions, the `tam_simple` text search configuration, the search_vector triggers and the
+//   change-notification triggers (pg_notify on channel `tam_changes`, read by the api for SSE).
 // - Binary media never lives in PostgreSQL; `media.storage_key` points into object storage.
 
 generator client {
@@ -102,6 +103,14 @@ enum JobStatus {
 enum ImportJobType {
   IMPORT
   SYNC
+}
+
+/// Why a job runs: someone asked for it, the scheduled check found new messages, or Telegram
+/// announced new messages.
+enum JobOrigin {
+  MANUAL
+  SCHEDULE
+  TELEGRAM_UPDATE
 }
 
 enum ImportMode {
@@ -271,7 +280,11 @@ model Channel {
   isForum             Boolean   @default(false) @map("is_forum")
   isProtected         Boolean   @default(false) @map("is_protected")
   memberCount         Int?      @map("member_count")
-  syncEnabled         Boolean   @default(false) @map("sync_enabled")
+  /// Keep the channel up to date: the worker reads new messages on a schedule and when Telegram
+  /// announces them.
+  syncEnabled         Boolean   @default(true) @map("sync_enabled")
+  /// Why automatic sync switched itself off (e.g. content protection was turned on).
+  syncNote            String?   @map("sync_note")
   /// Newest message id of the contiguous imported range [backfillCursorId … headMessageId].
   headMessageId       Int?      @map("head_message_id")
   /// Oldest message id of the contiguous imported range (backfill resumes below it).
@@ -464,6 +477,7 @@ model ImportJob {
   /// Child jobs import the legacy basic group of a migrated supergroup.
   parentImportJobId   String?        @map("parent_import_job_id") @db.Uuid
   type                ImportJobType  @default(IMPORT)
+  origin              JobOrigin      @default(MANUAL)
   mode                ImportMode     @default(ALL)
   fromDate            DateTime?      @map("from_date") @db.Timestamptz(3)
   status              JobStatus      @default(PENDING)
@@ -480,7 +494,6 @@ model ImportJob {
   skippedFiles        Int            @default(0) @map("skipped_files")
   totalBytes          BigInt         @default(0) @map("total_bytes")
   downloadedBytes     BigInt         @default(0) @map("downloaded_bytes")
-  currentFile         String?        @map("current_file")
   /// What an unfinished job waits for, for people (e.g. a Telegram rate limit); null otherwise.
   statusDetail        String?        @map("status_detail")
   error               String?

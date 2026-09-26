@@ -5,6 +5,7 @@ import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
 import { chatTypeLabel } from '../../features/channels/channel-labels';
 import { ImportJobWatch } from '../../features/imports/import-job-watch';
+import { JOB_ORIGIN_LABELS } from '../../features/imports/import-labels';
 import { ImportProgress } from '../../features/imports/import-progress';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
@@ -43,7 +44,8 @@ export class ImportJobPage {
       return '';
     }
     const kind = job.type === 'SYNC' ? 'Sync' : 'Import';
-    return `${kind} of a ${chatTypeLabel(job.channel.type).toLowerCase()}`;
+    const what = `${kind} of a ${chatTypeLabel(job.channel.type).toLowerCase()}`;
+    return job.type === 'SYNC' ? `${what} · ${JOB_ORIGIN_LABELS[job.origin]}` : what;
   });
 
   constructor() {

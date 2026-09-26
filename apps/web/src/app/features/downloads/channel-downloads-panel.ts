@@ -3,7 +3,6 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
   input,
   linkedSignal,
@@ -17,7 +16,9 @@ import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
 import { RouterLink } from '@angular/router';
-import { finalize } from 'rxjs';
+import { filter, finalize } from 'rxjs';
+import { LiveEvents } from '../../core/live/live-events';
+import { LIVE_SAFETY_POLL_MS, liveRefresh } from '../../core/live/live-refresh';
 import { Notice } from '../../shared/components/notice/notice';
 import { Skeleton } from '../../shared/components/skeleton/skeleton';
 import {
@@ -42,7 +43,8 @@ interface ActiveRow {
 /**
  * The media downloads of a channel: the switch for automatic downloads, how many files are in
  * (and how many bytes are left), where they go and whether it has room, what downloads right now,
- * and a retry for failed files. Re-read every few seconds while the page is open.
+ * and a retry for failed files. Read again when its downloads change (live updates), or every few
+ * seconds while live updates cannot arrive.
  */
 @Component({
   selector: 'app-channel-downloads-panel',
@@ -144,14 +146,24 @@ export class ChannelDownloadsPanel {
   protected readonly retried = signal<number | null>(null);
 
   constructor() {
-    effect((onCleanup) => {
-      const data = this.data();
-      if (!data || this.summary.isLoading()) {
-        return;
-      }
-      const delay = data.files.active > 0 ? this.polling.activeMs : this.polling.idleMs;
-      const timer = setTimeout(() => this.summary.reload(), delay);
-      onCleanup(() => clearTimeout(timer));
+    liveRefresh({
+      reload: () => this.summary.reload(),
+      events: inject(LiveEvents)
+        .on('downloads.changed')
+        .pipe(filter(({ channelId }) => channelId === this.channelId())),
+      // Progress is written about once a second per file: fresh enough, and light on the api.
+      throttleMs: 2_000,
+      loading: () => this.summary.isLoading(),
+      poll: (live) => {
+        const data = this.data();
+        if (!data) {
+          return null;
+        }
+        if (live) {
+          return LIVE_SAFETY_POLL_MS;
+        }
+        return data.files.active > 0 ? this.polling.activeMs : this.polling.idleMs;
+      },
     });
   }
 

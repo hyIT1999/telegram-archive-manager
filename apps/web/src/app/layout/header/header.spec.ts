@@ -7,7 +7,9 @@ import { Router, provideRouter } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { makeUser } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
+import { FakeEventSources, provideFakeLiveEvents } from '../../../testing/live';
 import { AUTH_ENDPOINTS, AuthService } from '../../core/auth/auth-service';
+import { LiveEvents } from '../../core/live/live-events';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { NotifyService } from '../../core/services/notify-service';
 import { Header } from './header';
@@ -21,14 +23,17 @@ describe('Header', () => {
   let router: Router;
   const confirm = { ask: vi.fn<ConfirmService['ask']>() };
   const notify = { success: vi.fn(), error: vi.fn(), info: vi.fn() };
+  let sources: FakeEventSources;
 
   beforeEach(async () => {
+    sources = new FakeEventSources();
     confirm.ask.mockReset();
     notify.success.mockReset();
     notify.error.mockReset();
     TestBed.configureTestingModule({
       imports: [Header],
       providers: [
+        ...provideFakeLiveEvents(sources),
         provideRouter([{ path: '**', component: PageStub }]),
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -122,5 +127,23 @@ describe('Header', () => {
     http.expectNone(AUTH_ENDPOINTS.logout);
     expect(router.url).toBe('/dashboard');
     expect(TestBed.inject(AuthService).isAuthenticated()).toBe(true);
+  });
+  it('says when live updates are reconnecting for a while', async () => {
+    const disconnect = TestBed.inject(LiveEvents).connect();
+    sources.ready();
+    await fixture.whenStable();
+    expect(element().querySelector('.live-stalled')).toBeNull();
+
+    sources.latest.drop();
+    await vi.waitFor(() => {
+      fixture.detectChanges();
+      expect(element().querySelector('.live-stalled')?.getAttribute('aria-label')).toContain(
+        'Live updates are reconnecting',
+      );
+    });
+    sources.latest.send({ type: 'ready' });
+    await fixture.whenStable();
+    expect(element().querySelector('.live-stalled')).toBeNull();
+    disconnect();
   });
 });

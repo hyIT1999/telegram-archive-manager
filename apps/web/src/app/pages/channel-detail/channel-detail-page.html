@@ -107,20 +107,12 @@
           </dd>
         </div>
         <div>
-          <dt>Automatic sync</dt>
-          <dd>{{ item.syncEnabled ? 'On' : 'Off' }}</dd>
-        </div>
-        <div>
           <dt>History</dt>
           <dd>{{ item.backfillComplete ? 'Fully imported' : 'Not fully imported yet' }}</dd>
         </div>
         <div>
           <dt>Newest archived message</dt>
           <dd>{{ item.headMessageId === null ? 'None yet' : '#' + item.headMessageId }}</dd>
-        </div>
-        <div>
-          <dt>Last synced</dt>
-          <dd>{{ item.lastSyncedAt ? (item.lastSyncedAt | date: 'medium') : 'Never' }}</dd>
         </div>
         <div>
           <dt>Added to archive</dt>
@@ -139,6 +131,10 @@
 
     <section class="surface-card panel" aria-labelledby="channel-import-title">
       <app-channel-import-panel [channel]="item" />
+    </section>
+
+    <section class="surface-card panel" aria-labelledby="channel-sync-title">
+      <app-channel-sync-panel [channel]="item" (channelChange)="updated($event)" />
     </section>
 
     <section class="surface-card panel" aria-labelledby="channel-downloads-title">

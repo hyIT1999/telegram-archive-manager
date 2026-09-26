@@ -179,7 +179,8 @@ app-page-header {
   }
 }
 
-.downloads-switch {
+.downloads-switch,
+.sync-switch {
   display: grid;
   gap: 4px;
   margin-bottom: 16px;

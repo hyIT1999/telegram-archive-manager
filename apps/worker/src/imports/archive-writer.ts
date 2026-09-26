@@ -11,14 +11,7 @@ import {
   readDownloadSettings,
 } from '@tam/shared';
 import type { Message } from '@tam/telegram';
-import {
-  editableColumns,
-  isArchivable,
-  isArchivableMedia,
-  isNewerEdit,
-  toMediaRow,
-  toMessageRow,
-} from './archive-rows.js';
+import { isArchivable, isArchivableMedia, toMediaRow, toMessageRow } from './archive-rows.js';
 import { ArchiveRangeMovedError, ImportInterruptedError } from './import-errors.js';
 
 /**
@@ -107,15 +100,17 @@ async function storeMessages(
     return { added: 0, skipped };
   }
 
+  // A message stored before stays exactly as it was first stored: the archive keeps the original,
+  // whatever was edited on Telegram since.
   const { count: added } = await tx.message.createMany({
     data: kept.map((message) => toMessageRow(channelId, message)),
     skipDuplicates: true,
   });
   // The whole page, not only the new rows: a message stored before still gets its media and
-  // download job, and an edit made since is applied.
+  // download job.
   const rows = await tx.message.findMany({
     where: { channelId, telegramMessageId: { in: kept.map((message) => Number(message.id)) } },
-    select: { id: true, telegramMessageId: true, editDate: true },
+    select: { id: true, telegramMessageId: true },
   });
   const byTelegramId = new Map(rows.map((row) => [row.telegramMessageId, row]));
 
@@ -128,9 +123,6 @@ async function storeMessages(
     const row = byTelegramId.get(Number(message.id));
     if (!row) {
       continue;
-    }
-    if (isNewerEdit(message.editDate, row.editDate)) {
-      await tx.message.update({ where: { id: row.id }, data: editableColumns(message) });
     }
     media.push(
       ...message.media.filter(isArchivableMedia).map((item) => ({

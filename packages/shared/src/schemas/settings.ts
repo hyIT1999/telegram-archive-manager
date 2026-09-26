@@ -64,20 +64,62 @@ export function isAutoDownloaded(
   );
 }
 
-/** PATCH /api/settings — only the given fields change. */
-export const updateSettingsRequestSchema = z.object({
-  downloads: z
-    .object(downloadSettingFields)
-    .partial()
-    .refine((value) => Object.values(value).some((field) => field !== undefined), {
-      message: 'Nothing to change',
-    }),
+/** How often the worker checks each synced channel for new messages, in minutes. */
+export const SYNC_INTERVAL_MINUTES = [15, 30, 60, 180, 360, 720, 1440] as const;
+export type SyncIntervalMinutes = (typeof SYNC_INTERVAL_MINUTES)[number];
+
+const syncSettingFields = {
+  /**
+   * Between two checks of a channel. Telegram also announces most new messages as they come, so
+   * the check mostly catches what arrived while the worker was stopped.
+   */
+  intervalMinutes: z.literal([...SYNC_INTERVAL_MINUTES]),
+};
+
+/** How channels are synced (app_settings key "sync"); stored values are parsed like downloads. */
+export const syncSettingsSchema = z.object({
+  intervalMinutes: syncSettingFields.intervalMinutes.default(15),
 });
+export type SyncSettings = z.output<typeof syncSettingsSchema>;
+
+/** The app_settings key holding SyncSettings. */
+export const SYNC_SETTINGS_KEY = 'sync';
+
+export function defaultSyncSettings(): SyncSettings {
+  return syncSettingsSchema.parse({});
+}
+
+/** Reads stored settings; anything unreadable falls back to the defaults. */
+export function readSyncSettings(stored: unknown): SyncSettings {
+  const parsed = syncSettingsSchema.safeParse(stored ?? {});
+  return parsed.success ? parsed.data : defaultSyncSettings();
+}
+
+function changesSomething(value: Record<string, unknown>): boolean {
+  return Object.values(value).some((field) => field !== undefined);
+}
+
+/** PATCH /api/settings — only the given fields change. */
+export const updateSettingsRequestSchema = z
+  .object({
+    downloads: z
+      .object(downloadSettingFields)
+      .partial()
+      .refine(changesSomething, { message: 'Nothing to change' })
+      .optional(),
+    sync: z
+      .object(syncSettingFields)
+      .partial()
+      .refine(changesSomething, { message: 'Nothing to change' })
+      .optional(),
+  })
+  .refine(changesSomething, { message: 'Nothing to change' });
 export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
 
 /** GET /api/settings */
 export interface SettingsDto {
   downloads: DownloadSettings;
+  sync: SyncSettings;
   /** Server limits shown for information; they change in the server's .env. */
   disk: {
     /** Downloads to a folder on the server stop before its disk has less free space (MIN_FREE_DISK_MB). */

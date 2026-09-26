@@ -40,6 +40,17 @@
   </form>
 
   <div class="actions">
+    @if (live.stalled()) {
+      <span
+        class="live-stalled"
+        role="status"
+        tabindex="0"
+        aria-label="Live updates are reconnecting; pages refresh every few seconds meanwhile"
+        matTooltip="Live updates are reconnecting. Pages refresh every few seconds meanwhile."
+      >
+        <mat-icon aria-hidden="true">cloud_off</mat-icon>
+      </span>
+    }
     <button
       matIconButton
       type="button"

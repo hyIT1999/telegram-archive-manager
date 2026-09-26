@@ -12,6 +12,8 @@ export async function createTestApp(
   const moduleRef = await customize(Test.createTestingModule({ imports: [AppModule] })).compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({
     logger: ['fatal', 'error'],
+    // Like main.ts: open live update streams must not keep close() waiting.
+    forceCloseConnections: true,
   });
   configureApp(app, readEnv(app.get<ConfigService<Env, true>>(ConfigService)));
   await app.init();

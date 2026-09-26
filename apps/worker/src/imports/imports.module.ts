@@ -6,9 +6,12 @@ import { ArchiveWriter } from './archive-writer.js';
 import { IMPORT_SETTINGS, importSettingsFrom } from './import-settings.js';
 import { ImportReconciler } from './import-reconciler.js';
 import { ImportRunner } from './import-runner.js';
-import { ImportProcessor } from './import.processor.js';
+import { ImportProcessor, SyncProcessor } from './import.processor.js';
 
-/** History imports: the telegram-import processor, its runner and the reconciler. */
+/**
+ * History imports and syncs: the telegram-import and telegram-sync processors, their runner and
+ * the reconciler.
+ */
 @Module({
   imports: [TelegramModule],
   providers: [
@@ -23,6 +26,7 @@ import { ImportProcessor } from './import.processor.js';
     ArchiveWriter,
     ImportRunner,
     ImportProcessor,
+    SyncProcessor,
     ImportReconciler,
   ],
 })

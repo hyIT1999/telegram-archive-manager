@@ -102,6 +102,18 @@ export class SessionService {
     return { id: session.id, user: session.user, expiresAt: refresh.expiresAt, refreshed: true };
   }
 
+  /**
+   * Whether a session still exists and has not expired. Only reads: a long-lived response (live
+   * updates) cannot send a refreshed cookie, so it must not extend the session either.
+   */
+  async isActive(sessionId: string, now: Date = new Date()): Promise<boolean> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { expiresAt: true, absoluteExpiresAt: true },
+    });
+    return session !== null && !isSessionExpired(session, now);
+  }
+
   async revoke(token: string): Promise<void> {
     if (!isWellFormedSessionToken(token)) {
       return;

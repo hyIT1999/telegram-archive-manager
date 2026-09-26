@@ -49,8 +49,8 @@ function optionalInt(value: string | null): number | null {
   return value === null ? null : Number(value);
 }
 
-/** The columns an edit can change (text, formatting, views, metadata). */
-export function editableColumns(message: Message) {
+/** The content of a message as first stored (text, formatting, views, metadata). */
+function contentColumns(message: Message) {
   return {
     type: message.type,
     text: cleanText(message.text),
@@ -78,7 +78,7 @@ export function toMessageRow(channelId: string, message: Message): Prisma.Messag
         senderName: message.forward.senderName,
       },
     ),
-    ...editableColumns(message),
+    ...contentColumns(message),
   };
 }
 
@@ -95,9 +95,4 @@ export function toMediaRow(messageId: string, media: MessageMedia): Prisma.Media
     height: media.height,
     duration: media.duration,
   };
-}
-
-/** True when Telegram has a newer edit of a message than the archive. */
-export function isNewerEdit(incoming: Date | null, stored: Date | null): boolean {
-  return incoming !== null && (stored === null || incoming.getTime() > stored.getTime());
 }

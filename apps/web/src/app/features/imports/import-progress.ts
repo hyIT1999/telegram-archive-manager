@@ -15,19 +15,24 @@ import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import { Notice } from '../../shared/components/notice/notice';
 import type { ImportJobDto } from '../../shared/models';
 import { BytesPipe } from '../../shared/pipes/bytes-pipe';
+import { DOWNLOAD_STAGE_LABELS } from '../downloads/download-labels';
 import {
   JOB_STATUS_ICONS,
-  JOB_STATUS_LABELS,
   canPause,
   canResume,
+  downloadedPercent,
+  isSync,
   isUnfinished,
+  jobNoun,
   progressPercent,
+  statusLabel,
 } from './import-labels';
 import type { ImportJobAction } from './imports-api';
 
 /**
- * Where an import job stands: status, a progress bar over the expected messages, what was found,
- * why it waits or failed, and (optionally) pause/resume/cancel buttons that emit `action`.
+ * Where an import or sync job stands: status, a progress bar over the expected messages, what was
+ * found and downloaded (with the files downloading now), why it waits or failed, and
+ * (optionally) pause/resume/cancel buttons that emit `action`.
  */
 @Component({
   selector: 'app-import-progress',
@@ -47,8 +52,9 @@ export class ImportProgress {
   private readonly locale = inject(LOCALE_ID);
   private readonly bytes = new BytesPipe();
 
-  protected readonly statusLabel = computed(() => JOB_STATUS_LABELS[this.job().status]);
+  protected readonly statusLabel = computed(() => statusLabel(this.job()));
   protected readonly statusIcon = computed(() => JOB_STATUS_ICONS[this.job().status]);
+  protected readonly noun = computed(() => jobNoun(this.job()));
   protected readonly unfinished = computed(() => isUnfinished(this.job()));
   protected readonly canPause = computed(() => canPause(this.job()));
   protected readonly canResume = computed(() => canResume(this.job()));
@@ -64,6 +70,9 @@ export class ImportProgress {
 
   protected readonly modeText = computed(() => {
     const job = this.job();
+    if (isSync(job)) {
+      return 'New messages';
+    }
     if (job.mode === 'ALL' || !job.fromDate) {
       return 'The whole history';
     }
@@ -74,6 +83,11 @@ export class ImportProgress {
     const job = this.job();
     const read = this.count(job.processedMessages);
     if (job.status === 'COMPLETED') {
+      if (isSync(job)) {
+        return job.processedMessages === 0
+          ? 'No new messages'
+          : `${read} new ${job.processedMessages === 1 ? 'message' : 'messages'}`;
+      }
       return `${read} ${job.processedMessages === 1 ? 'message' : 'messages'}`;
     }
     if (job.totalMessages !== null) {
@@ -88,9 +102,14 @@ export class ImportProgress {
     if (job.totalMedia === 0) {
       return null;
     }
+    const percent = downloadedPercent(job);
     const parts = [
       `${this.count(job.downloadedFiles)} of ${this.count(job.totalMedia)} files · ${this.bytes.transform(job.downloadedBytes)} of ${this.bytes.transform(job.totalBytes)}`,
     ];
+    if (percent !== null) {
+      // A few files of a big archive are not nothing.
+      parts.unshift(percent === 0 && job.downloadedFiles > 0 ? '<1 %' : `${percent} %`);
+    }
     if (job.failedFiles > 0) {
       parts.push(`${this.count(job.failedFiles)} failed`);
     }
@@ -98,6 +117,22 @@ export class ImportProgress {
       parts.push(`${this.count(job.skippedFiles)} skipped`);
     }
     return parts.join(' · ');
+  });
+
+  /** The files downloading now: the first one with its progress, and how many more. */
+  protected readonly currentFileText = computed(() => {
+    const [first, ...others] = this.job().activeFiles;
+    if (!first) {
+      return null;
+    }
+    const detail =
+      first.stage === 'FETCHING'
+        ? `${first.progress} %`
+        : first.stage
+          ? DOWNLOAD_STAGE_LABELS[first.stage]
+          : 'Starting';
+    const more = others.length > 0 ? ` (and ${others.length} more)` : '';
+    return `${first.name} · ${detail}${more}`;
   });
 
   protected readonly mediaText = computed(() => {

@@ -1,13 +1,19 @@
 import type { Channel, ImportJob } from '@tam/database';
-import type { ImportJobDto } from '@tam/shared';
+import type { ActiveDownloadDto, ImportJobDto } from '@tam/shared';
 
 /** What import job queries load next to the row (`include`), so the DTO can name the channel. */
 export const IMPORT_JOB_INCLUDE = { channel: true } as const;
 
 export type ImportJobWithChannel = ImportJob & { channel: Channel };
 
-/** BIGINT counters become numbers (byte totals stay far below 2^53); ids travel as strings. */
-export function toImportJobDto(job: ImportJobWithChannel): ImportJobDto {
+/**
+ * BIGINT counters become numbers (byte totals stay far below 2^53); ids travel as strings.
+ * `activeFiles` are the job's downloads running now (activeFilesOf).
+ */
+export function toImportJobDto(
+  job: ImportJobWithChannel,
+  activeFiles: ActiveDownloadDto[] = [],
+): ImportJobDto {
   return {
     id: job.id,
     channelId: job.channelId,
@@ -20,6 +26,7 @@ export function toImportJobDto(job: ImportJobWithChannel): ImportJobDto {
     },
     parentImportJobId: job.parentImportJobId,
     type: job.type,
+    origin: job.origin,
     mode: job.mode,
     fromDate: job.fromDate?.toISOString() ?? null,
     status: job.status,
@@ -32,7 +39,7 @@ export function toImportJobDto(job: ImportJobWithChannel): ImportJobDto {
     skippedFiles: job.skippedFiles,
     totalBytes: Number(job.totalBytes),
     downloadedBytes: Number(job.downloadedBytes),
-    currentFile: job.currentFile,
+    activeFiles,
     statusDetail: job.statusDetail,
     error: job.error,
     startedAt: job.startedAt?.toISOString() ?? null,

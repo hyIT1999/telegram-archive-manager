@@ -3,7 +3,7 @@ import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
 import { AUTH_ENDPOINTS, AuthService } from '../auth/auth-service';
-import { LOGIN_PATH, loginQueryParams } from '../auth/return-url';
+import { sessionExpired } from '../auth/session-expired';
 
 /** 401s from these calls are expected answers ("not signed in", "wrong password"). */
 const SESSION_PROBES: ReadonlySet<string> = new Set([AUTH_ENDPOINTS.me, AUTH_ENDPOINTS.login]);
@@ -22,11 +22,7 @@ export const unauthorizedInterceptor: HttpInterceptorFn = (req, next) => {
         path.startsWith('/api/') &&
         !SESSION_PROBES.has(path)
       ) {
-        auth.clearSession();
-        const currentUrl = router.url;
-        if (!currentUrl.startsWith(LOGIN_PATH)) {
-          void router.navigate([LOGIN_PATH], { queryParams: loginQueryParams(currentUrl) });
-        }
+        sessionExpired(auth, router);
       }
       return throwError(() => error);
     }),

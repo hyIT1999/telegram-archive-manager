@@ -2,7 +2,6 @@ import {
   Component,
   DestroyRef,
   computed,
-  effect,
   inject,
   input,
   linkedSignal,
@@ -13,7 +12,9 @@ import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { MatProgressSpinner } from '@angular/material/progress-spinner';
 import { Router, RouterLink } from '@angular/router';
-import { finalize } from 'rxjs';
+import { filter, finalize } from 'rxjs';
+import { LiveEvents } from '../../core/live/live-events';
+import { liveRefresh } from '../../core/live/live-refresh';
 import { Notice } from '../../shared/components/notice/notice';
 import { Skeleton } from '../../shared/components/skeleton/skeleton';
 import { type ChannelDto, type ImportJobDto, detailString, toApiError } from '../../shared/models';
@@ -30,8 +31,9 @@ import { ImportProgress } from './import-progress';
 import { ImportsApi } from './imports-api';
 
 /**
- * The import section of a channel page: its latest import job, and a way to import (again) —
- * new messages and whatever older history is still missing.
+ * The import section of a channel page: its latest import job, followed live, and a way to
+ * import (again) — new messages and whatever older history is still missing. Syncs have a panel
+ * of their own.
  */
 @Component({
   selector: 'app-channel-import-panel',
@@ -64,9 +66,9 @@ export class ChannelImportPanel {
   private readonly channelId = computed(() => this.channel().id);
   private readonly latest = rxResource({
     params: () => (this.importable() ? this.channelId() : undefined),
-    stream: ({ params }) => this.api.list({ channelId: params, limit: 1 }),
+    stream: ({ params }) => this.api.list({ channelId: params, type: 'IMPORT', limit: 1 }),
   });
-  /** The channel's latest job; null when it was never imported, undefined while loading. */
+  /** The channel's latest import; null when it was never imported, undefined while loading. */
   protected readonly job = computed<ImportJobDto | null | undefined>(() =>
     this.latest.hasValue() ? (this.latest.value().items[0] ?? null) : undefined,
   );
@@ -91,18 +93,21 @@ export class ChannelImportPanel {
   protected readonly blockingJobId = signal<string | null>(null);
 
   constructor() {
-    effect((onCleanup) => {
-      const job = this.job();
-      if (!job || !isMoving(job) || this.latest.isLoading()) {
-        return;
-      }
-      const timer = setTimeout(() => {
-        const current = this.job();
-        if (current && isMoving(current)) {
-          this.latest.reload();
-        }
-      }, this.polling.jobMs);
-      onCleanup(() => clearTimeout(timer));
+    inject(LiveEvents)
+      .on('import.job')
+      .pipe(
+        filter(({ job }) => job.type === 'IMPORT' && job.channelId === this.channelId()),
+        takeUntilDestroyed(),
+      )
+      .subscribe(({ job }) => this.show(job));
+    liveRefresh({
+      reload: () => this.latest.reload(),
+      loading: () => this.latest.isLoading(),
+      active: () => {
+        const job = this.job();
+        return !!job && isMoving(job);
+      },
+      poll: (live) => (live ? null : this.polling.jobMs),
     });
   }
 
@@ -131,5 +136,16 @@ export class ChannelImportPanel {
           this.blockingJobId.set(detailString(error, 'jobId'));
         },
       });
+  }
+
+  /** The latest import changed, or a newer one started. */
+  private show(job: ImportJobDto): void {
+    const current = this.job();
+    if (current === undefined || !this.latest.hasValue()) {
+      return;
+    }
+    if (current === null || current.id === job.id || job.createdAt > current.createdAt) {
+      this.latest.set({ ...this.latest.value(), items: [job] });
+    }
   }
 }

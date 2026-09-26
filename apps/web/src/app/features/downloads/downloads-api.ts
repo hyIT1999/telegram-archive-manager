@@ -18,7 +18,7 @@ export interface DownloadPolling {
   readonly idleMs: number;
 }
 
-/** Polling until live progress over server-sent events arrives (Phase 7). */
+/** Polling while live updates cannot arrive (and, for single files, while one downloads). */
 export const DOWNLOAD_POLLING = new InjectionToken<DownloadPolling>('DOWNLOAD_POLLING', {
   providedIn: 'root',
   factory: () => ({ activeMs: 2_000, idleMs: 10_000 }),

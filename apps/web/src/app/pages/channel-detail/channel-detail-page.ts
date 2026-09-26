@@ -4,11 +4,15 @@ import { rxResource } from '@angular/core/rxjs-interop';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { RouterLink } from '@angular/router';
+import { filter, merge } from 'rxjs';
+import { LiveEvents } from '../../core/live/live-events';
+import { liveRefresh } from '../../core/live/live-refresh';
 import { channelHandle, chatTypeLabel, telegramUrl } from '../../features/channels/channel-labels';
 import { ChannelsApi } from '../../features/channels/channels-api';
 import { ChannelDownloadsPanel } from '../../features/downloads/channel-downloads-panel';
 import { ChannelImportPanel } from '../../features/imports/channel-import-panel';
 import { MessageFeed } from '../../features/messages/message-feed';
+import { ChannelSyncPanel } from '../../features/sync/channel-sync-panel';
 import { ChannelTopics } from '../../features/topics/channel-topics';
 import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { ErrorState } from '../../shared/components/error-state/error-state';
@@ -23,6 +27,7 @@ import { BytesPipe } from '../../shared/pipes/bytes-pipe';
   imports: [
     ChannelDownloadsPanel,
     ChannelImportPanel,
+    ChannelSyncPanel,
     ChannelTopics,
     DatePipe,
     DecimalPipe,
@@ -52,6 +57,21 @@ export class ChannelDetailPage {
     stream: ({ params }) => this.api.get(params.id),
   });
 
+  constructor() {
+    // Imports, syncs and downloads change the channel's range and numbers: read it again, now
+    // and then (its statistics count the whole archive of the channel).
+    const live = inject(LiveEvents);
+    liveRefresh({
+      reload: () => this.channel.reload(),
+      events: merge(live.on('channel.changed'), live.on('downloads.changed')).pipe(
+        filter(({ channelId }) => channelId === this.id()),
+      ),
+      throttleMs: 10_000,
+      loading: () => this.channel.isLoading(),
+      poll: () => null,
+    });
+  }
+
   protected readonly data = computed<ChannelDto | undefined>(() =>
     this.channel.hasValue() ? this.channel.value() : undefined,
   );
@@ -71,7 +91,7 @@ export class ChannelDetailPage {
     return channel ? chatTypeLabel(channel.type) : '';
   });
 
-  /** The switch of the downloads panel changed the channel. */
+  /** A switch of the downloads or sync panel changed the channel. */
   protected updated(channel: ChannelDto): void {
     this.channel.set(channel);
   }

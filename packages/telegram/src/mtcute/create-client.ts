@@ -14,6 +14,11 @@ export interface MtcuteClientOptions {
   logLevel?: number;
   /** Called before mtcute sleeps through a short FLOOD_WAIT (≤ 10 s); longer ones are thrown. */
   onFloodWait?: (method: string, seconds: number) => void;
+  /**
+   * Receive updates (new messages) while connected. @default true. Updates missed while offline
+   * are not caught up: the sync schedule reads history instead, which is cheaper and complete.
+   */
+  updates?: boolean;
 }
 
 export function createMtcuteClient(options: MtcuteClientOptions): TelegramClient {
@@ -21,8 +26,7 @@ export function createMtcuteClient(options: MtcuteClientOptions): TelegramClient
     apiId: options.apiId,
     apiHash: options.apiHash,
     storage: options.storage,
-    // Realtime updates are not consumed before Phase 7 (sync).
-    updates: false,
+    updates: options.updates === false ? false : { catchUp: false },
     logLevel: options.logLevel ?? 2,
     initConnectionOptions: {
       deviceModel: DEVICE_MODEL,

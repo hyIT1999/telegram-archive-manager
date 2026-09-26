@@ -15,6 +15,7 @@ import type { WorkerEnv } from '../config/env.schema.js';
 import { RedisLease } from './redis-lease.js';
 import { TelegramCooldown } from './telegram-cooldown.js';
 import { APP_VERSION, type TelegramSettings, mtcuteLogLevel } from './telegram-settings.js';
+import { TelegramUpdates } from './telegram-updates.js';
 import {
   SECRET_BOX,
   TELEGRAM_REDIS,
@@ -42,6 +43,8 @@ export class TelegramConnection implements TelegramApiProvider {
   private session: SessionStorage | undefined;
   private adapter: MtcuteTelegramAdapter | undefined;
   private leaseLostListener: (() => void) | undefined;
+  /** Whether the current client was asked to receive updates (logged once per client). */
+  private receiving = false;
 
   constructor(
     @Inject(TELEGRAM_SETTINGS) private readonly settings: TelegramSettings,
@@ -49,6 +52,7 @@ export class TelegramConnection implements TelegramApiProvider {
     @Inject(TELEGRAM_REDIS) private readonly redis: Redis,
     private readonly config: ConfigService<WorkerEnv, true>,
     private readonly cooldown: TelegramCooldown,
+    private readonly updates: TelegramUpdates,
   ) {}
 
   get api(): TelegramApi {
@@ -65,7 +69,12 @@ export class TelegramConnection implements TelegramApiProvider {
 
   /** Takes the owner lease; false while another worker process holds it. */
   async acquireLease(): Promise<boolean> {
-    this.lease ??= new RedisLease(this.redis, REDIS_KEYS.telegramOwner, LEASE_TTL_MS, `${hostname()}:${process.pid}`);
+    this.lease ??= new RedisLease(
+      this.redis,
+      REDIS_KEYS.telegramOwner,
+      LEASE_TTL_MS,
+      `${hostname()}:${process.pid}`,
+    );
     if (!(await this.lease.tryAcquire())) {
       return false;
     }
@@ -94,11 +103,17 @@ export class TelegramConnection implements TelegramApiProvider {
       },
     });
     await this.client.connect();
-    this.adapter = new MtcuteTelegramAdapter(this.client);
+    const adapter = new MtcuteTelegramAdapter(this.client);
+    // Before any sign-in: signing in starts the client's update loop by itself.
+    adapter.onUpdate((event) => this.updates.emit(event));
+    this.adapter = adapter;
+    this.receiving = false;
+    this.updates.attach(() => this.startUpdates(adapter));
   }
 
   /** Destroys the client and closes the session database; safe to call in any state. */
   async disconnect(): Promise<void> {
+    this.updates.attach(undefined);
     this.adapter = undefined;
     const client = this.client;
     const session = this.session;
@@ -116,13 +131,27 @@ export class TelegramConnection implements TelegramApiProvider {
     }
   }
 
+  /** Receives Telegram's updates on this client from now on; the account must be logged in. */
+  private async startUpdates(adapter: MtcuteTelegramAdapter): Promise<void> {
+    if (this.adapter !== adapter) {
+      return;
+    }
+    await adapter.startUpdates();
+    if (!this.receiving && this.adapter === adapter) {
+      this.receiving = true;
+      this.logger.log('Receiving updates from Telegram');
+    }
+  }
+
   async releaseLease(): Promise<void> {
     clearInterval(this.renewTimer);
     this.renewTimer = undefined;
     try {
       await this.lease?.release();
     } catch (error) {
-      this.logger.warn(`Releasing the Telegram owner lease failed (it will expire): ${errorMessage(error)}`);
+      this.logger.warn(
+        `Releasing the Telegram owner lease failed (it will expire): ${errorMessage(error)}`,
+      );
     }
   }
 

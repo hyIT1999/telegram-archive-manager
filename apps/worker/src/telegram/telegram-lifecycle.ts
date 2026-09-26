@@ -15,6 +15,7 @@ import { TelegramDialogsService } from './telegram-dialogs.service.js';
 import { TelegramRedisConnection } from './telegram-redis.connection.js';
 import { TelegramRpcServer } from './telegram-rpc.server.js';
 import type { TelegramSettings } from './telegram-settings.js';
+import { TelegramUpdates } from './telegram-updates.js';
 import { TELEGRAM_SETTINGS } from './telegram.tokens.js';
 
 /** How often a standby worker checks whether the owner lease became free. */
@@ -44,6 +45,7 @@ export class TelegramLifecycle implements OnApplicationBootstrap, OnModuleDestro
     private readonly rpc: TelegramRpcServer,
     private readonly redis: TelegramRedisConnection,
     private readonly prisma: PrismaService,
+    private readonly updates: TelegramUpdates,
   ) {
     if (settings.configured) {
       status.setTelegram(TelegramConnectionState.STANDBY, 'Starting');
@@ -87,12 +89,16 @@ export class TelegramLifecycle implements OnApplicationBootstrap, OnModuleDestro
         this.status.setTelegram(TelegramConnectionState.CONNECTED);
         this.logger.log(`Connected to Telegram (login state: ${state})`);
         if (state === TelegramAuthState.READY) {
+          await this.startUpdates();
           await this.refreshStaleDialogs();
         }
 
         await Promise.race([leaseLost, aborted(signal)]);
         if (!signal.aborted) {
-          this.status.setTelegram(TelegramConnectionState.ERROR, 'Lost the Telegram owner lease; reconnecting');
+          this.status.setTelegram(
+            TelegramConnectionState.ERROR,
+            'Lost the Telegram owner lease; reconnecting',
+          );
           retryAfterMs = LEASE_RETRY_MS;
         }
       } catch (error) {
@@ -115,8 +121,20 @@ export class TelegramLifecycle implements OnApplicationBootstrap, OnModuleDestro
     await this.connection.releaseLease();
   }
 
+  /**
+   * A restored session does not receive updates by itself (only a sign-in starts them). A failure
+   * is not fatal: the sync scheduler asks again on every round.
+   */
+  private async startUpdates(): Promise<void> {
+    await this.updates.start().catch((error: unknown) => {
+      this.logger.warn(`Could not start receiving Telegram updates: ${errorMessage(error)}`);
+    });
+  }
+
   private async refreshStaleDialogs(): Promise<void> {
-    const account = await this.prisma.telegramAccount.findUnique({ where: { accountKey: ACCOUNT_KEY } });
+    const account = await this.prisma.telegramAccount.findUnique({
+      where: { accountKey: ACCOUNT_KEY },
+    });
     const refreshedAt = account?.dialogsRefreshedAt?.getTime() ?? 0;
     if (Date.now() - refreshedAt > DIALOGS_STALE_AFTER_MS) {
       await this.dialogs.startRefresh().catch((error: unknown) => {

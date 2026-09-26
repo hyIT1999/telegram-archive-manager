@@ -15,7 +15,7 @@ export class SettingsController {
     return this.settings.get();
   }
 
-  /** Changes the given download settings; they apply to waiting files at once. */
+  /** Changes the given download and sync settings; downloads apply to waiting files at once. */
   @Patch()
   update(
     @Body({ schema: updateSettingsRequestSchema }) request: UpdateSettingsRequest,

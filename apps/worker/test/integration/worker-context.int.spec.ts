@@ -46,7 +46,7 @@ describe('worker application context', () => {
           .get(ShutdownCoordinator)
           .workers()
           .map((worker) => worker.name),
-      ).toEqual([QUEUES.telegramImport, QUEUES.mediaDownload]);
+      ).toEqual([QUEUES.telegramImport, QUEUES.telegramSync, QUEUES.mediaDownload]);
     } finally {
       await app.close();
     }

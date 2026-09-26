@@ -4,8 +4,13 @@ import { REDIS_KEYS } from '@tam/shared';
 import { AuthRequiredError, type Chat } from '@tam/telegram';
 import type { Redis } from 'ioredis';
 import { errorMessage } from '../common/error-message.js';
+import { SYNC_NOTES } from '../common/sync-notes.js';
 import { ACCOUNT_KEY, TelegramAuthService } from './telegram-auth.service.js';
-import { TELEGRAM_API_PROVIDER, TELEGRAM_REDIS, type TelegramApiProvider } from './telegram.tokens.js';
+import {
+  TELEGRAM_API_PROVIDER,
+  TELEGRAM_REDIS,
+  type TelegramApiProvider,
+} from './telegram.tokens.js';
 
 /** The "refreshing" flag expires on its own if the worker dies mid-refresh. */
 export const REFRESH_FLAG_TTL_MS = 10 * 60_000;
@@ -78,7 +83,10 @@ export class TelegramDialogsService {
           // Archived channels follow Telegram; one that turned protected stops syncing.
           await tx.channel.updateMany({
             where: { telegramChatId },
-            data: { ...details, ...(chat.isProtected ? { syncEnabled: false } : {}) },
+            data: {
+              ...details,
+              ...(chat.isProtected ? { syncEnabled: false, syncNote: SYNC_NOTES.protected } : {}),
+            },
           });
         }
         await tx.telegramDialog.deleteMany({ where: { lastSeenAt: { lt: seenAt } } });
@@ -93,7 +101,12 @@ export class TelegramDialogsService {
 
   /** The api reports the chat list as `refreshing` while this flag exists. */
   private async raiseFlag(): Promise<void> {
-    await this.redis.set(REDIS_KEYS.telegramDialogsRefreshing, new Date().toISOString(), 'PX', REFRESH_FLAG_TTL_MS);
+    await this.redis.set(
+      REDIS_KEYS.telegramDialogsRefreshing,
+      new Date().toISOString(),
+      'PX',
+      REFRESH_FLAG_TTL_MS,
+    );
   }
 
   private async lowerFlag(): Promise<void> {

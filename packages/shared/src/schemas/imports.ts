@@ -2,11 +2,17 @@ import { z } from 'zod';
 import {
   type ChatType,
   type ImportJobPhase,
-  type ImportJobType,
+  ImportJobType,
   type ImportMode,
+  type JobOrigin,
   JobStatus,
 } from '../enums.js';
 import { csvList, cursorQuerySchema, isoDateOrDateTimeSchema } from './common.js';
+import type { ActiveDownloadDto } from './media.js';
+import { MAX_DOWNLOAD_CONCURRENCY } from './settings.js';
+
+/** Files an import job lists as downloading: all of them, since no more download at once. */
+export const MAX_ACTIVE_FILES = MAX_DOWNLOAD_CONCURRENCY;
 
 /** Clocks and time zones differ a little between browser and server; a day of slack covers it. */
 const FUTURE_SLACK_MS = 24 * 60 * 60_000;
@@ -24,10 +30,11 @@ export const importRequestSchema = z.discriminatedUnion('mode', [
 ]);
 export type ImportRequest = z.infer<typeof importRequestSchema>;
 
-/** GET /api/import-jobs — newest first; filter by channel and/or status (`RUNNING,PAUSED`). */
+/** GET /api/import-jobs — newest first; filter by channel, status (`RUNNING,PAUSED`) and type. */
 export const importJobListQuerySchema = cursorQuerySchema.extend({
   channelId: z.uuid().optional(),
   status: csvList(z.enum(JobStatus)).optional(),
+  type: z.enum(ImportJobType).optional(),
 });
 export type ImportJobListQuery = z.infer<typeof importJobListQuerySchema>;
 
@@ -45,7 +52,9 @@ export interface ImportJobDto {
   channelId: string;
   channel: ImportJobChannelDto;
   parentImportJobId: string | null;
+  /** IMPORT reads history (and new messages); SYNC reads only the messages newer than the archive. */
   type: ImportJobType;
+  origin: JobOrigin;
   mode: ImportMode;
   fromDate: string | null;
   status: JobStatus;
@@ -63,7 +72,8 @@ export interface ImportJobDto {
   skippedFiles: number;
   totalBytes: number;
   downloadedBytes: number;
-  currentFile: string | null;
+  /** Files of this job downloading (or queued for it) right now, at most MAX_ACTIVE_FILES. */
+  activeFiles: ActiveDownloadDto[];
   /** What an unfinished job waits for, e.g. "Telegram asked to wait 45 s". */
   statusDetail: string | null;
   error: string | null;

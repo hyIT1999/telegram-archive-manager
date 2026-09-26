@@ -15,6 +15,7 @@ const channel: Channel = {
   isProtected: false,
   memberCount: 100,
   syncEnabled: false,
+  syncNote: null,
   headMessageId: 500,
   backfillCursorId: 1,
   backfillComplete: true,
@@ -35,6 +36,7 @@ const job: ImportJob = {
   channelId: channel.id,
   parentImportJobId: null,
   type: 'IMPORT',
+  origin: 'MANUAL',
   mode: 'FROM_DATE',
   fromDate: new Date('2026-09-01T00:00:00.000Z'),
   status: 'RUNNING',
@@ -49,7 +51,6 @@ const job: ImportJob = {
   skippedFiles: 0,
   totalBytes: 6n * 1024n ** 3n,
   downloadedBytes: 0n,
-  currentFile: null,
   statusDetail: 'Telegram asked to wait 30 s before reading more',
   error: null,
   startedAt: created,
@@ -83,5 +84,24 @@ describe('toImportJobDto', () => {
     expect(dto).not.toHaveProperty('runSeq');
     expect(dto).not.toHaveProperty('bullJobId');
     expect(JSON.parse(JSON.stringify(dto))).toEqual(dto);
+  });
+
+  it('says why the job runs and lists the files it downloads now', () => {
+    const file = {
+      mediaId: '0199a0b1-0000-7000-8000-0000000000bb',
+      name: 'lesson_01.mp4',
+      type: 'VIDEO',
+      size: 1_000,
+      downloadedBytes: 400,
+      progress: 40,
+      stage: 'FETCHING',
+      requested: false,
+      updatedAt: created.toISOString(),
+    } as const;
+    expect(toImportJobDto({ ...job, channel }, [file])).toMatchObject({
+      origin: 'MANUAL',
+      activeFiles: [file],
+    });
+    expect(toImportJobDto({ ...job, channel }).activeFiles).toEqual([]);
   });
 });

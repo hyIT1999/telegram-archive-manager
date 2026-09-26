@@ -34,10 +34,12 @@ import {
   MEDIA_SETTINGS,
   type MediaSettings,
 } from '../../src/media/media-settings.js';
+import { SYNC_SCHEDULER_SETTINGS } from '../../src/sync/sync-settings.js';
 import { ACCOUNT_KEY } from '../../src/telegram/telegram-auth.service.js';
 import { TELEGRAM_API_PROVIDER } from '../../src/telegram/telegram.tokens.js';
 import { WorkerModule } from '../../src/worker.module.js';
 import { FakeFiles } from './support/fake-files.js';
+import { IDLE_SYNC_SETTINGS } from './support/sync-fixtures.js';
 import {
   archiveFiles,
   localLocation,
@@ -104,7 +106,9 @@ describe('media downloads', () => {
       .overrideProvider(IMPORT_SETTINGS)
       .useValue({ pageDelayMs: 0, unavailableRetryMs: 100, reconcileIntervalMs: 3_600_000 })
       .overrideProvider(MEDIA_SETTINGS)
-      .useValue(testMediaSettings(settings));
+      .useValue(testMediaSettings(settings))
+      .overrideProvider(SYNC_SCHEDULER_SETTINGS)
+      .useValue(IDLE_SYNC_SETTINGS);
     if (drivers) {
       builder = builder.overrideProvider(LOCATION_DRIVERS).useValue(drivers);
     }

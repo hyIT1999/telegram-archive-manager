@@ -41,7 +41,21 @@ export class ImportJobsController {
     return job;
   }
 
-  /** Newest first; filter by `channelId` and `status` (comma separated). */
+  /**
+   * Reads the messages posted since the archive's newest one: 202 with the new sync, or 200 with
+   * the sync already on its way (idempotent).
+   */
+  @Post('channels/:id/sync')
+  async sync(
+    @Param({ schema: idParamSchema }) params: IdParam,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<ImportJobDto> {
+    const { job, created } = await this.imports.sync(params.id);
+    response.status(created ? HttpStatus.ACCEPTED : HttpStatus.OK);
+    return job;
+  }
+
+  /** Newest first; filter by `channelId`, `status` (comma separated) and `type`. */
   @Get('import-jobs')
   list(
     @Query({ schema: importJobListQuerySchema }) query: ImportJobListQuery,

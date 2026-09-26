@@ -73,6 +73,11 @@
     margin: 2px 0 0;
     font: var(--mat-sys-title-small);
   }
+
+  // Long file names wrap instead of widening the page.
+  .current-file {
+    overflow-wrap: anywhere;
+  }
 }
 
 .hint {

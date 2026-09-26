@@ -55,7 +55,7 @@ export const TelegramErrorCode = {
 } as const;
 export type TelegramErrorCode = (typeof TelegramErrorCode)[keyof typeof TelegramErrorCode];
 
-/** Outcomes of import requests (POST /api/channels/:id/import and /api/import-jobs/…). */
+/** Outcomes of import and sync requests (POST /api/channels/:id/import|sync, /api/import-jobs/…). */
 export const ImportErrorCode = {
   /** The channel already has an import running with other settings; details.jobId names it. */
   IMPORT_ACTIVE: 'IMPORT_ACTIVE',
@@ -63,6 +63,8 @@ export const ImportErrorCode = {
   INVALID_JOB_STATE: 'INVALID_JOB_STATE',
   /** The channel is the old basic group of an upgraded supergroup; import the supergroup. */
   CHANNEL_MIGRATED: 'CHANNEL_MIGRATED',
+  /** Nothing of the channel is archived yet, so there is nothing to sync from: import it first. */
+  SYNC_NEEDS_IMPORT: 'SYNC_NEEDS_IMPORT',
 } as const;
 export type ImportErrorCode = (typeof ImportErrorCode)[keyof typeof ImportErrorCode];
 

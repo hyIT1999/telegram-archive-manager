@@ -155,6 +155,8 @@ export class ImportWizardPage {
   protected readonly savingStorage = signal(false);
   protected readonly savingDownloads = signal(false);
   protected readonly downloadsError = signal<string | null>(null);
+  protected readonly savingSync = signal(false);
+  protected readonly syncError = signal<string | null>(null);
   protected readonly storageError = linkedSignal<string | null, string | null>({
     source: this.storageChoice,
     computation: () => null,
@@ -286,6 +288,29 @@ export class ImportWizardPage {
         next: (updated) => this.channel.set(updated),
         error: (error: unknown) => {
           this.downloadsError.set(toApiError(error).message);
+          change.source.checked = !change.checked;
+        },
+      });
+  }
+
+  /** Switches the channel's sync after the import (saved at once). */
+  protected setSyncEnabled(change: MatSlideToggleChange): void {
+    const channel = this.channel();
+    if (!channel || this.savingSync()) {
+      return;
+    }
+    this.savingSync.set(true);
+    this.syncError.set(null);
+    this.channelsApi
+      .update(channel.id, { syncEnabled: change.checked })
+      .pipe(
+        finalize(() => this.savingSync.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated) => this.channel.set(updated),
+        error: (error: unknown) => {
+          this.syncError.set(toApiError(error).message);
           change.source.checked = !change.checked;
         },
       });

@@ -3,6 +3,7 @@ import type { PrismaService } from '@tam/database/nest';
 import { type ImportJobData, JobStatus } from '@tam/shared';
 import { ChatProtectedError, type Message } from '@tam/telegram';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { SYNC_NOTES } from '../../src/common/sync-notes.js';
 import { ArchiveWriter } from '../../src/imports/archive-writer.js';
 import type { ImportSettings } from '../../src/imports/import-settings.js';
 import { ImportRunner } from '../../src/imports/import-runner.js';
@@ -299,7 +300,7 @@ describe('ImportRunner', () => {
     expect(api.getHistoryPage).toHaveBeenCalledTimes(1);
   });
 
-  it('applies edits made since a page was stored', async () => {
+  it('keeps a stored message as it was first stored, whatever was edited since', async () => {
     const writer = new ArchiveWriter(prisma);
     const channel = await addChannel();
     const job = await prisma.importJob.create({
@@ -325,8 +326,8 @@ describe('ImportRunner', () => {
     ).resolves.toEqual({ added: 0, skipped: 0 });
 
     const stored = await prisma.message.findFirstOrThrow({ where: { telegramMessageId: 7 } });
-    expect(stored).toMatchObject({ caption: 'Photo 7 (fixed)', views: 99 });
-    expect(stored.editDate).toEqual(dateOf(500));
+    expect(stored).toMatchObject({ caption: original.caption, views: original.views });
+    expect(stored.editDate).toEqual(original.editDate);
     expect(await prisma.media.count()).toBe(1);
     expect(
       (await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } })).processedMessages,
@@ -411,7 +412,11 @@ describe('ImportRunner', () => {
     const data = await newJob(channel);
 
     await expect(runner.run(data)).rejects.toBeInstanceOf(ChatProtectedError);
-    expect(await channelOf(channel)).toMatchObject({ isProtected: true, syncEnabled: false });
+    expect(await channelOf(channel)).toMatchObject({
+      isProtected: true,
+      syncEnabled: false,
+      syncNote: SYNC_NOTES.protected,
+    });
     expect(await prisma.telegramDialog.findFirstOrThrow()).toMatchObject({ isProtected: true });
     expect(api.getHistoryPage).not.toHaveBeenCalled();
     expect(await prisma.message.count()).toBe(0);
@@ -446,6 +451,8 @@ describe('ImportRunner', () => {
     expect(oldGroup).toMatchObject({
       title: 'Study group (before upgrade)',
       type: 'GROUP',
+      // Frozen: an upgraded group gets no new messages.
+      syncEnabled: false,
       migratedToChannelId: channel.id,
       headMessageId: 130,
       backfillCursorId: 1,
@@ -506,6 +513,98 @@ describe('ImportRunner', () => {
       headMessageId: 5,
       backfillCursorId: 1,
       backfillComplete: true,
+    });
+  });
+
+  describe('syncs', () => {
+    /** A channel whose archive holds messages 51…100 of its chat (history older than 51 missing). */
+    async function archivedChannel(data: Partial<Channel> = {}): Promise<Channel> {
+      const channel = await addChannel();
+      return prisma.channel.update({
+        where: { id: channel.id },
+        data: {
+          headMessageId: 100,
+          backfillCursorId: 51,
+          backfillComplete: false,
+          lastSyncedAt: new Date('2026-01-01T00:00:00Z'),
+          ...data,
+        },
+      });
+    }
+
+    async function syncJob(channel: Channel): Promise<ImportJobData> {
+      const job = await prisma.importJob.create({
+        data: { channelId: channel.id, type: 'SYNC', runSeq: 1 },
+      });
+      return { importJobId: job.id, runSeq: 1 };
+    }
+
+    it('reads only the messages newer than the archive, with an estimate', async () => {
+      const { runner, chats, api } = await setup();
+      chats.addChat(chatInfo(CHAT_ID), history(CHAT_ID, 115));
+      const channel = await archivedChannel();
+      const data = await syncJob(channel);
+
+      await expect(runner.run(data)).resolves.toBe('completed');
+
+      // The missing older history stays missing: a sync never reads it.
+      expect(await storedIds(channel)).toEqual(range(101, 115));
+      expect(await channelOf(channel)).toMatchObject({
+        headMessageId: 115,
+        backfillCursorId: 51,
+        backfillComplete: false,
+      });
+      expect((await channelOf(channel)).lastSyncedAt?.getTime()).toBeGreaterThan(
+        Date.parse('2026-01-01T00:00:00Z'),
+      );
+      expect(await jobOf(data)).toMatchObject({
+        status: 'COMPLETED',
+        processedMessages: 15,
+        totalMessages: 15,
+        totalMedia: 1,
+      });
+      // One newest-message request for the estimate; nothing below the archive.
+      expect(api.getHistoryPage).toHaveBeenCalledExactlyOnceWith(CHAT_ID, { limit: 1 });
+    });
+
+    it('keeps the estimate its creator gave, and completes at once when nothing is new', async () => {
+      const { runner, chats, api } = await setup();
+      chats.addChat(chatInfo(CHAT_ID), history(CHAT_ID, 100));
+      const channel = await archivedChannel();
+      const data = await syncJob(channel);
+      await prisma.importJob.update({
+        where: { id: data.importJobId },
+        data: { totalMessages: 3 },
+      });
+
+      await expect(runner.run(data)).resolves.toBe('completed');
+      expect(await jobOf(data)).toMatchObject({ processedMessages: 0, totalMessages: 0 });
+      expect(api.getHistoryPage).not.toHaveBeenCalled();
+      expect(api.getNewerMessages).toHaveBeenCalledExactlyOnceWith(CHAT_ID, '100', 100);
+    });
+
+    it('asks for the topic names again when new messages sit in a topic it does not know', async () => {
+      const { runner, chats } = await setup();
+      const inTopic = (id: number, topic: number) =>
+        textMessage(CHAT_ID, id, { threadId: String(topic) });
+      chats.addChat(chatInfo(CHAT_ID, { type: 'SUPERGROUP', isForum: true }), [
+        ...history(CHAT_ID, 100),
+        inTopic(101, 5),
+      ]);
+      const readAt = new Date('2026-09-01T00:00:00Z');
+      const channel = await archivedChannel({ isForum: true, topicsRefreshedAt: readAt });
+      await prisma.forumTopic.create({
+        data: { channelId: channel.id, topicId: 5, title: 'Lesson 5' },
+      });
+
+      await runner.run(await syncJob(channel));
+      // Topic 5 is known: nothing to read again.
+      expect((await channelOf(channel)).topicsRefreshedAt).toEqual(readAt);
+
+      await prisma.importJob.updateMany({ data: { status: 'COMPLETED' } });
+      chats.post(CHAT_ID, inTopic(102, 5), inTopic(103, 9));
+      await runner.run(await syncJob(await channelOf(channel)));
+      expect((await channelOf(channel)).topicsRefreshedAt).toBeNull();
     });
   });
 });

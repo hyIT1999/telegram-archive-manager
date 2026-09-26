@@ -1,35 +1,30 @@
-import {
-  DestroyRef,
-  Injectable,
-  InjectionToken,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { DestroyRef, Injectable, InjectionToken, computed, inject, signal } from '@angular/core';
 import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { finalize } from 'rxjs';
+import { filter, finalize } from 'rxjs';
+import { LiveEvents } from '../../core/live/live-events';
+import { liveRefresh } from '../../core/live/live-refresh';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { type ImportJobDto, toApiError } from '../../shared/models';
-import { isMoving } from './import-labels';
+import { isMoving, isSync } from './import-labels';
 import { type ImportJobAction, ImportsApi } from './imports-api';
 
 export interface ImportPolling {
-  /** Re-read a job this often while it is queued or running. */
+  /** Re-read a job this often while it is queued or running (and live updates are off). */
   readonly jobMs: number;
-  /** Re-read the job list this often while one of its jobs is queued or running. */
+  /** Re-read the job list this often while one of its jobs moves (and live updates are off). */
   readonly listMs: number;
 }
 
-/** Polling until live progress over server-sent events arrives (Phase 7). */
+/** Polling while live updates cannot arrive (a proxy that holds the stream back, say). */
 export const IMPORT_POLLING = new InjectionToken<ImportPolling>('IMPORT_POLLING', {
   providedIn: 'root',
   factory: () => ({ jobMs: 2_000, listMs: 5_000 }),
 });
 
 /**
- * One import job as a page shows it: loaded by id, re-read while it moves, and paused, resumed
- * or cancelled from there. Each page provides its own instance, so polling stops when it is left.
+ * One import or sync job as a page shows it: loaded by id, followed through live updates (or by
+ * polling while they cannot arrive), and paused, resumed or cancelled from there. Each page
+ * provides its own instance, so following stops when it is left.
  */
 @Injectable()
 export class ImportJobWatch {
@@ -56,19 +51,22 @@ export class ImportJobWatch {
   readonly actionError = signal<string | null>(null);
 
   constructor() {
-    effect((onCleanup) => {
-      const job = this.job();
-      if (!job || !isMoving(job) || this.resource.isLoading()) {
-        return;
-      }
-      const timer = setTimeout(() => {
-        // An action may have settled the job since the timer was set.
-        const current = this.job();
-        if (current && isMoving(current)) {
-          this.resource.reload();
-        }
-      }, this.polling.jobMs);
-      onCleanup(() => clearTimeout(timer));
+    // Every committed change arrives as the whole job.
+    inject(LiveEvents)
+      .on('import.job')
+      .pipe(
+        filter(({ job }) => job.id === this.id()),
+        takeUntilDestroyed(),
+      )
+      .subscribe(({ job }) => this.resource.set(job));
+    liveRefresh({
+      reload: () => this.resource.reload(),
+      loading: () => this.resource.isLoading(),
+      active: () => {
+        const job = this.job();
+        return job !== undefined && isMoving(job);
+      },
+      poll: (live) => (live ? null : this.polling.jobMs),
     });
   }
 
@@ -76,20 +74,30 @@ export class ImportJobWatch {
     this.resource.reload();
   }
 
-  /** Pauses or resumes at once; cancelling asks first, because a cancelled import cannot resume. */
+  /** Pauses or resumes at once; cancelling asks first, because a cancelled job cannot resume. */
   async request(action: ImportJobAction): Promise<void> {
     const job = this.job();
     if (!job || this.busy()) {
       return;
     }
     if (action === 'cancel') {
-      const confirmed = await this.confirm.ask({
-        title: 'Cancel this import?',
-        message: `Messages of ${job.channel.title} imported so far stay in the archive. A cancelled import cannot be resumed; start a new one to continue later.`,
-        confirmLabel: 'Cancel import',
-        cancelLabel: 'Keep importing',
-        destructive: true,
-      });
+      const confirmed = await this.confirm.ask(
+        isSync(job)
+          ? {
+              title: 'Cancel this sync?',
+              message: `New messages of ${job.channel.title} read so far stay in the archive. The next sync reads the rest.`,
+              confirmLabel: 'Cancel sync',
+              cancelLabel: 'Keep syncing',
+              destructive: true,
+            }
+          : {
+              title: 'Cancel this import?',
+              message: `Messages of ${job.channel.title} imported so far stay in the archive. A cancelled import cannot be resumed; start a new one to continue later.`,
+              confirmLabel: 'Cancel import',
+              cancelLabel: 'Keep importing',
+              destructive: true,
+            },
+      );
       if (!confirmed) {
         return;
       }

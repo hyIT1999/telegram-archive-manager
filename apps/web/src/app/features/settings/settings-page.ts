@@ -2,24 +2,24 @@ import { Component, inject } from '@angular/core';
 import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-toggle';
 import { MatIcon } from '@angular/material/icon';
 import { THEME_OPTIONS, type ThemeMode, ThemeService } from '../../core/services/theme-service';
-import { EmptyState } from '../../shared/components/empty-state/empty-state';
 import { PageHeader } from '../../shared/components/page-header/page-header';
 import { StorageLocationList } from '../storage/storage-location-list';
 import { TelegramConnect } from '../telegram/telegram-connect';
 import { TelegramSession } from '../telegram/telegram-session';
 import { DownloadSettingsPanel } from './download-settings';
+import { SyncSettingsPanel } from './sync-settings';
 
 @Component({
   selector: 'app-settings-page',
   providers: [TelegramSession],
   imports: [
     DownloadSettingsPanel,
-    EmptyState,
     MatButtonToggle,
     MatButtonToggleGroup,
     MatIcon,
     PageHeader,
     StorageLocationList,
+    SyncSettingsPanel,
     TelegramConnect,
   ],
   template: `
@@ -56,6 +56,16 @@ import { DownloadSettingsPanel } from './download-settings';
       <app-download-settings />
     </section>
 
+    <section class="surface-card panel" aria-labelledby="sync-title">
+      <h2 id="sync-title" class="panel-title">Sync</h2>
+      <p class="panel-hint">
+        Channels that sync get their new messages as soon as Telegram announces them. They are also
+        checked on this schedule, which catches what arrived while the worker was stopped. Each
+        channel switches its sync on or off on its page.
+      </p>
+      <app-sync-settings />
+    </section>
+
     <section class="surface-card panel" aria-labelledby="appearance-title">
       <h2 id="appearance-title" class="panel-title">Appearance</h2>
       <p class="panel-hint">Saved in this browser.</p>
@@ -72,15 +82,6 @@ import { DownloadSettingsPanel } from './download-settings';
           </mat-button-toggle>
         }
       </mat-button-toggle-group>
-    </section>
-
-    <section class="surface-card" aria-label="Sync settings">
-      <app-empty-state
-        icon="sync"
-        note="Arrives in Phase 7"
-        title="The sync schedule is on its way"
-        message="How often channels are checked for new messages becomes configurable here in Phase 7."
-      />
     </section>
   `,
   styles: `

@@ -16,7 +16,9 @@ import {
   makeTopic,
   makeTopicList,
 } from '../../../testing/fixtures';
-import { nextRequest } from '../../../testing/http';
+import { nextJobList, nextRequest } from '../../../testing/http';
+import { FakeEventSources, provideFakeLiveEvents } from '../../../testing/live';
+import { LiveEvents } from '../../core/live/live-events';
 import { DOWNLOAD_ENDPOINTS, DOWNLOAD_POLLING } from '../../features/downloads/downloads-api';
 import { IMPORT_POLLING } from '../../features/imports/import-job-watch';
 import { IMPORT_ENDPOINTS } from '../../features/imports/imports-api';
@@ -36,10 +38,14 @@ class ImportJobStub {}
 
 describe('ChannelDetailPage', () => {
   let http: HttpTestingController;
+  /** Live updates streams, opened only by tests that connect. */
+  let sources: FakeEventSources;
 
   beforeEach(() => {
+    sources = new FakeEventSources();
     TestBed.configureTestingModule({
       providers: [
+        ...provideFakeLiveEvents(sources),
         provideRouter(
           [
             { path: 'channels/:id', component: ChannelDetailPage },
@@ -118,7 +124,8 @@ describe('ChannelDetailPage', () => {
     page.querySelector<HTMLButtonElement>('app-error-state button')?.click();
     TestBed.tick();
     http.expectOne(`/api/channels/${channel.id}`).flush(channel);
-    (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+    (await nextJobList(http, 'IMPORT')).flush(makePage([]));
+    (await nextJobList(http, 'SYNC')).flush(makePage([]));
     (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(makeChannelDownloads());
     await answerLibrary();
     await harness.fixture.whenStable();
@@ -130,10 +137,11 @@ describe('ChannelDetailPage', () => {
       const channel = makeChannel({ isProtected: false, ...overrides });
       const harness = await open(channel.id);
       http.expectOne(`/api/channels/${channel.id}`).flush(channel);
-      const list = await nextRequest(http, IMPORT_ENDPOINTS.jobs);
+      const list = await nextJobList(http, 'IMPORT');
       expect(list.request.params.get('channelId')).toBe(channel.id);
       expect(list.request.params.get('limit')).toBe('1');
       list.flush(makePage(jobs));
+      (await nextJobList(http, 'SYNC')).flush(makePage([]));
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id }),
       );
@@ -222,7 +230,8 @@ describe('ChannelDetailPage', () => {
       const channel = makeChannel({ isProtected: false, ...overrides });
       const harness = await open(channel.id);
       http.expectOne(`/api/channels/${channel.id}`).flush(channel);
-      (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+      (await nextJobList(http, 'IMPORT')).flush(makePage([]));
+      (await nextJobList(http, 'SYNC')).flush(makePage([]));
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id, ...downloads }),
       );
@@ -317,12 +326,179 @@ describe('ChannelDetailPage', () => {
     });
   });
 
+  describe('sync panel', () => {
+    async function openWithSyncs(syncs: ImportJobDto[], overrides: Partial<ChannelDto> = {}) {
+      const channel = makeChannel({ isProtected: false, ...overrides });
+      const harness = await open(channel.id);
+      http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      (await nextJobList(http, 'IMPORT')).flush(makePage([]));
+      const list = await nextJobList(http, 'SYNC');
+      expect(list.request.params.get('channelId')).toBe(channel.id);
+      list.flush(makePage(syncs));
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
+      await answerLibrary();
+      await harness.fixture.whenStable();
+      const page = harness.routeNativeElement as HTMLElement;
+      return {
+        channel,
+        harness,
+        panel: page.querySelector('app-channel-sync-panel') as HTMLElement,
+      };
+    }
+
+    const syncNowButton = (panel: HTMLElement) =>
+      Array.from(panel.querySelectorAll<HTMLButtonElement>('button')).find((button) =>
+        button.textContent?.includes('Sync now'),
+      );
+
+    it('shows the latest sync, switches sync off and syncs now', async () => {
+      const done = makeImportJob({
+        type: 'SYNC',
+        origin: 'SCHEDULE',
+        status: 'COMPLETED',
+        processedMessages: 12,
+        totalMessages: 12,
+        completedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+      });
+      const { channel, harness, panel } = await openWithSyncs([done], {
+        lastSyncedAt: new Date(Date.now() - 5 * 60_000).toISOString(),
+      });
+      expect(panel.querySelector('h2')?.textContent).toContain('Sync');
+      expect(panel.textContent).toContain('New messages are archived as Telegram announces them');
+      expect(panel.textContent).toContain('5 minutes ago');
+      expect(panel.querySelector('.latest')?.textContent).toContain('12 new messages');
+      expect(panel.querySelector(`a[href="/imports/${done.id}"]`)).not.toBeNull();
+
+      panel.querySelector<HTMLButtonElement>('mat-slide-toggle button')?.click();
+      TestBed.tick();
+      const update = await nextRequest(http, `/api/channels/${channel.id}`);
+      expect(update.request.body).toEqual({ syncEnabled: false });
+      update.flush({ ...channel, syncEnabled: false });
+      await harness.fixture.whenStable();
+      expect(panel.textContent).toContain('New messages wait until you sync the channel.');
+
+      syncNowButton(panel)?.click();
+      const sync = await nextRequest(http, IMPORT_ENDPOINTS.sync(channel.id));
+      expect(sync.request.method).toBe('POST');
+      const queued = makeImportJob({
+        type: 'SYNC',
+        channelId: channel.id,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+      sync.flush(queued, { status: 202, statusText: 'Accepted' });
+      await harness.fixture.whenStable();
+      expect(panel.querySelector('.latest')?.textContent).toContain('Queued');
+      expect(syncNowButton(panel)?.disabled).toBe(true);
+    });
+
+    it('explains why sync stopped by itself, and what a refused sync needs', async () => {
+      const { channel, harness, panel } = await openWithSyncs([], {
+        syncEnabled: false,
+        syncNote: 'This account can no longer read the chat',
+        lastSyncedAt: null,
+      });
+      expect(panel.textContent).toContain('Sync stopped by itself');
+      expect(panel.textContent).toContain('This account can no longer read the chat');
+      expect(panel.textContent).toContain('Never');
+
+      syncNowButton(panel)?.click();
+      flushError(
+        await nextRequest(http, IMPORT_ENDPOINTS.sync(channel.id)),
+        409,
+        'An import of this channel is unfinished. Sync once it is done.',
+        'IMPORT_ACTIVE',
+        { jobId: '0199a0b1-0000-7000-8000-a00000000999' },
+      );
+      await harness.fixture.whenStable();
+      expect(panel.textContent).toContain('Sync once it is done.');
+      expect(
+        panel.querySelector('a[href="/imports/0199a0b1-0000-7000-8000-a00000000999"]'),
+      ).not.toBeNull();
+    });
+
+    it('asks to import a channel first', async () => {
+      const { panel } = await openWithSyncs([], { headMessageId: null, lastSyncedAt: null });
+      expect(panel.textContent).toContain('Import its history first');
+      expect(syncNowButton(panel)?.disabled).toBe(true);
+    });
+  });
+
+  describe('live updates', () => {
+    it('follows the import and sync of the channel as they change', async () => {
+      const live = TestBed.inject(LiveEvents);
+      const disconnect = live.connect();
+      sources.ready();
+      const channel = makeChannel({ isProtected: false });
+      const harness = await open(channel.id);
+      http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      (await nextJobList(http, 'IMPORT')).flush(makePage([]));
+      (await nextJobList(http, 'SYNC')).flush(makePage([]));
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
+      await answerLibrary();
+      await harness.fixture.whenStable();
+      const page = harness.routeNativeElement as HTMLElement;
+
+      const sync = makeImportJob({
+        type: 'SYNC',
+        origin: 'TELEGRAM_UPDATE',
+        channelId: channel.id,
+        status: 'RUNNING',
+        processedMessages: 2,
+        totalMessages: 5,
+      });
+      sources.latest.send({ type: 'import.job', job: sync });
+      // Another channel's job changes nothing here.
+      sources.latest.send({ type: 'import.job', job: makeImportJob({ status: 'RUNNING' }) });
+      await harness.fixture.whenStable();
+      expect(page.querySelector('app-channel-sync-panel .latest')?.textContent).toContain(
+        '2 of about 5 new messages',
+      );
+      expect(page.querySelector('app-channel-import-panel')?.textContent).toContain(
+        'Nothing of this chat is in the archive yet.',
+      );
+
+      sources.latest.send({
+        type: 'import.job',
+        job: {
+          ...sync,
+          status: 'COMPLETED',
+          processedMessages: 5,
+          totalMessages: 5,
+          completedAt: new Date().toISOString(),
+        },
+      });
+      await harness.fixture.whenStable();
+      expect(page.querySelector('app-channel-sync-panel .latest')?.textContent).toContain(
+        '5 new messages',
+      );
+      // Synced just now, before the channel is read again.
+      expect(page.querySelector('app-channel-sync-panel .facts')?.textContent).toContain(
+        'just now',
+      );
+
+      // Its downloads changed: the panel reads them again.
+      sources.latest.send({ type: 'downloads.changed', channelId: channel.id });
+      (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
+        makeChannelDownloads({ channelId: channel.id }),
+      );
+      // And the channel itself (its numbers).
+      http.expectOne(`/api/channels/${channel.id}`).flush(channel);
+      disconnect();
+    });
+  });
+
   describe('library and topics', () => {
     async function openBrowsable(overrides: Partial<ChannelDto> = {}) {
       const channel = makeChannel({ isProtected: false, ...overrides });
       const harness = await open(channel.id);
       http.expectOne(`/api/channels/${channel.id}`).flush(channel);
-      (await nextRequest(http, IMPORT_ENDPOINTS.jobs)).flush(makePage([]));
+      (await nextJobList(http, 'IMPORT')).flush(makePage([]));
+      (await nextJobList(http, 'SYNC')).flush(makePage([]));
       (await nextRequest(http, DOWNLOAD_ENDPOINTS.channel(channel.id))).flush(
         makeChannelDownloads({ channelId: channel.id }),
       );

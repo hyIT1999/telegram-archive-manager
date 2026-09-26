@@ -42,10 +42,10 @@
 <section class="surface-card panel" aria-labelledby="wizard-step-title">
   @switch (step()) {
     @case (0) {
-      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">
-        Connect Telegram
-      </h2>
-      <p class="panel-hint">The archive reads Telegram with your own account, through the worker.</p>
+      <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Connect Telegram</h2>
+      <p class="panel-hint">
+        The archive reads Telegram with your own account, through the worker.
+      </p>
       <app-telegram-connect />
       @if (session.ready()) {
         <div class="panel-actions">
@@ -96,8 +96,8 @@
             tone="success"
             [title]="result.created ? 'Added to your archive' : 'Already in your archive'"
           >
-            {{ result.channel.title }} is a channel of your archive. Next, choose where its media
-            is saved.
+            {{ result.channel.title }} is a channel of your archive. Next, choose where its media is
+            saved.
           </app-notice>
           <div class="panel-actions">
             <button matButton type="button" (click)="pickAnother()">Add another chat</button>
@@ -135,9 +135,9 @@
       <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Storage location</h2>
       @if (channel(); as item) {
         <p class="panel-hint">
-          Where the media of <strong>{{ item.title }}</strong> is saved: in its own folder,
-          grouped by month, with the original file names. You can add a folder on this computer
-          or connect Google Drive.
+          Where the media of <strong>{{ item.title }}</strong> is saved: in its own folder, grouped
+          by month, with the original file names. You can add a folder on this computer or connect
+          Google Drive.
         </p>
         <app-storage-location-list selectable [(selectedId)]="storageChoice" />
 
@@ -177,7 +177,9 @@
     @case (4) {
       <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Import mode</h2>
       @if (channel(); as item) {
-        <p class="panel-hint">Which messages of <strong>{{ item.title }}</strong> to import.</p>
+        <p class="panel-hint">
+          Which messages of <strong>{{ item.title }}</strong> to import.
+        </p>
         <app-import-mode-picker [(choice)]="importChoice" />
         <div class="panel-actions">
           <button matButton type="button" (click)="open(3)">Back</button>
@@ -233,10 +235,29 @@
         @if (downloadsError(); as message) {
           <app-notice tone="error">{{ message }}</app-notice>
         }
+        <div class="sync-switch">
+          <mat-slide-toggle
+            [checked]="item.syncEnabled"
+            [disabled]="savingSync()"
+            (change)="setSyncEnabled($event)"
+          >
+            Keep it up to date
+          </mat-slide-toggle>
+          <p class="panel-hint">
+            @if (item.syncEnabled) {
+              After the import, new messages are archived as Telegram announces them.
+            } @else {
+              New messages wait until you sync the channel from its page.
+            }
+          </p>
+        </div>
+        @if (syncError(); as message) {
+          <app-notice tone="error">{{ message }}</app-notice>
+        }
         <app-notice tone="info" title="What happens">
-          The worker reads the history page by page into the archive, and can be paused, resumed
-          or cancelled at any time; whatever it read stays saved. Media files are recorded with
-          their messages and downloaded on their own schedule, so the import finishes first.
+          The worker reads the history page by page into the archive, and can be paused, resumed or
+          cancelled at any time; whatever it read stays saved. Media files are recorded with their
+          messages and downloaded on their own schedule, so the import finishes first.
         </app-notice>
 
         @if (startError(); as message) {
@@ -276,7 +297,9 @@
       <h2 #stepTitle id="wizard-step-title" class="panel-title" tabindex="-1">Progress</h2>
       @if (job(); as current) {
         @if (started()?.created === false) {
-          <app-notice tone="info">This import was already under way; here is where it stands.</app-notice>
+          <app-notice tone="info"
+            >This import was already under way; here is where it stands.</app-notice
+          >
         }
         <app-import-progress
           actions

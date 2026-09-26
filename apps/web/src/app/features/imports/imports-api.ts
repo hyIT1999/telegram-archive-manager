@@ -2,7 +2,13 @@ import { HttpClient, HttpContext, HttpParams, HttpStatusCode } from '@angular/co
 import { Injectable, inject } from '@angular/core';
 import { type Observable, map } from 'rxjs';
 import { ERRORS_SHOWN_INLINE } from '../../core/interceptors/server-error-interceptor';
-import type { ImportJobDto, ImportRequest, JobStatus, Page } from '../../shared/models';
+import type {
+  ImportJobDto,
+  ImportJobType,
+  ImportRequest,
+  JobStatus,
+  Page,
+} from '../../shared/models';
 
 export type ImportJobAction = 'pause' | 'resume' | 'cancel';
 
@@ -12,6 +18,7 @@ export const IMPORT_ENDPOINTS = {
   action: (id: string, action: ImportJobAction) =>
     `/api/import-jobs/${encodeURIComponent(id)}/${action}`,
   start: (channelId: string) => `/api/channels/${encodeURIComponent(channelId)}/import`,
+  sync: (channelId: string) => `/api/channels/${encodeURIComponent(channelId)}/sync`,
 } as const;
 
 export interface ImportJobListParams {
@@ -19,11 +26,12 @@ export interface ImportJobListParams {
   readonly cursor?: string | null;
   readonly channelId?: string;
   readonly status?: readonly JobStatus[];
+  readonly type?: ImportJobType;
 }
 
 export interface StartedImport {
   readonly job: ImportJobDto;
-  /** False when the same import was already unfinished (the request is idempotent). */
+  /** False when the same job was already unfinished (the request is idempotent). */
   readonly created: boolean;
 }
 
@@ -39,19 +47,12 @@ export class ImportsApi {
 
   /** Starts importing a channel's history (`POST /api/channels/:id/import`). */
   start(channelId: string, request: ImportRequest): Observable<StartedImport> {
-    return this.http
-      .post<ImportJobDto>(IMPORT_ENDPOINTS.start(channelId), request, {
-        observe: 'response',
-        ...inlineErrors(),
-      })
-      .pipe(
-        map((response) => {
-          if (!response.body) {
-            throw new Error('The server answered without the import job');
-          }
-          return { job: response.body, created: response.status === HttpStatusCode.Accepted };
-        }),
-      );
+    return this.startJob(IMPORT_ENDPOINTS.start(channelId), request);
+  }
+
+  /** Reads the messages posted since the archive's newest one (`POST /api/channels/:id/sync`). */
+  sync(channelId: string): Observable<StartedImport> {
+    return this.startJob(IMPORT_ENDPOINTS.sync(channelId), {});
   }
 
   /** Newest first, keyset-paginated by `nextCursor`. */
@@ -69,6 +70,9 @@ export class ImportsApi {
     if (params.status?.length) {
       httpParams = httpParams.set('status', params.status.join(','));
     }
+    if (params.type) {
+      httpParams = httpParams.set('type', params.type);
+    }
     return this.http.get<Page<ImportJobDto>>(IMPORT_ENDPOINTS.jobs, { params: httpParams });
   }
 
@@ -79,5 +83,17 @@ export class ImportsApi {
   /** Pauses, resumes or cancels a job; answers with the job as it stands afterwards. */
   act(id: string, action: ImportJobAction): Observable<ImportJobDto> {
     return this.http.post<ImportJobDto>(IMPORT_ENDPOINTS.action(id, action), null, inlineErrors());
+  }
+
+  /** 202 means a new job, 200 the same job that was already on its way. */
+  private startJob(url: string, body: object): Observable<StartedImport> {
+    return this.http.post<ImportJobDto>(url, body, { observe: 'response', ...inlineErrors() }).pipe(
+      map((response) => {
+        if (!response.body) {
+          throw new Error('The server answered without the job');
+        }
+        return { job: response.body, created: response.status === HttpStatusCode.Accepted };
+      }),
+    );
   }
 }

@@ -5,6 +5,8 @@ import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import { provideRouter } from '@angular/router';
 import { flushError, makeImportJob, makePage } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
+import { FakeEventSources, provideFakeLiveEvents } from '../../../testing/live';
+import { LiveEvents } from '../../core/live/live-events';
 import { IMPORT_POLLING } from './import-job-watch';
 import { IMPORT_PAGE_SIZE, ImportListPage } from './import-list-page';
 import { IMPORT_ENDPOINTS } from './imports-api';
@@ -12,10 +14,13 @@ import { IMPORT_ENDPOINTS } from './imports-api';
 describe('ImportListPage', () => {
   let fixture: ComponentFixture<ImportListPage>;
   let http: HttpTestingController;
+  let sources: FakeEventSources;
 
   beforeEach(() => {
+    sources = new FakeEventSources();
     TestBed.configureTestingModule({
       providers: [
+        ...provideFakeLiveEvents(sources),
         provideRouter([]),
         provideHttpClient(),
         provideHttpClientTesting(),
@@ -107,5 +112,68 @@ describe('ImportListPage', () => {
     (await listRequest()).flush(makePage([makeImportJob({ status: 'FAILED' })]));
     await vi.waitFor(() => expect(rows()).toHaveLength(1));
     expect(text(rows()[0])).toContain('Failed');
+  });
+  it('keeps rows current through live updates and puts a new job on top', async () => {
+    TestBed.inject(LiveEvents).connect();
+    sources.ready();
+    const running = makeImportJob({ createdAt: '2026-09-24T09:00:00.000Z' });
+    const done = makeImportJob({ status: 'COMPLETED', createdAt: '2026-09-23T09:00:00.000Z' });
+    (await listRequest()).flush(makePage([running, done]));
+    await fixture.whenStable();
+
+    sources.latest.send({ type: 'import.job', job: { ...running, processedMessages: 300 } });
+    const sync = makeImportJob({
+      type: 'SYNC',
+      origin: 'SCHEDULE',
+      status: 'PENDING',
+      createdAt: '2026-09-25T09:00:00.000Z',
+    });
+    sources.latest.send({ type: 'import.job', job: sync });
+    // An old job the list does not show stays out of it.
+    sources.latest.send({
+      type: 'import.job',
+      job: makeImportJob({ createdAt: '2026-01-01T00:00:00.000Z' }),
+    });
+    await fixture.whenStable();
+
+    expect(rows().map((row) => row.getAttribute('href'))).toEqual([
+      `/imports/${sync.id}`,
+      `/imports/${running.id}`,
+      `/imports/${done.id}`,
+    ]);
+    expect(text(rows()[0])).toContain('Sync · Scheduled check');
+    expect(text(rows()[1])).toContain('300 of about 500 messages');
+    // Live: the list is not polled although a job runs.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    http.expectNone(IMPORT_ENDPOINTS.jobs);
+  });
+
+  it('shows imports or syncs only', async () => {
+    const imported = makeImportJob({ status: 'COMPLETED' });
+    const synced = makeImportJob({ type: 'SYNC', status: 'COMPLETED', processedMessages: 0 });
+    const all = await listRequest();
+    expect(all.request.params.has('type')).toBe(false);
+    all.flush(makePage([synced, imported]));
+    await fixture.whenStable();
+    expect(text(rows()[0])).toContain('No new messages');
+
+    const syncsToggle = Array.from(
+      page().querySelectorAll<HTMLButtonElement>('mat-button-toggle button'),
+    ).find((button) => button.textContent?.includes('Syncs'));
+    syncsToggle?.click();
+    const syncs = await listRequest();
+    expect(syncs.request.params.get('type')).toBe('SYNC');
+    syncs.flush(makePage([synced]));
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+
+    // An import changing meanwhile does not belong here.
+    TestBed.inject(LiveEvents).connect();
+    sources.ready();
+    sources.latest.send({
+      type: 'import.job',
+      job: { ...imported, createdAt: '2027-01-01T00:00:00.000Z' },
+    });
+    await fixture.whenStable();
+    expect(rows()).toHaveLength(1);
   });
 });

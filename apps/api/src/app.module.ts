@@ -9,6 +9,7 @@ import { ChannelsModule } from './channels/channels.module.js';
 import { createValidationPipe } from './common/validation/validation.pipe.js';
 import { configModuleOptions } from './config/config-module.js';
 import type { Env } from './config/env.js';
+import { EventsModule } from './events/events.module.js';
 import { FavoritesModule } from './favorites/favorites.module.js';
 import { HealthModule } from './health/health.module.js';
 import { ImportsModule } from './imports/imports.module.js';
@@ -43,6 +44,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     AuthModule,
     HealthModule,
     ChannelsModule,
+    EventsModule,
     FavoritesModule,
     ImportsModule,
     MediaModule,
