@@ -94,8 +94,9 @@ echo "==> /api/stats";    curl -fsS -b "$COOKIES" "${BASE}/api/stats"; echo
 echo "==> /api/channels"; curl -fsS -b "$COOKIES" "${BASE}/api/channels"; echo
 
 echo "==> Live updates start with a ready event through nginx"
+# The event's type travels in its data (the stream sends no "event:" lines).
 events="$(curl -sN --max-time 5 -b "$COOKIES" "${BASE}/api/events" || true)"
-grep -q '^event: ready' <<<"$events" || fail "no ready event on /api/events"
+grep -qF 'data: {"type":"ready"}' <<<"$events" || fail "no ready event on /api/events"
 
 echo "==> A cross-site POST is rejected"
 code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Sec-Fetch-Site: cross-site' \
