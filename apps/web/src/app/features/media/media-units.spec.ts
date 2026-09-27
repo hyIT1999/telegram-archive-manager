@@ -115,7 +115,7 @@ describe('PlaybackMemory', () => {
 });
 
 describe('FeedStateCache', () => {
-  const snapshot = { items: [], nextCursor: 'next', total: 3 };
+  const snapshot = { items: [], nextCursor: 'next', total: 3, totalCapped: false };
 
   it('keeps the last feeds for ten minutes', () => {
     const cache = new FeedStateCache();

@@ -12,7 +12,8 @@
     "packages/telegram",
     "apps/api",
     "apps/worker",
-    "apps/web"
+    "apps/web",
+    "apps/e2e"
   ],
   "engines": {
     "node": "^24.15.0 || >=26.0.0"
@@ -39,11 +40,24 @@
     "test": "npm run build:packages && npm run test --workspaces --if-present",
     "test:integration": "npm run build:packages && npm run test:integration --workspaces --if-present",
     "dev": "npm run build:packages && tsc -b apps/api apps/worker && concurrently -k -n tsc,api,worker,web -c gray,blue,magenta,green \"tsc -b -w --preserveWatchOutput apps/api apps/worker\" \"npm run dev:run -w @tam/api\" \"npm run dev:run -w @tam/worker\" \"npm run start -w @tam/web\"",
-    "user:create": "npm run user:create -w @tam/api --"
+    "prod:start": "node scripts/prod/pm2.mjs start",
+    "prod:stop": "node scripts/prod/pm2.mjs stop",
+    "prod:restart": "node scripts/prod/pm2.mjs restart",
+    "prod:status": "node scripts/prod/pm2.mjs status",
+    "prod:logs": "node scripts/prod/pm2.mjs logs",
+    "prod:update": "node scripts/prod/pm2.mjs update",
+    "prod:enable": "node scripts/prod/pm2.mjs enable",
+    "prod:disable": "node scripts/prod/pm2.mjs disable",
+    "user:create": "npm run user:create -w @tam/api --",
+    "user:reset-password": "npm run user:reset-password -w @tam/api --",
+    "test:e2e": "npm run e2e -w @tam/e2e",
+    "test:e2e:full": "npm run build && npm run test:e2e",
+    "test:coverage": "npm run build:packages && node scripts/coverage.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "~24.13.6",
+    "@vitest/coverage-v8": "4.1.11",
     "angular-eslint": "~22.5.0",
     "concurrently": "^10.0.5",
     "eslint": "~10.11.0",
@@ -57,7 +71,9 @@
     "typescript": "$typescript",
     "vitest": "$vitest",
     "prisma": "7.10.0",
-    "@prisma/client": "7.10.0"
+    "@prisma/client": "7.10.0",
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.4"
   },
   "allowScripts": {
     "argon2@0.45.1": true,

@@ -9,6 +9,10 @@ export interface StoredObjectInfo {
   contentType: string | null;
   /** SHA-256 (hex) when the backend computes one itself (Google Drive); absent otherwise. */
   sha256?: string | null;
+  /** When the object last changed, where the backend says so cheaply (local files). */
+  modifiedAt?: Date | null;
+  /** The backend's own handle of the object (a Drive file id), so a read needs no second lookup. */
+  ref?: string;
 }
 
 /** Inclusive byte range, as in an HTTP `Range: bytes=start-end` header. */
@@ -47,10 +51,13 @@ export interface StorageDriver {
   putFile(key: string, sourcePath: string, options?: PutOptions): Promise<StoredObjectInfo>;
   /** Makes `targetKey` hold the same bytes as `sourceKey` without downloading them again. */
   duplicate(sourceKey: string, targetKey: string): Promise<void>;
-  /** Null when the object does not exist. */
+  /** Null when the object does not exist (or, for a local folder, lies outside it). */
   stat(key: string): Promise<StoredObjectInfo | null>;
-  /** Streams the object, optionally a byte range (for HTTP 206 responses). */
-  openReadStream(key: string, range?: ByteRange): Promise<Readable>;
+  /**
+   * Streams the object, optionally a byte range (for HTTP 206 responses). `known` is what a
+   * stat() of the same key just returned: the driver then does not look the object up again.
+   */
+  openReadStream(key: string, range?: ByteRange, known?: StoredObjectInfo): Promise<Readable>;
   delete(key: string): Promise<void>;
   /** Absolute filesystem path for local storage (lets the api use sendFile); null otherwise. */
   localPath(key: string): string | null;

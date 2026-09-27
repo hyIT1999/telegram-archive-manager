@@ -18,7 +18,9 @@ const DEFAULT_CONTENT_TYPE = 'application/octet-stream';
 
 /** The app's own top folder in My Drive: reused if this app created it before, else created. */
 export async function ensureTopFolder(drive: GoogleDriveApi, name: string): Promise<DriveFile> {
-  return (await drive.findChild('root', name, 'folder')) ?? (await drive.createFolder('root', name));
+  return (
+    (await drive.findChild('root', name, 'folder')) ?? (await drive.createFolder('root', name))
+  );
 }
 
 /**
@@ -45,7 +47,11 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     return null;
   }
 
-  async putFile(key: string, sourcePath: string, options: PutOptions = {}): Promise<StoredObjectInfo> {
+  async putFile(
+    key: string,
+    sourcePath: string,
+    options: PutOptions = {},
+  ): Promise<StoredObjectInfo> {
     const { size } = await stat(sourcePath);
     let file: DriveFile;
     try {
@@ -60,9 +66,15 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     }
     const storedSize = file.size === undefined ? size : Number(file.size);
     if (storedSize !== size) {
-      throw new StorageIntegrityError(`Google Drive stored ${storedSize} of ${size} bytes of ${key}`);
+      throw new StorageIntegrityError(
+        `Google Drive stored ${storedSize} of ${size} bytes of ${key}`,
+      );
     }
-    if (options.sha256 && file.sha256Checksum && file.sha256Checksum.toLowerCase() !== options.sha256.toLowerCase()) {
+    if (
+      options.sha256 &&
+      file.sha256Checksum &&
+      file.sha256Checksum.toLowerCase() !== options.sha256.toLowerCase()
+    ) {
       throw new StorageIntegrityError(`The checksum of ${key} in Google Drive does not match`);
     }
     return { key, size, contentType: file.mimeType || options.contentType || null };
@@ -85,16 +97,26 @@ export class GoogleDriveStorageDriver implements StorageDriver {
   async stat(key: string): Promise<StoredObjectInfo | null> {
     const file = await this.find(key);
     return file
-      ? { key, size: Number(file.size ?? 0), contentType: file.mimeType || null, sha256: file.sha256Checksum ?? null }
+      ? {
+          key,
+          size: Number(file.size ?? 0),
+          contentType: file.mimeType || null,
+          sha256: file.sha256Checksum ?? null,
+          ref: file.id,
+        }
       : null;
   }
 
-  async openReadStream(key: string, range?: ByteRange): Promise<Readable> {
-    const file = await this.find(key);
-    if (!file) {
+  async openReadStream(
+    key: string,
+    range?: ByteRange,
+    known?: StoredObjectInfo,
+  ): Promise<Readable> {
+    const fileId = known?.ref ?? (await this.find(key))?.id;
+    if (fileId === undefined) {
       throw new StorageNotFoundError(`${key} does not exist`);
     }
-    const response = await this.drive.download(file.id, range);
+    const response = await this.drive.download(fileId, range);
     return Readable.fromWeb(response.body as unknown as WebReadableStream<Uint8Array>);
   }
 
@@ -139,7 +161,12 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     };
   }
 
-  private async upload(key: string, sourcePath: string, size: number, options: PutOptions): Promise<DriveFile> {
+  private async upload(
+    key: string,
+    sourcePath: string,
+    size: number,
+    options: PutOptions,
+  ): Promise<DriveFile> {
     const { folders, name } = this.split(key);
     const parentId = await this.folder(folders);
     const existing = await this.drive.findChild(parentId, name, 'file');
@@ -169,7 +196,9 @@ export class GoogleDriveStorageDriver implements StorageDriver {
     let parentId = this.rootFolderId;
     for (let index = 0; index < segments.length; index += 1) {
       const path = segments.slice(0, index + 1).join('/');
-      parentId = this.folderIds.get(path) ?? (await this.createOnce(path, parentId, segments[index] as string));
+      parentId =
+        this.folderIds.get(path) ??
+        (await this.createOnce(path, parentId, segments[index] as string));
     }
     return parentId;
   }

@@ -26,6 +26,7 @@ export interface SearchResult {
   /** The messages found, in order, at most `limit`. */
   hits: SearchPosition[];
   hasMore: boolean;
+  /** Matches counted up to TOTAL_COUNT_ROWS (null when not asked for). */
   total: number | null;
 }
 

@@ -38,7 +38,7 @@ describe('MessageChanges', () => {
   it('updates the feeds kept for Back and tells the open ones', () => {
     const message = makeMessage();
     const cache = TestBed.inject(FeedStateCache);
-    cache.set('feed', { items: [message], nextCursor: null, total: 1 });
+    cache.set('feed', { items: [message], nextCursor: null, total: 1, totalCapped: false });
     const changes = TestBed.inject(MessageChanges);
     const heard: MessageUpdate[] = [];
     changes.updates.subscribe((update) => heard.push(update));

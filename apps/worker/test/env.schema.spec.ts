@@ -151,7 +151,25 @@ describe('validateWorkerEnv', () => {
     expect(error.message).not.toContain('hunter2');
   });
 
-  describe('Telegram settings (optional until Phase 2)', () => {
+  it('refuses the .env.example placeholder in production only', () => {
+    const placeholder = {
+      DATABASE_URL: 'postgresql://tam:CHANGE_ME@localhost:5432/tam',
+      REDIS_URL: 'redis://:CHANGE_ME@127.0.0.1:6380/0',
+    };
+    expect(validateWorkerEnv({ ...required, ...placeholder })).toMatchObject(placeholder);
+    expect(problemsOf({ ...required, ...placeholder, NODE_ENV: 'production' })).toEqual([
+      'DATABASE_URL: still holds the CHANGE_ME placeholder from .env.example',
+      'REDIS_URL: still holds the CHANGE_ME placeholder from .env.example',
+    ]);
+  });
+
+  it('takes an absolute path for the file the heartbeat touches', () => {
+    expect(problemsOf({ ...required, WORKER_ALIVE_FILE: 'tmp/alive' })).toEqual([
+      'WORKER_ALIVE_FILE: must be an absolute path',
+    ]);
+  });
+
+  describe('Telegram settings (optional; the worker reports what is missing)', () => {
     it('accepts a complete, well-formed set', () => {
       const env = validateWorkerEnv({ ...required, ...telegram });
       expect(env).toMatchObject({ ...telegram, TELEGRAM_API_ID: 1234567 });

@@ -1,0 +1,136 @@
+@if (user(); as me) {
+  <p class="signed-in">
+    Signed in as <strong>{{ me.email }}</strong>
+    @if (me.lastLoginAt) {
+      <!-- The leading space matters: the line break after </strong> is whitespace-only, so it is dropped. -->
+      <span class="muted"> · last sign-in {{ me.lastLoginAt | date: 'medium' }}</span>
+    }
+  </p>
+}
+
+<h3 class="subtitle">Change password</h3>
+@if (submitError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+}
+<form class="password-form" [formRoot]="passwordForm">
+  <mat-form-field>
+    <mat-label>Current password</mat-label>
+    <input
+      matInput
+      autocomplete="current-password"
+      [type]="passwordsHidden() ? 'password' : 'text'"
+      [formField]="passwordForm.currentPassword"
+    />
+    <button
+      matIconButton
+      matSuffix
+      type="button"
+      [attr.aria-label]="passwordsHidden() ? 'Show passwords' : 'Hide passwords'"
+      [attr.aria-pressed]="!passwordsHidden()"
+      (click)="togglePasswordVisibility()"
+    >
+      <mat-icon>{{ passwordsHidden() ? 'visibility' : 'visibility_off' }}</mat-icon>
+    </button>
+    @if (passwordForm.currentPassword().errors()[0]; as error) {
+      <mat-error>{{ error.message }}</mat-error>
+    }
+  </mat-form-field>
+
+  <mat-form-field>
+    <mat-label>New password</mat-label>
+    <input
+      matInput
+      autocomplete="new-password"
+      [type]="passwordsHidden() ? 'password' : 'text'"
+      [formField]="passwordForm.newPassword"
+    />
+    <mat-hint>At least {{ minLength }} characters. A few unrelated words work well.</mat-hint>
+    @if (passwordForm.newPassword().errors()[0]; as error) {
+      <mat-error>{{ error.message }}</mat-error>
+    }
+  </mat-form-field>
+
+  <mat-form-field>
+    <mat-label>New password again</mat-label>
+    <input
+      matInput
+      autocomplete="new-password"
+      [type]="passwordsHidden() ? 'password' : 'text'"
+      [formField]="passwordForm.repeatPassword"
+    />
+    @if (passwordForm.repeatPassword().errors()[0]; as error) {
+      <mat-error>{{ error.message }}</mat-error>
+    }
+  </mat-form-field>
+
+  <div class="actions">
+    <button
+      matButton="filled"
+      type="submit"
+      [showProgress]="passwordForm().submitting()"
+      [disabled]="passwordForm().submitting()"
+    >
+      Change password
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="20" />
+    </button>
+    <span class="muted">Other browsers are signed out; this one stays signed in.</span>
+  </div>
+</form>
+
+<h3 class="subtitle">Signed-in browsers</h3>
+@if (sessions.error() && !sessions.hasValue()) {
+  <app-error-state
+    title="The signed-in browsers could not be loaded"
+    [message]="sessionsError()"
+    (retry)="sessions.reload()"
+  />
+} @else if (sessions.hasValue()) {
+  <ul class="sessions" aria-label="Signed-in browsers">
+    @for (session of sessions.value(); track session.id) {
+      <li class="session" [class.current]="session.current">
+        <span class="icon" aria-hidden="true">
+          <mat-icon>{{ session.current ? 'computer' : 'devices' }}</mat-icon>
+        </span>
+        <span class="text">
+          <span class="name">
+            {{ browser(session) }}
+            @if (session.current) {
+              <span class="badge">This browser</span>
+            }
+          </span>
+          <span class="meta">
+            {{ lastActive(session) }}
+            @if (session.ip) {
+              · {{ session.ip }}
+            }
+            · signed in {{ session.createdAt | date: 'mediumDate' }}
+          </span>
+        </span>
+        @if (!session.current) {
+          <button
+            matButton
+            type="button"
+            [disabled]="busySessionId() === session.id || signingOutOthers()"
+            (click)="signOut(session)"
+          >
+            Sign out
+          </button>
+        }
+      </li>
+    }
+  </ul>
+  @if (otherSessions() > 0) {
+    <button
+      matButton="tonal"
+      type="button"
+      class="sign-out-others"
+      [disabled]="signingOutOthers()"
+      (click)="signOutOthers()"
+    >
+      <mat-icon>logout</mat-icon>
+      Sign out all other browsers
+    </button>
+  }
+} @else {
+  <app-skeleton variant="line" [count]="2" label="Loading the signed-in browsers…" />
+}

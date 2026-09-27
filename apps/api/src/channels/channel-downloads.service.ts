@@ -61,12 +61,11 @@ export class ChannelDownloadsService {
     }
     const ids = await this.withOldGroup(channelId);
     const [statuses, active, settings, location] = await Promise.all([
+      // From download_jobs_channel_id_status_size_idx alone, however many files the channel has.
       this.prisma.$queryRaw<StatusRow[]>`
-        SELECT d.status, count(*)::int AS files, coalesce(sum(m.size), 0)::text AS bytes
+        SELECT d.status, count(*)::int AS files, coalesce(sum(d.size), 0)::text AS bytes
         FROM download_jobs d
-        JOIN media m ON m.id = d.media_id
-        JOIN messages g ON g.id = m.message_id
-        WHERE g.channel_id = ANY(${ids}::uuid[])
+        WHERE d.channel_id = ANY(${ids}::uuid[])
         GROUP BY d.status`,
       this.prisma.$queryRaw<ActiveDownloadRow[]>`
         SELECT m.id, m.filename, m.mime_type, m.type, m.size::text AS size,
@@ -75,7 +74,7 @@ export class ChannelDownloadsService {
         FROM download_jobs d
         JOIN media m ON m.id = d.media_id
         JOIN messages g ON g.id = m.message_id
-        WHERE g.channel_id = ANY(${ids}::uuid[]) AND d.status = 'ACTIVE'
+        WHERE d.channel_id = ANY(${ids}::uuid[]) AND d.status = 'ACTIVE'
         ORDER BY d.updated_at DESC
         LIMIT ${ACTIVE_LIMIT}`,
       loadDownloadSettings(this.prisma),
@@ -133,9 +132,7 @@ export class ChannelDownloadsService {
         UPDATE download_jobs d
         SET status = 'PENDING', requested_at = now(), attempts = 0, error = NULL, not_before = NULL,
             stage = NULL, updated_at = now()
-        FROM media m
-        JOIN messages g ON g.id = m.message_id
-        WHERE d.media_id = m.id AND d.status = 'FAILED' AND g.channel_id = ANY(${ids}::uuid[])
+        WHERE d.status = 'FAILED' AND d.channel_id = ANY(${ids}::uuid[])
         RETURNING d.media_id, d.import_job_id`;
       if (rows.length > 0) {
         await tx.$executeRaw`

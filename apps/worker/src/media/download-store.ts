@@ -1,5 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { type Channel, type Media, type Prisma, refreshMediaCounters } from '@tam/database';
+import {
+  type Channel,
+  countFinishedFile,
+  type FinishedDownloadStatus,
+  type Media,
+  type Prisma,
+  refreshMediaCounters,
+} from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   DownloadJobStatus,
@@ -57,8 +64,8 @@ function owned(job: ClaimedTry) {
 /**
  * download_jobs and the download status of media, changed together and only by compare-and-set:
  * a try writes while its row is ACTIVE with its run number, so pausing, cancelling or a newer
- * try (after a crash) makes an older one stop at its next write. Import jobs' media counters are
- * recomputed with every change that affects them.
+ * try (after a crash) makes an older one stop at its next write. A try that ends adds its file to
+ * the import job's counters in the same transaction; changes of many files recount them.
  */
 @Injectable()
 export class DownloadStore {
@@ -74,16 +81,19 @@ export class DownloadStore {
    * downloads are paused.
    */
   async claim(concurrency: number): Promise<ClaimedTry[]> {
+    // One worker claims at a time, so counting first is safe; a known, small LIMIT lets
+    // PostgreSQL walk download_jobs_queue_idx in queue order and stop at the first free slots.
+    const [{ active } = { active: 0 }] = await this.prisma.$queryRaw<{ active: number }[]>`
+      SELECT count(*)::int AS active FROM download_jobs WHERE status = 'ACTIVE'`;
+    const slots = concurrency - active;
+    if (slots <= 0) {
+      return [];
+    }
     const rows = await this.prisma.$queryRaw<{ id: string; run_seq: number }[]>`
-      WITH free AS (
-        SELECT greatest(0, ${concurrency}::int - count(*)::int) AS slots
-        FROM download_jobs WHERE status = 'ACTIVE'
-      ), picked AS (
+      WITH picked AS (
         SELECT d.id
         FROM download_jobs d
-        JOIN media m ON m.id = d.media_id
-        JOIN messages g ON g.id = m.message_id
-        JOIN channels c ON c.id = g.channel_id
+        JOIN channels c ON c.id = d.channel_id
         LEFT JOIN storage_locations l ON l.id = coalesce(
           c.storage_location_id,
           (SELECT s.id FROM storage_locations s WHERE s.is_default)
@@ -97,8 +107,8 @@ export class DownloadStore {
           AND NOT EXISTS (
             SELECT 1 FROM app_settings s WHERE s.key = 'downloads' AND s.value -> 'paused' = 'true'::jsonb
           )
-        ORDER BY d.requested_at ASC NULLS LAST, m.size ASC NULLS LAST, d.id
-        LIMIT (SELECT slots FROM free)
+        ORDER BY d.requested_at ASC NULLS LAST, d.size ASC NULLS LAST, d.id
+        LIMIT ${slots}::int
         FOR UPDATE OF d SKIP LOCKED
       )
       UPDATE download_jobs d
@@ -212,7 +222,7 @@ export class DownloadStore {
           error: null,
         },
       });
-      await this.refreshCounters(tx, task.importJobId);
+      await this.countFinished(tx, task, DownloadJobStatus.COMPLETED);
       return true;
     });
   }
@@ -249,7 +259,10 @@ export class DownloadStore {
           error: outcome.error,
         },
       });
-      await this.refreshCounters(tx, task.importJobId);
+      // Waiting again changes no counter: only a file that ends counts somewhere.
+      if (failed) {
+        await this.countFinished(tx, task, DownloadJobStatus.FAILED);
+      }
       return failed ? 'failed' : 'waiting';
     });
   }
@@ -271,9 +284,7 @@ export class DownloadStore {
         UPDATE download_jobs d
         SET status = 'SKIPPED', reason = 'PROTECTED', stage = NULL, error = ${error},
             not_before = NULL, updated_at = now()
-        FROM media m
-        JOIN messages g ON g.id = m.message_id
-        WHERE d.media_id = m.id AND g.channel_id = ${channelId}::uuid
+        WHERE d.channel_id = ${channelId}::uuid
           AND d.status IN ('PENDING', 'ACTIVE', 'FAILED')
         RETURNING d.media_id, d.import_job_id`;
       if (skipped.length > 0) {
@@ -367,7 +378,7 @@ export class DownloadStore {
 
   private finish(
     task: TryRef,
-    status: DownloadJobStatus,
+    status: typeof DownloadJobStatus.FAILED | typeof DownloadJobStatus.SKIPPED,
     mediaStatus: DownloadStatus,
     reason: DownloadSkipReason | null,
     error: string,
@@ -384,17 +395,19 @@ export class DownloadStore {
         where: { id: task.mediaId },
         data: { downloadStatus: mediaStatus, error },
       });
-      await this.refreshCounters(tx, task.importJobId);
+      await this.countFinished(tx, task, status);
       return true;
     });
   }
 
-  private async refreshCounters(
+  /** Adds the file that just left ACTIVE to its import job's counters. */
+  private async countFinished(
     tx: Prisma.TransactionClient,
-    importJobId: string | null,
+    task: TryRef,
+    status: FinishedDownloadStatus,
   ): Promise<void> {
-    if (importJobId !== null) {
-      await refreshMediaCounters(tx, importJobId);
+    if (task.importJobId !== null) {
+      await countFinishedFile(tx, task.importJobId, task.id, status);
     }
   }
 }

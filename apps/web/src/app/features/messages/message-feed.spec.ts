@@ -115,6 +115,13 @@ describe('MessageFeed', () => {
     expect(page(harness).querySelector('.count')?.textContent).toContain('3 messages');
   });
 
+  it('says "10,000+" when more messages match than the server counts', async () => {
+    const harness = await open('/messages');
+    http.expectOne(isList()).flush(makeMessagePage([makeMessage()], 'next', 10_000, true));
+    await harness.fixture.whenStable();
+    expect(page(harness).querySelector('.count')?.textContent).toContain('10,000+ messages');
+  });
+
   it('searches the words in the URL, one card per result, with the words marked', async () => {
     const harness = await open('/messages?q=bai%202');
     const request = http.expectOne((candidate) => candidate.url === '/api/search');

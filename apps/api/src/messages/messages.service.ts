@@ -11,6 +11,7 @@ import {
   messageTypesOf,
   telegramMessageUrl,
 } from '@tam/shared';
+import { cappedTotal, TOTAL_COUNT_ROWS } from '../common/pagination/capped-total.js';
 import { MEDIA_INCLUDE, toMediaDto } from '../media/media.mapper.js';
 import { MESSAGE_TAGS_INCLUDE } from '../tags/tag.mapper.js';
 import {
@@ -60,7 +61,7 @@ export class MessagesService {
         take: query.limit + 1,
         include: MESSAGE_SUMMARY_INCLUDE,
       }),
-      cursor === undefined ? this.prisma.message.count({ where }) : null,
+      cursor === undefined ? this.prisma.message.count({ where, take: TOTAL_COUNT_ROWS }) : null,
     ]);
     const hasMore = rows.length > query.limit;
     const page = hasMore ? rows.slice(0, query.limit) : rows;
@@ -69,7 +70,7 @@ export class MessagesService {
     return {
       items: page.map((row) => toMessageSummaryDto(row, titles)),
       nextCursor: hasMore && last ? encodeMessageCursor(query.sort, last) : null,
-      total,
+      ...cappedTotal(total),
     };
   }
 

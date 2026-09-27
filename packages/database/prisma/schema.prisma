@@ -6,8 +6,9 @@
 //   (MTProto server message ids are int32). The API serializes BIGINT as strings.
 // - Every index is declared here (including GIN, trigram and partial indexes) so that
 //   `prisma migrate dev` never drops them. Hand-written SQL in migrations is limited to
-//   extensions, the `tam_simple` text search configuration, the search_vector triggers and the
-//   change-notification triggers (pg_notify on channel `tam_changes`, read by the api for SSE).
+//   extensions, the `tam_simple` text search configuration, the search_vector triggers, the
+//   change-notification triggers (pg_notify on channel `tam_changes`, read by the api for SSE)
+//   and the triggers that fill download_jobs.channel_id/size from the file.
 // - Binary media never lives in PostgreSQL; `media.storage_key` points into object storage.
 
 generator client {
@@ -537,6 +538,11 @@ model DownloadJob {
   notBefore   DateTime?           @map("not_before") @db.Timestamptz(3)
   reason      DownloadSkipReason?
   error       String?
+  /// The channel of the file's message. Filled in by a trigger on insert (a file never moves),
+  /// so per-channel counts and the download queue never join media and messages.
+  channelId   String?             @map("channel_id") @db.Uuid
+  /// The file's size (media.size), kept equal by triggers; orders the queue smallest first.
+  size        BigInt?
   createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt   DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -545,6 +551,10 @@ model DownloadJob {
 
   @@index([importJobId, status])
   @@index([status, notBefore])
+  /// Counts per channel and status (downloads panel, channel stats) from the index alone.
+  @@index([channelId, status, size])
+  /// The waiting files in the order the worker takes them: asked for first, then smallest.
+  @@index([requestedAt, size, id], map: "download_jobs_queue_idx", where: raw("(status = 'PENDING'::\"DownloadJobStatus\")"))
   @@map("download_jobs")
 }
 

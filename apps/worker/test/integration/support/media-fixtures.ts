@@ -76,6 +76,7 @@ export async function archiveFiles(
   prisma: PrismaService,
   channel: Channel,
   files: readonly ArchivedFile[],
+  importJobId: string | null = null,
 ): Promise<{ mediaId: string; downloadJobId: string; fileUniqueId: string }[]> {
   const chatId = channel.telegramChatId.toString();
   const created = [];
@@ -105,7 +106,7 @@ export async function archiveFiles(
         size: BigInt(file.size),
       },
     });
-    const job = await prisma.downloadJob.create({ data: { mediaId: media.id } });
+    const job = await prisma.downloadJob.create({ data: { mediaId: media.id, importJobId } });
     created.push({ mediaId: media.id, downloadJobId: job.id, fileUniqueId });
   }
   return created;

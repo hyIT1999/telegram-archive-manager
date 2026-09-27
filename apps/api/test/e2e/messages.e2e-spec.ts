@@ -73,6 +73,7 @@ describe('messages and topics (e2e)', () => {
       const first = await list('limit=2');
       expect(ids(first)).toEqual([7, 6]);
       expect(first.total).toBe(6);
+      expect(first.totalCapped).toBe(false);
       expect(first.nextCursor).toEqual(expect.any(String));
 
       const seen = [...ids(first)];
@@ -96,6 +97,17 @@ describe('messages and topics (e2e)', () => {
         'INVALID_CURSOR',
       );
       expectApiError(await get('/api/messages?cursor=not-a-cursor'), 400, 'INVALID_CURSOR');
+    });
+
+    it('counts matches up to 10 000, so a first page costs the same in any archive', async () => {
+      const channel = await addChannel();
+      await prisma.$executeRaw`
+        INSERT INTO messages (channel_id, telegram_message_id, type, text, telegram_date)
+        SELECT ${channel.id}::uuid, g, 'TEXT', 'note ' || g, now() - g * interval '1 minute'
+        FROM generate_series(1, 10001) AS g`;
+      const page = await list('limit=1');
+      expect(page).toMatchObject({ total: 10_000, totalCapped: true });
+      expect(await list(`limit=1&types=VIDEO`)).toMatchObject({ total: 0, totalCapped: false });
     });
 
     it('breaks ties between channels posting at the same moment', async () => {

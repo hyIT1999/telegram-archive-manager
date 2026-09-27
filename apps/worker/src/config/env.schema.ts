@@ -50,9 +50,18 @@ function isBase64Key(value: string, bytes: number): boolean {
   return decoded.length === bytes && decoded.toString('base64') === value;
 }
 
+/** The placeholder of .env.example; a production worker must never run with it. */
+const PLACEHOLDER = /CHANGE_ME/i;
+const PLACEHOLDER_CHECKED_KEYS = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'TELEGRAM_SESSION_DATABASE_URL',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+] as const;
+
 /**
- * Worker environment. Telegram settings are optional until Phase 2 wires the MTProto client,
- * but a value that is present must already be well-formed.
+ * Worker environment. Telegram settings are optional (the worker then reports what is missing),
+ * but a value that is present must be well-formed.
  */
 export const workerEnvSchema = z
   .object({
@@ -63,6 +72,8 @@ export const workerEnvSchema = z
     REDIS_URL: redisUrl,
     BULLMQ_PREFIX: z.string().regex(/^\S+$/, 'must not contain whitespace').default('tam'),
     WORKER_HEARTBEAT_INTERVAL_MS: wholeNumber(1_000, 60_000).default(5_000),
+    /** Touched after every heartbeat written to Redis: the Docker healthcheck reads its age. */
+    WORKER_ALIVE_FILE: absolutePath.optional(),
 
     /** Pause between two pages of history (100 messages), to stay clear of Telegram's limits. */
     IMPORT_PAGE_DELAY_MS: wholeNumber(0, 60_000).default(1_000),
@@ -125,7 +136,21 @@ export const workerEnvSchema = z
       path: ['GOOGLE_OAUTH_CLIENT_ID'],
       message: 'GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
     },
-  );
+  )
+  .superRefine((env, context) => {
+    if (env.NODE_ENV !== 'production') {
+      return;
+    }
+    for (const key of PLACEHOLDER_CHECKED_KEYS) {
+      if (PLACEHOLDER.test(env[key] ?? '')) {
+        context.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'still holds the CHANGE_ME placeholder from .env.example',
+        });
+      }
+    }
+  });
 
 export type WorkerEnv = z.output<typeof workerEnvSchema>;
 

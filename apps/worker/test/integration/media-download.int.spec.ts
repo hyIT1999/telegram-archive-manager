@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { SecretBox } from '@tam/crypto';
-import type { Channel } from '@tam/database';
+import { type Channel, refreshMediaCounters } from '@tam/database';
 import type { PrismaService } from '@tam/database/nest';
 import { MediaType, type MediaDownloadJobData, QUEUES } from '@tam/shared';
 import {
@@ -262,6 +262,59 @@ describe('media downloads', () => {
       });
     });
     expect((await mediaOf(file!.mediaId)).downloadStatus).toBe('SKIPPED');
+  });
+
+  it('counts each file that ends in its import job, exactly as a recount would', async () => {
+    const fake = createFakeTelegramApi();
+    const files = new FakeFiles(fake.api);
+    await localLocation(prisma, root);
+    const channel = await lessons();
+    const job = await prisma.importJob.create({
+      data: { channelId: channel.id, status: 'COMPLETED', phase: 'DONE' },
+    });
+    const [done, failed] = await archiveFiles(
+      prisma,
+      channel,
+      [
+        { messageId: 31, size: 4_000 },
+        { messageId: 32, size: 6_000 },
+        { messageId: 33, size: 8_000 },
+      ],
+      job.id,
+    );
+    // The importer leaves the counters recounted; from then on each ending file adds itself.
+    await prisma.$transaction((tx) => refreshMediaCounters(tx, job.id));
+    files.add(done!.fileUniqueId, 4_000);
+    files.add(failed!.fileUniqueId, 6_000);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      files.failNext(failed!.fileUniqueId, new Error('boom'));
+    }
+    // The third file is not on Telegram any more: skipped.
+    await boot(fake);
+
+    await until(async () => {
+      const statuses = await prisma.downloadJob.findMany({
+        where: { importJobId: job.id },
+        orderBy: { size: 'asc' },
+        select: { status: true },
+      });
+      expect(statuses.map((row) => row.status)).toEqual(['COMPLETED', 'FAILED', 'SKIPPED']);
+    });
+    const counters = {
+      totalMedia: 3,
+      downloadedFiles: 1,
+      failedFiles: 1,
+      skippedFiles: 1,
+      totalBytes: 18_000n,
+      downloadedBytes: 4_000n,
+    };
+    expect(await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject(
+      counters,
+    );
+    await prisma.$transaction((tx) => refreshMediaCounters(tx, job.id));
+    expect(await prisma.importJob.findUniqueOrThrow({ where: { id: job.id } })).toMatchObject(
+      counters,
+    );
   });
 
   it('gives up after the last try, and downloads again when someone asks', async () => {

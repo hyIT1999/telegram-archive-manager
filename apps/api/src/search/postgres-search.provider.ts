@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import type { SearchSort } from '@tam/shared';
+import { TOTAL_COUNT_ROWS } from '../common/pagination/capped-total.js';
 import { messageFilterSql } from './message-filter-sql.js';
 import {
   type SearchPosition,
@@ -87,8 +88,11 @@ export class PostgresSearchProvider extends SearchProvider {
         LIMIT ${request.limit + 1}`,
       request.withTotal
         ? this.prisma.$queryRaw<{ count: number }[]>`
-            SELECT count(*)::int AS count FROM messages m
-            WHERE m.search_vector @@ ${prefix} AND ${filters}`
+            SELECT count(*)::int AS count FROM (
+              SELECT 1 FROM messages m
+              WHERE m.search_vector @@ ${prefix} AND ${filters}
+              LIMIT ${TOTAL_COUNT_ROWS}
+            ) AS counted`
         : null,
     ]);
     const hasMore = rows.length > request.limit;

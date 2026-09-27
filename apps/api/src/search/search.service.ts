@@ -6,6 +6,7 @@ import {
   type MessageSummaryRow,
   toMessageSummaryDto,
 } from '../messages/message.mapper.js';
+import { cappedTotal } from '../common/pagination/capped-total.js';
 import { channelWithOldGroups, topicTitles } from '../messages/message-lookups.js';
 import { decodeSearchCursor, encodeSearchCursor } from './search-cursor.js';
 import { SearchProvider } from './search-provider.js';
@@ -50,7 +51,7 @@ export class SearchService {
     return {
       items: found.map((row) => withMatches(toMessageSummaryDto(row, titles), row, terms)),
       nextCursor: result.hasMore && last ? encodeSearchCursor(query.sort, last) : null,
-      total: result.total,
+      ...cappedTotal(result.total),
     };
   }
 }

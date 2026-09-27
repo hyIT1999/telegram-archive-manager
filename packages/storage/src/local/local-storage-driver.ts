@@ -5,6 +5,7 @@ import {
   link,
   mkdir,
   readFile,
+  realpath,
   rename,
   rm,
   rmdir,
@@ -38,7 +39,8 @@ export const STAGING_FOLDER = '.tam-tmp';
 const RENAME_RETRY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
 const RENAME_RETRY_DELAYS_MS = [50, 150, 400, 1_000];
 
-const pause = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+const pause = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
@@ -86,7 +88,11 @@ export class LocalStorageDriver implements StorageDriver {
     return path.join(this.root, STAGING_FOLDER);
   }
 
-  async putFile(key: string, sourcePath: string, options: PutOptions = {}): Promise<StoredObjectInfo> {
+  async putFile(
+    key: string,
+    sourcePath: string,
+    options: PutOptions = {},
+  ): Promise<StoredObjectInfo> {
     const target = this.localPath(key);
     options.signal?.throwIfAborted();
     try {
@@ -130,27 +136,44 @@ export class LocalStorageDriver implements StorageDriver {
     }
   }
 
+  /**
+   * A symlink or junction inside the folder that points elsewhere counts as missing: the archive
+   * only ever serves files that really are in the location.
+   */
   async stat(key: string): Promise<StoredObjectInfo | null> {
     try {
-      const info = await stat(this.localPath(key));
-      return info.isFile() ? { key, size: info.size, contentType: null } : null;
+      const target = await realpath(this.localPath(key));
+      if (!isInsideFolder(target, await realpath(this.root))) {
+        return null;
+      }
+      const info = await stat(target);
+      return info.isFile()
+        ? { key, size: info.size, contentType: null, modifiedAt: info.mtime }
+        : null;
     } catch (error) {
       if (errorCode(error) === 'ENOENT' || errorCode(error) === 'ENOTDIR') {
         return null;
       }
-      throw accessError(this.root, error);
+      throw error instanceof StorageError ? error : accessError(this.root, error);
     }
   }
 
-  async openReadStream(key: string, range?: ByteRange): Promise<Readable> {
-    const info = await this.stat(key);
+  async openReadStream(
+    key: string,
+    range?: ByteRange,
+    known?: StoredObjectInfo,
+  ): Promise<Readable> {
+    const info = known ?? (await this.stat(key));
     if (!info) {
       throw new StorageNotFoundError(`${key} does not exist`);
     }
     if (range && (range.start < 0 || range.end < range.start || range.end >= info.size)) {
       throw new StorageError(`Invalid range ${range.start}-${range.end} for ${info.size} bytes`);
     }
-    return createReadStream(this.localPath(key), range ? { start: range.start, end: range.end } : {});
+    return createReadStream(
+      this.localPath(key),
+      range ? { start: range.start, end: range.end } : {},
+    );
   }
 
   async delete(key: string): Promise<void> {

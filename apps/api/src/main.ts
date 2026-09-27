@@ -26,3 +26,9 @@ closeOnShutdownMessage(app, logger);
 
 await app.listen(env.API_PORT, env.API_HOST);
 logger.log(`Listening on http://${env.API_HOST}:${env.API_PORT}/${API_PREFIX}`, 'Bootstrap');
+if (env.WEB_DIST_DIR !== undefined) {
+  logger.log(
+    `Serving the web app from ${env.WEB_DIST_DIR} on http://${env.API_HOST}:${env.API_PORT}/`,
+    'Bootstrap',
+  );
+}

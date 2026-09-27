@@ -2,7 +2,7 @@
   "name": "@tam/telegram",
   "version": "0.0.0",
   "private": true,
-  "description": "TelegramClient abstraction and the real MTProto adapter (implemented in Phase 2).",
+  "description": "TelegramClient abstraction and its MTProto adapter (mtcute).",
   "type": "module",
   "exports": {
     ".": {

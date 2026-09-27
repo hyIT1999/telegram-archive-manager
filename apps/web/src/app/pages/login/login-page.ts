@@ -83,7 +83,10 @@ function signInErrorMessage(error: unknown): string {
     case 401:
       return 'Incorrect email or password.';
     case 429:
-      return 'Too many sign-in attempts. Wait a minute, then try again.';
+      // A lock of this email says how long it lasts; the per-address limit is a minute.
+      return apiError.code === 'LOGIN_LOCKED'
+        ? apiError.message
+        : 'Too many sign-in attempts. Wait a minute, then try again.';
     default:
       return apiError.message;
   }

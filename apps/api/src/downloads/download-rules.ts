@@ -79,10 +79,8 @@ export async function stopRunningDownloads(
           RETURNING media_id`
       : await tx.$queryRaw<{ media_id: string }[]>`
           UPDATE download_jobs d SET status = 'PENDING', stage = NULL, updated_at = now()
-          FROM media m
-          JOIN messages g ON g.id = m.message_id
-          WHERE d.media_id = m.id AND d.status = 'ACTIVE' AND d.requested_at IS NULL
-            AND g.channel_id = ANY(${[...channelIds]}::uuid[])
+          WHERE d.status = 'ACTIVE' AND d.requested_at IS NULL
+            AND d.channel_id = ANY(${[...channelIds]}::uuid[])
           RETURNING d.media_id`;
   if (stopped.length > 0) {
     await tx.$executeRaw`

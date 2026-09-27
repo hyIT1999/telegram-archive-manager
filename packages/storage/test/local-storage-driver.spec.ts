@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -33,11 +33,18 @@ describe('LocalStorageDriver', () => {
     const info = await driver.putFile(key, file, { contentType: 'application/pdf' });
 
     expect(info).toEqual({ key, size: 13, contentType: 'application/pdf' });
-    expect(await readFile(path.join(root, 'Physics (-100123)', '2026-09', '7 - notes.pdf'), 'utf8')).toBe(
-      'hello archive',
+    expect(
+      await readFile(path.join(root, 'Physics (-100123)', '2026-09', '7 - notes.pdf'), 'utf8'),
+    ).toBe('hello archive');
+    expect(driver.localPath(key)).toBe(
+      path.join(root, 'Physics (-100123)', '2026-09', '7 - notes.pdf'),
     );
-    expect(driver.localPath(key)).toBe(path.join(root, 'Physics (-100123)', '2026-09', '7 - notes.pdf'));
-    expect(await driver.stat(key)).toEqual({ key, size: 13, contentType: null });
+    expect(await driver.stat(key)).toEqual({
+      key,
+      size: 13,
+      contentType: null,
+      modifiedAt: expect.any(Date),
+    });
     expect(await text(await driver.openReadStream(key))).toBe('hello archive');
     expect(await text(await driver.openReadStream(key, { start: 6, end: 12 }))).toBe('archive');
   });
@@ -63,9 +70,36 @@ describe('LocalStorageDriver', () => {
   });
 
   it('never leaves the root', async () => {
-    await expect(driver.putFile('../escape.txt', await source('x'))).rejects.toBeInstanceOf(UnsafeKeyError);
+    await expect(driver.putFile('../escape.txt', await source('x'))).rejects.toBeInstanceOf(
+      UnsafeKeyError,
+    );
     expect(() => driver.localPath('a/../../b')).toThrow(UnsafeKeyError);
     expect(() => new LocalStorageDriver('relative/root')).toThrow(/absolute/);
+  });
+
+  it('treats a link to a folder outside the root as missing, but follows links inside it', async () => {
+    const outside = path.join(base, 'outside');
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, 'secret.txt'), 'not archived');
+    await driver.putFile(key, await source('hello archive'));
+    // Junctions need no special rights on Windows; elsewhere they are plain symlinks.
+    await symlink(outside, path.join(root, 'escape'), 'junction');
+    await symlink(path.join(root, 'Physics (-100123)'), path.join(root, 'alias'), 'junction');
+
+    expect(await driver.stat('escape/secret.txt')).toBeNull();
+    await expect(driver.openReadStream('escape/secret.txt')).rejects.toBeInstanceOf(
+      StorageNotFoundError,
+    );
+    expect(await driver.stat('alias/2026-09/7 - notes.pdf')).toMatchObject({ size: 13 });
+  });
+
+  it('reads what a stat just found without looking it up again', async () => {
+    await driver.putFile(key, await source('hello archive'));
+    const info = await driver.stat(key);
+    expect(info).not.toBeNull();
+    expect(
+      await text(await driver.openReadStream(key, { start: 0, end: 4 }, info ?? undefined)),
+    ).toBe('hello');
   });
 
   it('probes by writing, reading and removing a file', async () => {

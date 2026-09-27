@@ -133,6 +133,25 @@ describe('LoginPage', () => {
     );
   });
 
+  it('says how long a locked email has to wait', async () => {
+    await openLogin();
+    type('input[type="email"]', 'archivist@example.test');
+    type('input[autocomplete="current-password"]', 'secret');
+    submit();
+
+    flushError(
+      await nextRequest(http, AUTH_ENDPOINTS.login),
+      429,
+      'Too many failed sign-ins for this email. Try again in 14 minutes.',
+      'LOGIN_LOCKED',
+    );
+    await vi.waitFor(() =>
+      expect(page.querySelector('[role="alert"]')?.textContent).toContain(
+        'Too many failed sign-ins for this email. Try again in 14 minutes.',
+      ),
+    );
+  });
+
   it('can reveal the password', async () => {
     await openLogin();
     const password = page.querySelector<HTMLInputElement>('input[autocomplete="current-password"]');

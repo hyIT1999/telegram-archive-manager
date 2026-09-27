@@ -1,6 +1,11 @@
 export * from './generated/prisma/client.js';
 export { createPrismaClient, type PrismaClientOptions } from './client.js';
-export { refreshMediaCounters, refreshMediaCountersOf } from './media-counters.js';
+export {
+  countFinishedFile,
+  refreshMediaCounters,
+  refreshMediaCountersOf,
+  type FinishedDownloadStatus,
+} from './media-counters.js';
 export {
   CHANGE_CHANNEL,
   type Change,

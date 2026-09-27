@@ -1,23 +1,44 @@
-# Unofficial Telegram Archive Manager — production-style stack for a Linux Docker host.
-#   cp .env.example .env   # fill in POSTGRES_PASSWORD, REDIS_PASSWORD, ADMIN_*, TELEGRAM_*
+# Unofficial Telegram Archive Manager — production stack for a Linux Docker host on a LAN.
+#   cp .env.example .env   # fill in the "Docker Compose only" section and TELEGRAM_*
 #   docker compose up -d --build
+#   docker compose exec api node apps/api/dist/cli/create-user.js --email you@example.com
 # Services receive only the variables they need (no shared env_file): Telegram credentials reach
-# the worker alone. Windows Server 2019 cannot run these Linux containers; validate on Linux with
-# scripts/compose-smoke.sh. S3-compatible storage (RustFS profile) is planned for a later phase.
+# the worker alone, PostgreSQL's superuser password reaches PostgreSQL alone. Windows Server 2019
+# cannot run these Linux containers; validate on Linux with scripts/compose-smoke.sh.
 
 name: tam
 
 x-database-url: &database-url postgresql://tam:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/tam
 x-redis-url: &redis-url redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
 
+# Log files rotate instead of filling the disk.
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: '5'
+
+# The application containers run as an unprivileged user, with no Linux capabilities, on a
+# read-only root filesystem (writable: /tmp and their volumes).
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs:
+    - /tmp
+  logging: *logging
+
 services:
   postgres:
     image: postgres:18.6-trixie
     restart: unless-stopped
+    logging: *logging
+    security_opt: [no-new-privileges:true]
     environment:
-      POSTGRES_USER: tam
-      POSTGRES_DB: tam
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # PostgreSQL's own superuser: only its entrypoint and the init script use it.
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set POSTGRES_SUPERUSER_PASSWORD in .env}
+      # The archive's role (not a superuser), created by docker/postgres/init with its databases.
+      TAM_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       # Same text semantics as the Windows dev database: UTF-8, builtin collation and a
       # Unicode-aware ctype (never plain C, or pg_trgm stops treating Vietnamese letters as letters).
       POSTGRES_INITDB_ARGS: >-
@@ -28,7 +49,7 @@ services:
       - pgdata:/var/lib/postgresql
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tam -d tam"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d tam']
       interval: 5s
       timeout: 5s
       retries: 30
@@ -36,9 +57,12 @@ services:
   redis:
     image: redis:7.4.11
     restart: unless-stopped
+    <<: *hardening
+    # The image's own unprivileged user; /data belongs to it.
+    user: redis
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}
-    # The password goes into a config file, not onto the redis-server command line.
+    # The password goes into a config file (on the /tmp tmpfs), not onto the command line.
     command:
       - sh
       - -c
@@ -49,43 +73,26 @@ services:
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      test: ['CMD-SHELL', 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
       interval: 5s
       timeout: 5s
       retries: 30
 
-  # One-shot: applies Prisma migrations, then exits.
+  # One-shot: applies Prisma migrations as the archive's role (the owner of its database), then exits.
   migrate:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
       target: migrate
+    logging: *logging
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     environment:
       DATABASE_URL: *database-url
     depends_on:
       postgres:
         condition: service_healthy
-    restart: "no"
-
-  # One-shot: creates the first web admin from ADMIN_EMAIL / ADMIN_PASSWORD if no such user exists.
-  bootstrap:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-      target: runtime
-    environment:
-      DATABASE_URL: *database-url
-      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL in .env}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
-    # The password is piped through stdin, never passed as an argument.
-    command:
-      - sh
-      - -c
-      - printf '%s' "$$ADMIN_PASSWORD" | node apps/api/dist/cli/create-user.js --email "$$ADMIN_EMAIL" --password-stdin --if-missing
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-    restart: "no"
+    restart: 'no'
 
   api:
     build:
@@ -94,6 +101,7 @@ services:
       target: runtime
     restart: unless-stopped
     init: true
+    <<: *hardening
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -101,14 +109,17 @@ services:
       REDIS_URL: *redis-url
       BULLMQ_PREFIX: ${BULLMQ_PREFIX:-tam}
       API_HOST: 0.0.0.0
-      API_PORT: "3100"
-      # Keep true behind HTTPS. false only for plain-HTTP LAN use (browsers drop Secure cookies on http).
+      API_PORT: '3100'
+      # Keep false for plain HTTP on the LAN (browsers drop Secure cookies on http); true behind HTTPS.
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
       SESSION_ABSOLUTE_TTL_DAYS: ${SESSION_ABSOLUTE_TTL_DAYS:-30}
-      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8080}
-      # nginx (web container) sits on the compose network; trust it for the client IP.
-      TRUST_PROXY: loopback, uniquelocal
+      # The addresses people type to open the archive. Their host names (and ALLOWED_HOSTS) are the
+      # only names the api answers for; IP addresses always work.
+      CSRF_TRUSTED_ORIGINS: ${WEB_ORIGINS:-http://localhost:8080}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      # Exactly one proxy hop: nginx (web), which writes the client address into X-Forwarded-For.
+      TRUST_PROXY: '1'
       # Storage locations (README §9). The api checks and serves the folders, so it mounts the same
       # media volume as the worker. To offer more folders, mount them into both containers
       # (e.g. /data/nas) and list them here, separated by ";".
@@ -122,11 +133,9 @@ services:
     volumes:
       - media:/data/storage
     expose:
-      - "3100"
+      - '3100'
     depends_on:
       migrate:
-        condition: service_completed_successfully
-      bootstrap:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -137,6 +146,7 @@ services:
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
     init: true
+    <<: *hardening
     # Exactly one worker: it owns the single Telegram connection. Stop before starting a new one.
     deploy:
       replicas: 1
@@ -174,8 +184,9 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    <<: *hardening
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - '${WEB_PORT:-8080}:8080'
     depends_on:
       api:
         condition: service_healthy

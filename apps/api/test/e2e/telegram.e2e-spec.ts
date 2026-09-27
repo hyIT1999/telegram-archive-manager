@@ -116,19 +116,31 @@ describe('telegram endpoints (e2e)', () => {
     it('validates the step before contacting the worker', async () => {
       await worker.setHeartbeat({ state: 'CONNECTED', detail: null });
       await worker.listen();
-      const response = await post('/api/telegram/authenticate', { step: 'phone', phoneNumber: 'call me' });
+      const response = await post('/api/telegram/authenticate', {
+        step: 'phone',
+        phoneNumber: 'call me',
+      });
       expectApiError(response, 400, 'VALIDATION_FAILED');
       expect(worker.requests).toHaveLength(0);
     });
 
     it('answers 503 WORKER_UNAVAILABLE without a worker heartbeat', async () => {
-      const response = await post('/api/telegram/authenticate', { step: 'phone', phoneNumber: '+84912345678' });
+      const response = await post('/api/telegram/authenticate', {
+        step: 'phone',
+        phoneNumber: '+84912345678',
+      });
       expectApiError(response, 503, 'WORKER_UNAVAILABLE');
     });
 
     it('explains why no worker holds the Telegram connection', async () => {
-      await worker.setHeartbeat({ state: 'UNCONFIGURED', detail: 'TELEGRAM_API_ID and TELEGRAM_API_HASH are not set' });
-      const response = await post('/api/telegram/authenticate', { step: 'phone', phoneNumber: '+84912345678' });
+      await worker.setHeartbeat({
+        state: 'UNCONFIGURED',
+        detail: 'TELEGRAM_API_ID and TELEGRAM_API_HASH are not set',
+      });
+      const response = await post('/api/telegram/authenticate', {
+        step: 'phone',
+        phoneNumber: '+84912345678',
+      });
       const body = expectApiError(response, 503, 'TELEGRAM_UNAVAILABLE');
       expect(body.message).toContain('README §4');
     });
@@ -152,8 +164,14 @@ describe('telegram endpoints (e2e)', () => {
         return { ok: true };
       };
 
-      const response = await post('/api/telegram/authenticate', { step: 'phone', phoneNumber: '+84 912 345 678' }).expect(200);
-      expect(worker.requests[0]?.call).toEqual({ method: 'auth.phone', phoneNumber: '+84912345678' });
+      const response = await post('/api/telegram/authenticate', {
+        step: 'phone',
+        phoneNumber: '+84 912 345 678',
+      }).expect(200);
+      expect(worker.requests[0]?.call).toEqual({
+        method: 'auth.phone',
+        phoneNumber: '+84912345678',
+      });
       expect(response.body).toMatchObject({
         state: 'CODE_SENT',
         phoneMasked: '+84•••••••78',
@@ -182,7 +200,11 @@ describe('telegram endpoints (e2e)', () => {
         ok: false,
         error: { code: 'FLOOD_WAIT', message: 'Telegram asks to wait 60 s', retryAfterSeconds: 60 },
       });
-      const body = expectApiError(await post('/api/telegram/authenticate', { step: 'resend' }), 429, 'FLOOD_WAIT');
+      const body = expectApiError(
+        await post('/api/telegram/authenticate', { step: 'resend' }),
+        429,
+        'FLOOD_WAIT',
+      );
       expect(body.details).toEqual({ retryAfterSeconds: 60 });
     });
 
@@ -190,8 +212,38 @@ describe('telegram endpoints (e2e)', () => {
       await worker.setHeartbeat({ state: 'CONNECTED', detail: null });
       await worker.listen();
       worker.handler = () => 'silent';
-      const response = await post('/api/telegram/authenticate', { step: 'password', password: 'secret' });
+      const response = await post('/api/telegram/authenticate', {
+        step: 'password',
+        password: 'secret',
+      });
       expectApiError(response, 504, 'TELEGRAM_TIMEOUT');
+    });
+  });
+
+  describe('POST /api/telegram/logout', () => {
+    it('asks the worker to log out and returns the state it stored', async () => {
+      await prisma.telegramAccount.create({
+        data: { accountKey: 'default', authState: 'READY', displayName: 'An Archivist' },
+      });
+      await worker.setHeartbeat({ state: 'CONNECTED', detail: null });
+      await worker.listen();
+      worker.handler = async () => {
+        // The real worker logs out of Telegram and forgets the account before it answers.
+        await prisma.telegramAccount.update({
+          where: { accountKey: 'default' },
+          data: { authState: 'LOGGED_OUT', displayName: null },
+        });
+        return { ok: true };
+      };
+
+      const response = await post('/api/telegram/logout').expect(200);
+      expect(worker.requests.map((request) => request.call)).toEqual([{ method: 'auth.logout' }]);
+      expect(response.body).toMatchObject({ state: 'LOGGED_OUT', worker: 'online' });
+    });
+
+    it('needs a session, and a worker', async () => {
+      expectApiError(await http().post('/api/telegram/logout'), 401, 'UNAUTHENTICATED');
+      expectApiError(await post('/api/telegram/logout'), 503, 'WORKER_UNAVAILABLE');
     });
   });
 
@@ -199,9 +251,19 @@ describe('telegram endpoints (e2e)', () => {
     it('lists cached chats with their archive link and refresh state', async () => {
       await prisma.telegramDialog.createMany({
         data: [
-          { telegramChatId: BigInt(CHANNEL_ID), title: 'Lessons', username: 'lessons', type: 'CHANNEL' },
+          {
+            telegramChatId: BigInt(CHANNEL_ID),
+            title: 'Lessons',
+            username: 'lessons',
+            type: 'CHANNEL',
+          },
           { telegramChatId: -200n, title: 'Family', type: 'GROUP', memberCount: 5 },
-          { telegramChatId: -1003n, title: 'Protected club', type: 'SUPERGROUP', isProtected: true },
+          {
+            telegramChatId: -1003n,
+            title: 'Protected club',
+            type: 'SUPERGROUP',
+            isProtected: true,
+          },
         ],
       });
       const channel = await prisma.channel.create({
@@ -211,12 +273,18 @@ describe('telegram endpoints (e2e)', () => {
 
       const list = (await get('/api/telegram/chats').expect(200)).body as TelegramDialogListDto;
       expect(list.refreshing).toBe(true);
-      expect(list.items.map((item) => [item.title, item.archivedChannelId, item.isProtected])).toEqual([
+      expect(
+        list.items.map((item) => [item.title, item.archivedChannelId, item.isProtected]),
+      ).toEqual([
         ['Family', null, false],
         ['Lessons', channel.id, false],
         ['Protected club', null, true],
       ]);
-      expect(list.items[1]).toMatchObject({ telegramChatId: CHANNEL_ID, type: 'CHANNEL', username: 'lessons' });
+      expect(list.items[1]).toMatchObject({
+        telegramChatId: CHANNEL_ID,
+        type: 'CHANNEL',
+        username: 'lessons',
+      });
     });
 
     it('asks the worker to refresh the list', async () => {
@@ -225,22 +293,42 @@ describe('telegram endpoints (e2e)', () => {
       await post('/api/telegram/chats/refresh').expect(202);
       expect(worker.requests.map((item) => item.call.method)).toEqual(['dialogs.refresh']);
 
-      worker.handler = () => ({ ok: false, error: { code: 'TELEGRAM_NOT_READY', message: 'Log in to Telegram first' } });
+      worker.handler = () => ({
+        ok: false,
+        error: { code: 'TELEGRAM_NOT_READY', message: 'Log in to Telegram first' },
+      });
       expectApiError(await post('/api/telegram/chats/refresh'), 409, 'TELEGRAM_NOT_READY');
     });
   });
 
   describe('POST /api/channels', () => {
     it('rejects ids that are not Telegram ids and chats that are not in the list', async () => {
-      expectApiError(await post('/api/channels', { telegramChatId: 'abc' }), 400, 'VALIDATION_FAILED');
-      expectApiError(await post('/api/channels', { telegramChatId: CHANNEL_ID }), 404, 'DIALOG_NOT_FOUND');
+      expectApiError(
+        await post('/api/channels', { telegramChatId: 'abc' }),
+        400,
+        'VALIDATION_FAILED',
+      );
+      expectApiError(
+        await post('/api/channels', { telegramChatId: CHANNEL_ID }),
+        404,
+        'DIALOG_NOT_FOUND',
+      );
     });
 
     it('refuses chats with content protection', async () => {
       await prisma.telegramDialog.create({
-        data: { telegramChatId: -1003n, title: 'Protected club', type: 'SUPERGROUP', isProtected: true },
+        data: {
+          telegramChatId: -1003n,
+          title: 'Protected club',
+          type: 'SUPERGROUP',
+          isProtected: true,
+        },
       });
-      expectApiError(await post('/api/channels', { telegramChatId: '-1003' }), 422, 'CHAT_PROTECTED');
+      expectApiError(
+        await post('/api/channels', { telegramChatId: '-1003' }),
+        422,
+        'CHAT_PROTECTED',
+      );
       expect(await prisma.channel.count()).toBe(0);
     });
 
@@ -256,7 +344,8 @@ describe('telegram endpoints (e2e)', () => {
         },
       });
 
-      const created = (await post('/api/channels', { telegramChatId: CHANNEL_ID }).expect(201)).body as ChannelDto;
+      const created = (await post('/api/channels', { telegramChatId: CHANNEL_ID }).expect(201))
+        .body as ChannelDto;
       expect(created).toMatchObject({
         telegramChatId: CHANNEL_ID,
         title: 'Lessons',
@@ -268,13 +357,16 @@ describe('telegram endpoints (e2e)', () => {
       });
       expect(JSON.stringify(created)).not.toContain('987654');
 
-      const again = (await post('/api/channels', { telegramChatId: CHANNEL_ID }).expect(200)).body as ChannelDto;
+      const again = (await post('/api/channels', { telegramChatId: CHANNEL_ID }).expect(200))
+        .body as ChannelDto;
       expect(again.id).toBe(created.id);
       expect(await prisma.channel.count()).toBe(1);
     });
 
     it('creates a single channel when the same chat is submitted concurrently', async () => {
-      await prisma.telegramDialog.create({ data: { telegramChatId: BigInt(CHANNEL_ID), title: 'Lessons', type: 'CHANNEL' } });
+      await prisma.telegramDialog.create({
+        data: { telegramChatId: BigInt(CHANNEL_ID), title: 'Lessons', type: 'CHANNEL' },
+      });
       const responses = await Promise.all([
         post('/api/channels', { telegramChatId: CHANNEL_ID }),
         post('/api/channels', { telegramChatId: CHANNEL_ID }),

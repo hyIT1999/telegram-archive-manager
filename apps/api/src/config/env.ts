@@ -13,6 +13,11 @@ export type TrustProxySetting = boolean | number | string[];
 
 /** What browsers send in the Origin header: scheme://host[:port], without a path. */
 const ORIGIN_PATTERN = /^https?:\/\/[^/?#\s\\]+$/i;
+/** A host name without port, optionally with a leading "*." for every subdomain. */
+const HOST_NAME_PATTERN =
+  /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+/** The placeholder of .env.example; a production server must never run with it. */
+const PLACEHOLDER = /CHANGE_ME/i;
 const PROXY_KEYWORDS = new Set(['loopback', 'linklocal', 'uniquelocal']);
 const HOP_COUNT_PATTERN = /^\d+$/;
 
@@ -108,6 +113,24 @@ const envObjectSchema = z.object({
       ),
     )
     .default([]),
+  /**
+   * Host names the api answers for, besides IP addresses, localhost and the hosts of
+   * CSRF_TRUSTED_ORIGINS. Any other Host header is refused (protects against DNS rebinding).
+   */
+  ALLOWED_HOSTS: z
+    .string()
+    .transform((value) => splitList(value).map((host) => host.toLowerCase()))
+    .pipe(
+      z.array(
+        z.string().regex(HOST_NAME_PATTERN, {
+          error: (issue) =>
+            `"${String(issue.input)}" is not a host name such as archive.lan or *.example.com (no scheme, no port)`,
+        }),
+      ),
+    )
+    .default([]),
+  /** The built web app (apps/web/dist/web/browser), served by the api itself when set. */
+  WEB_DIST_DIR: absolutePath.optional(),
   /** How long a Telegram request (login step, chat list refresh) waits for the worker. */
   TELEGRAM_RPC_TIMEOUT_MS: z.coerce.number().int().min(500).max(120_000).default(30_000),
   /** Folder of the built-in "This computer" storage location. */
@@ -151,6 +174,13 @@ const envObjectSchema = z.object({
 
 export type Env = z.output<typeof envObjectSchema>;
 
+/** Secrets that production refuses to start with while they hold the .env.example placeholder. */
+const PLACEHOLDER_CHECKED_KEYS = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'GOOGLE_OAUTH_CLIENT_SECRET',
+] as const satisfies readonly (keyof Env)[];
+
 /** Treats `KEY=` like an unset variable, so the default applies instead of a validation error. */
 function withoutEmptyValues(input: unknown): unknown {
   if (typeof input !== 'object' || input === null) {
@@ -166,21 +196,43 @@ function withoutEmptyValues(input: unknown): unknown {
 /** Validates the api environment (process.env merged with the .env files) at startup. */
 export const envSchema = z.preprocess(
   withoutEmptyValues,
-  envObjectSchema.refine(
-    (env) => (env.GOOGLE_OAUTH_CLIENT_ID === undefined) === (env.GOOGLE_OAUTH_CLIENT_SECRET === undefined),
-    {
-      path: ['GOOGLE_OAUTH_CLIENT_ID'],
-      message: 'GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
-    },
-  ),
+  envObjectSchema
+    .refine(
+      (env) =>
+        (env.GOOGLE_OAUTH_CLIENT_ID === undefined) ===
+        (env.GOOGLE_OAUTH_CLIENT_SECRET === undefined),
+      {
+        path: ['GOOGLE_OAUTH_CLIENT_ID'],
+        message: 'GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+      },
+    )
+    .superRefine((env, context) => {
+      if (env.NODE_ENV !== 'production') {
+        return;
+      }
+      for (const key of PLACEHOLDER_CHECKED_KEYS) {
+        if (PLACEHOLDER.test(env[key] ?? '')) {
+          context.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'still holds the CHANGE_ME placeholder from .env.example',
+          });
+        }
+      }
+    }),
 );
 
 /** Variables the api reads; nothing else is taken from the .env files. */
 export const ENV_KEYS = Object.keys(envObjectSchema.shape) as (keyof Env)[];
 
-const cliEnvObjectSchema = envObjectSchema.pick({ DATABASE_URL: true });
+const cliEnvObjectSchema = envObjectSchema
+  .pick({ DATABASE_URL: true, BULLMQ_PREFIX: true })
+  .extend({
+    /** Optional: reset-password clears the sign-in lock kept in Redis. */
+    REDIS_URL: envObjectSchema.shape.REDIS_URL.optional(),
+  });
 
-/** The subset of the environment the create-user CLI needs. */
+/** The subset of the environment the user CLIs (create-user, reset-password) need. */
 export const cliEnvSchema = z.preprocess(withoutEmptyValues, cliEnvObjectSchema);
 export const CLI_ENV_KEYS = Object.keys(cliEnvObjectSchema.shape);
 

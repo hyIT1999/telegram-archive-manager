@@ -17,22 +17,25 @@ html {
         tertiary: palettes.$tertiary-palette,
       ),
       typography: (
+        // The fonts are part of the build (angular.json "styles"), never loaded from elsewhere.
         plain-family: (
-          Inter,
-          'Segoe UI',
-          Roboto,
-          'Helvetica Neue',
-          Arial,
-          sans-serif,
-        ),
+            'Inter Variable',
+            Inter,
+            'Segoe UI',
+            Roboto,
+            'Helvetica Neue',
+            Arial,
+            sans-serif
+          ),
         // Material interpolates this list unquoted; a family ending in a digit must keep its
         // quotes or the whole `font` shorthand becomes invalid.
         brand-family: (
-          '"Source Serif 4"',
-          'Iowan Old Style',
-          Georgia,
-          serif,
-        ),
+            '"Source Serif 4 Variable"',
+            '"Source Serif 4"',
+            'Iowan Old Style',
+            Georgia,
+            serif
+          ),
         bold-weight: 600,
         medium-weight: 500,
         regular-weight: 400,

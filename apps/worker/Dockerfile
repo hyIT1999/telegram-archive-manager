@@ -21,13 +21,18 @@ COPY packages/telegram/package.json packages/telegram/
 COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/web/package.json apps/web/
+COPY apps/e2e/package.json apps/e2e/
 
 FROM manifests AS build
+# Prisma's engines look for OpenSSL, which the slim image does not have.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm ci --include-workspace-root -w @tam/database -w @tam/worker
 COPY tsconfig.base.json tsconfig.node.json tsconfig.json ./
 COPY packages ./packages
 COPY apps/worker ./apps/worker
-RUN npm run build:packages && npm run build -w @tam/worker
+RUN npm run db:generate && npx tsc -b apps/worker
 
 FROM manifests AS prod-deps
 RUN npm ci --omit=dev -w @tam/worker
@@ -39,7 +44,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
-    STORAGE_LOCAL_ROOT=/data/storage
+    STORAGE_LOCAL_ROOT=/data/storage \
+    WORKER_ALIVE_FILE=/tmp/tam-worker.alive
 
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=prod-deps /app/packages ./packages
@@ -57,4 +63,7 @@ RUN mkdir -p /data/storage && chown node:node /data/storage
 USER node
 # SIGTERM → graceful shutdown: jobs hand themselves back to the queue before the process exits.
 STOPSIGNAL SIGTERM
+# The heartbeat touches WORKER_ALIVE_FILE after every beat it wrote to Redis.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD ["node", "-e", "const f=require('node:fs');try{process.exit(Date.now()-f.statSync(process.env.WORKER_ALIVE_FILE).mtimeMs<60000?0:1)}catch{process.exit(1)}"]
 CMD ["node", "apps/worker/dist/main.js"]

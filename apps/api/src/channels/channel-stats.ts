@@ -13,7 +13,8 @@ interface ChannelStatsRow {
 
 /**
  * Message/media counters for a set of channels in one query (no N+1): one lateral subquery per
- * counter family, each served by the (channel_id, …) and (message_id, …) indexes.
+ * counter family, each read from an index alone. Every file has exactly one download job, which
+ * carries its channel, status and size (download_jobs_channel_id_status_size_idx).
  */
 export async function loadChannelStats(
   prisma: PrismaService,
@@ -37,11 +38,10 @@ export async function loadChannelStats(
     ) msg ON true
     LEFT JOIN LATERAL (
       SELECT count(*) AS total,
-             count(*) FILTER (WHERE md.download_status = 'DOWNLOADED') AS downloaded,
-             sum(md.size) FILTER (WHERE md.download_status = 'DOWNLOADED') AS downloaded_bytes
-      FROM media md
-      JOIN messages m ON m.id = md.message_id
-      WHERE m.channel_id = c.id
+             count(*) FILTER (WHERE d.status = 'COMPLETED') AS downloaded,
+             sum(d.size) FILTER (WHERE d.status = 'COMPLETED') AS downloaded_bytes
+      FROM download_jobs d
+      WHERE d.channel_id = c.id
     ) med ON true`;
 
   return new Map(

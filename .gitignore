@@ -33,3 +33,7 @@ npm-debug.log*
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Browser tests (Playwright)
+test-results/
+playwright-report/

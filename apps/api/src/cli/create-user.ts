@@ -1,26 +1,14 @@
 /**
- * Creates a web user (non-interactive; also used by the Docker `bootstrap` service).
- *   echo "<password>" | node dist/cli/create-user.js --email <email> --password-stdin [--if-missing]
+ * Creates a web user; the password is asked on the terminal or read from stdin (Docker, scripts).
+ *   node dist/cli/create-user.js --email <email> [--password-stdin] [--if-missing]
  * Exit codes: 0 created or already present with --if-missing, 1 failure, 2 usage error.
  */
 import { createPrismaClient } from '@tam/database';
 import { loadEnvFiles } from '../config/env-files.js';
 import { CLI_ENV_KEYS, cliEnvSchema, formatEnvIssues } from '../config/env.js';
-import {
-  CREATE_USER_USAGE,
-  createUser,
-  parseCreateUserArgs,
-  passwordFromStdin,
-  UsageError,
-} from './create-user.command.js';
-
-async function readStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : (chunk as Buffer));
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
+import { CREATE_USER_USAGE, createUser, parseCreateUserArgs } from './create-user.command.js';
+import { PromptCancelledError, readPassword } from './password-input.js';
+import { UsageError } from './usage-error.js';
 
 async function main(): Promise<number> {
   const args = parseCreateUserArgs(process.argv.slice(2));
@@ -28,10 +16,7 @@ async function main(): Promise<number> {
     console.log(CREATE_USER_USAGE);
     return 0;
   }
-  if (process.stdin.isTTY) {
-    throw new UsageError('No password on stdin: pipe it into the command (see the example below)');
-  }
-  const password = passwordFromStdin(await readStdin());
+  const password = await readPassword(args.passwordStdin);
 
   loadEnvFiles(CLI_ENV_KEYS);
   const env = cliEnvSchema.safeParse(process.env);
@@ -59,6 +44,10 @@ async function main(): Promise<number> {
 }
 
 process.exitCode = await main().catch((error: unknown) => {
+  if (error instanceof PromptCancelledError) {
+    console.error('Cancelled; nothing was changed.');
+    return 1;
+  }
   if (error instanceof UsageError) {
     console.error(`${error.message}\n\n${CREATE_USER_USAGE}`);
     return 2;

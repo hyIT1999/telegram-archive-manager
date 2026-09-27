@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { Channel, PrismaClient, StorageLocation } from '@tam/database';
@@ -464,6 +464,95 @@ describe('media, downloads and settings (e2e)', () => {
       expectApiError(await get(`/api/media/${video!.mediaId}/content`), 404, 'NOT_FOUND');
     });
 
+    it('lets the browser revalidate, answers HEAD without reading, and honours If-Range', async () => {
+      const channel = await addChannel();
+      const [video] = await archive(channel, [{ messageId: 1, size: 0 }]);
+      const content = randomBytes(32 * 1024);
+      await store(video!.mediaId, 'Lessons (-1)/2026-01/1 - lesson-1.mp4', content);
+      const url = `/api/media/${video!.mediaId}/content`;
+      const checksum = createHash('sha256').update(content).digest('hex');
+
+      const first = await get(url).buffer(true).parse(binary).expect(200);
+      expect(first.headers).toMatchObject({
+        etag: `"${checksum}"`,
+        'cache-control': 'private, no-cache',
+      });
+      expect(first.headers['last-modified']).toBeDefined();
+
+      const again = await get(url).set('If-None-Match', `"${checksum}"`).expect(304);
+      expect(again.headers['content-length']).toBeUndefined();
+      expect(again.text ?? '').toBe('');
+
+      const head = await http().head(url).set('Cookie', cookie).expect(200);
+      expect(head.headers['content-length']).toBe(String(content.length));
+      expect(head.headers['etag']).toBe(`"${checksum}"`);
+
+      const sameVersion = await get(url)
+        .set('Range', 'bytes=0-9')
+        .set('If-Range', `"${checksum}"`)
+        .buffer(true)
+        .parse(binary)
+        .expect(206);
+      expect((sameVersion.body as Buffer).equals(content.subarray(0, 10))).toBe(true);
+      const otherVersion = await get(url)
+        .set('Range', 'bytes=0-9')
+        .set('If-Range', '"an-older-version"')
+        .buffer(true)
+        .parse(binary)
+        .expect(200);
+      expect((otherVersion.body as Buffer).length).toBe(content.length);
+    });
+
+    it('keeps file names from reversing, downloads XML, and never leaves the location', async () => {
+      const channel = await addChannel();
+      const [named, playlist, escaped] = await archive(channel, [
+        {
+          messageId: 1,
+          size: 0,
+          type: 'DOCUMENT',
+          mimeType: 'application/octet-stream',
+          fileName: 'invoice‮fdp.exe',
+        },
+        {
+          messageId: 2,
+          size: 0,
+          type: 'DOCUMENT',
+          mimeType: 'audio/x-list+xml',
+          fileName: 'a.xml',
+        },
+        { messageId: 3, size: 0 },
+      ]);
+      await store(named!.mediaId, 'Lessons (-1)/2026-01/1 - invoice.bin', Buffer.from('MZ'));
+      const disposition = String(
+        (await get(`/api/media/${named!.mediaId}/content`).buffer(true).parse(binary).expect(200))
+          .headers['content-disposition'],
+      );
+      expect(disposition).toBe(
+        `attachment; filename="invoicefdp.exe"; filename*=UTF-8''invoicefdp.exe`,
+      );
+
+      await store(playlist!.mediaId, 'Lessons (-1)/2026-01/2 - a.xml', Buffer.from('<list/>'));
+      const xml = await get(`/api/media/${playlist!.mediaId}/content`)
+        .buffer(true)
+        .parse(binary)
+        .expect(200);
+      expect(xml.headers['content-disposition']).toMatch(/^attachment;/);
+
+      // A junction inside the location that points outside of it.
+      const outside = path.join(path.dirname(root), `outside-${randomUUID()}`);
+      await mkdir(outside, { recursive: true });
+      await writeFile(path.join(outside, 'secret.txt'), 'not part of the archive');
+      await mkdir(path.join(root, 'Lessons (-1)'), { recursive: true });
+      await symlink(outside, path.join(root, 'Lessons (-1)', 'linked'), 'junction');
+      await store(escaped!.mediaId, 'Lessons (-1)/2026-01/3 - lesson-3.mp4', Buffer.from('x'));
+      await prisma.media.update({
+        where: { id: escaped!.mediaId },
+        data: { storageKey: 'Lessons (-1)/linked/secret.txt' },
+      });
+      expectApiError(await get(`/api/media/${escaped!.mediaId}/content`), 404, 'NOT_FOUND');
+      await rm(outside, { recursive: true, force: true });
+    });
+
     it('serves the preview from the thumbnail cache', async () => {
       const channel = await addChannel();
       const [withPreview, withoutPreview] = await archive(channel, [
@@ -488,7 +577,11 @@ describe('media, downloads and settings (e2e)', () => {
       expect(response.headers).toMatchObject({
         'content-type': 'image/jpeg',
         'cache-control': 'private, max-age=86400',
+        'content-length': String(jpeg.length),
       });
+      await get(`/api/media/${withPreview!.mediaId}/thumbnail`)
+        .set('If-None-Match', String(response.headers['etag']))
+        .expect(304);
       expect(
         ((await get(`/api/media/${withPreview!.mediaId}`).expect(200)).body as MediaDto)
           .hasThumbnail,

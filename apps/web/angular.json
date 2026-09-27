@@ -30,7 +30,12 @@
                 "input": "public"
               }
             ],
-            "styles": ["src/styles.scss"]
+            "styles": [
+              "@fontsource-variable/inter/opsz.css",
+              "@fontsource-variable/source-serif-4/opsz.css",
+              "material-symbols/outlined.css",
+              "src/styles.scss"
+            ]
           },
           "configurations": {
             "production": {

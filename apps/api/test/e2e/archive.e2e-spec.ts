@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import type { Channel, DownloadStatus, MediaType, PrismaClient } from '@tam/database';
+import type {
+  Channel,
+  DownloadJobStatus,
+  DownloadStatus,
+  MediaType,
+  PrismaClient,
+} from '@tam/database';
 import { STATS_KEYS, type ChannelDto, type Page, type StatsDto } from '@tam/shared';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -68,14 +74,24 @@ describe('channels and stats (e2e)', () => {
     let legacyGroup: Channel;
     let listed: Channel[];
 
-    /** One message per distinct message id, each with its media rows. */
+    /** The download job state of a file in each download state, as the importer and worker keep them. */
+    const JOB_STATUS: Record<DownloadStatus, DownloadJobStatus> = {
+      PENDING: 'PENDING',
+      DOWNLOADING: 'ACTIVE',
+      DOWNLOADED: 'COMPLETED',
+      FAILED: 'FAILED',
+      SKIPPED: 'SKIPPED',
+      CANCELLED: 'CANCELLED',
+    };
+
+    /** One message per distinct message id, each with its media rows and their download jobs. */
     async function seedMessages(
       channel: Channel,
       media: [number, MediaType, DownloadStatus, bigint | null][],
     ) {
       const messageIds = [...new Set(media.map(([messageId]) => messageId))];
       for (const telegramMessageId of messageIds) {
-        await prisma.message.create({
+        const message = await prisma.message.create({
           data: {
             channelId: channel.id,
             telegramMessageId,
@@ -94,7 +110,13 @@ describe('channels and stats (e2e)', () => {
                 })),
             },
           },
+          include: { media: true },
         });
+        for (const file of message.media) {
+          await prisma.downloadJob.create({
+            data: { mediaId: file.id, status: JOB_STATUS[file.downloadStatus] },
+          });
+        }
       }
     }
 

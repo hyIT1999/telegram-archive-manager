@@ -11,7 +11,8 @@
     "typecheck": "tsc -p tsconfig.test.json",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.e2e.config.ts",
-    "user:create": "node dist/cli/create-user.js"
+    "user:create": "node dist/cli/create-user.js",
+    "user:reset-password": "node dist/cli/reset-password.js"
   },
   "dependencies": {
     "@nestjs/bullmq": "12.0.0",
@@ -27,6 +28,7 @@
     "@tam/storage": "0.0.0",
     "argon2": "0.45.1",
     "bullmq": "6.3.8",
+    "express": "5.2.1",
     "ioredis": "5.11.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",

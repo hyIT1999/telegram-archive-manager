@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { getQueueToken } from '@nestjs/bullmq';
 import { NestFactory } from '@nestjs/core';
@@ -64,12 +65,17 @@ describe('worker application context', () => {
       expect(ttl).toBeGreaterThan(0);
       expect(ttl).toBeLessThanOrEqual(heartbeatTtlMs(TEST_HEARTBEAT_INTERVAL_MS));
 
+      // The Docker healthcheck reads the age of the alive file, touched with every beat.
+      const aliveFile = process.env['WORKER_ALIVE_FILE'] ?? '';
+      const firstTouch = statSync(aliveFile).mtimeMs;
+
       // Later beats rewrite the timestamp and renew the TTL; startedAt stays the same.
       await vi.waitFor(
         async () => {
           const next = await readHeartbeat();
           expect(next?.ts).not.toBe(first?.ts);
           expect(next?.startedAt).toBe(first?.startedAt);
+          expect(statSync(aliveFile).mtimeMs).toBeGreaterThan(firstTouch);
         },
         { timeout: 5 * TEST_HEARTBEAT_INTERVAL_MS, interval: 100 },
       );

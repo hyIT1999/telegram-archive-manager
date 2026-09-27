@@ -93,6 +93,10 @@
     <mat-icon>person</mat-icon>
     <span>Signed in as {{ email() }}</span>
   </button>
+  <a mat-menu-item routerLink="/settings">
+    <mat-icon>manage_accounts</mat-icon>
+    <span>Account settings</span>
+  </a>
   <mat-divider />
   <button mat-menu-item type="button" (click)="logOut()">
     <mat-icon>logout</mat-icon>

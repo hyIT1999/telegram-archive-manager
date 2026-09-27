@@ -16,6 +16,7 @@ import { MEDIA_CATEGORIES } from '@tam/shared';
 import {
   makeMessagePage,
   makePage,
+  makeSession,
   makeSettings,
   makeStats,
   makeStorageList,
@@ -114,6 +115,9 @@ describe('app routes', () => {
     }
     for (const request of http.match('/api/settings')) {
       request.flush(makeSettings());
+    }
+    for (const request of http.match('/api/auth/sessions')) {
+      request.flush([makeSession()]);
     }
     for (const request of http.match((candidate) => candidate.url === '/api/messages')) {
       request.flush(makeMessagePage([]));

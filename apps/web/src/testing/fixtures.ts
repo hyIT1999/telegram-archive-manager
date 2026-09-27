@@ -13,6 +13,7 @@ import type {
   MessagePageDto,
   MessageSummaryDto,
   Page,
+  SessionDto,
   SettingsDto,
   StatsDto,
   StorageCheckDto,
@@ -44,6 +45,21 @@ export function makeUser(overrides: Partial<AuthUserDto> = {}): AuthUserDto {
     id: '0199a0b1-0000-7000-8000-000000000001',
     email: 'archivist@example.test',
     lastLoginAt: '2026-09-20T08:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/** A signed-in browser of the current user (this one unless `current: false`). */
+export function makeSession(overrides: Partial<SessionDto> = {}): SessionDto {
+  return {
+    id: '0199a0b1-0000-7000-8000-00000000a001',
+    current: true,
+    createdAt: '2026-09-20T08:00:00.000Z',
+    lastSeenAt: '2026-09-20T09:00:00.000Z',
+    expiresAt: '2026-09-27T09:00:00.000Z',
+    ip: '127.0.0.1',
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36',
     ...overrides,
   };
 }
@@ -393,8 +409,9 @@ export function makeMessagePage(
   items: MessageSummaryDto[],
   nextCursor: string | null = null,
   total: number | null = items.length,
+  totalCapped = false,
 ): MessagePageDto {
-  return { items, nextCursor, total };
+  return { items, nextCursor, total, totalCapped };
 }
 
 let topicSequence = 1;

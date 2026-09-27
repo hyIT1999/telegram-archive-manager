@@ -3,6 +3,7 @@ import { MatButtonToggle, MatButtonToggleGroup } from '@angular/material/button-
 import { MatIcon } from '@angular/material/icon';
 import { THEME_OPTIONS, type ThemeMode, ThemeService } from '../../core/services/theme-service';
 import { PageHeader } from '../../shared/components/page-header/page-header';
+import { AccountSettings } from '../account/account-settings';
 import { StorageLocationList } from '../storage/storage-location-list';
 import { TelegramConnect } from '../telegram/telegram-connect';
 import { TelegramSession } from '../telegram/telegram-session';
@@ -13,6 +14,7 @@ import { SyncSettingsPanel } from './sync-settings';
   selector: 'app-settings-page',
   providers: [TelegramSession],
   imports: [
+    AccountSettings,
     DownloadSettingsPanel,
     MatButtonToggle,
     MatButtonToggleGroup,
@@ -28,6 +30,12 @@ import { SyncSettingsPanel } from './sync-settings';
       title="Settings"
       subtitle="How the archive looks and behaves."
     />
+
+    <section id="account" class="surface-card panel" aria-labelledby="account-title">
+      <h2 id="account-title" class="panel-title">Your account</h2>
+      <p class="panel-hint">How you sign in to this archive, and where you are signed in.</p>
+      <app-account-settings />
+    </section>
 
     <section class="surface-card panel" aria-labelledby="telegram-title">
       <h2 id="telegram-title" class="panel-title">Telegram account</h2>

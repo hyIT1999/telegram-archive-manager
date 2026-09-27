@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import {
   Injectable,
@@ -30,6 +31,7 @@ export class HeartbeatService implements OnApplicationBootstrap, OnModuleDestroy
   private readonly logger = new Logger(HeartbeatService.name);
   private readonly redis: Redis;
   private readonly intervalMs: number;
+  private readonly aliveFile: string | undefined;
   private readonly host = hostname();
   private readonly startedAt = new Date();
   private timer: NodeJS.Timeout | undefined;
@@ -43,6 +45,7 @@ export class HeartbeatService implements OnApplicationBootstrap, OnModuleDestroy
     private readonly status: WorkerStatusService,
   ) {
     this.intervalMs = config.get('WORKER_HEARTBEAT_INTERVAL_MS', { infer: true });
+    this.aliveFile = config.get('WORKER_ALIVE_FILE', { infer: true });
     this.redis = new Redis(config.get('REDIS_URL', { infer: true }), {
       connectionName: 'tam-worker-heartbeat',
       lazyConnect: true,
@@ -119,9 +122,22 @@ export class HeartbeatService implements OnApplicationBootstrap, OnModuleDestroy
       heartbeatTtlMs(this.intervalMs),
     );
     this.lastPayload = payload;
+    await this.touchAliveFile();
     if (this.failing) {
       this.failing = false;
       this.logger.log('Heartbeat restored');
+    }
+  }
+
+  /** Shows a container healthcheck that the worker is alive and reaches Redis (Docker only). */
+  private async touchAliveFile(): Promise<void> {
+    if (this.aliveFile === undefined) {
+      return;
+    }
+    try {
+      await writeFile(this.aliveFile, new Date().toISOString());
+    } catch (error) {
+      this.logger.debug(`Could not touch ${this.aliveFile}: ${errorMessage(error)}`);
     }
   }
 

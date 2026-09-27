@@ -4,22 +4,21 @@ import { verifyPassword } from '../../src/auth/password.js';
 import {
   createUser,
   parseCreateUserArgs,
-  passwordFromStdin,
-  UsageError,
   UserExistsError,
 } from '../../src/cli/create-user.command.js';
+import { UsageError } from '../../src/cli/usage-error.js';
 
 describe('parseCreateUserArgs', () => {
   it('normalizes the email and reads the flags', () => {
     expect(parseCreateUserArgs(['--email', ' Admin@Example.COM ', '--password-stdin'])).toEqual({
       email: 'admin@example.com',
       ifMissing: false,
+      passwordStdin: true,
     });
-    expect(
-      parseCreateUserArgs(['--email=admin@example.com', '--password-stdin', '--if-missing']),
-    ).toEqual({
+    expect(parseCreateUserArgs(['--email=admin@example.com', '--if-missing'])).toEqual({
       email: 'admin@example.com',
       ifMissing: true,
+      passwordStdin: false,
     });
   });
 
@@ -29,7 +28,6 @@ describe('parseCreateUserArgs', () => {
   });
 
   it.each([
-    [['--email', 'admin@example.com'], /--password-stdin is required/],
     [['--password-stdin'], /--email must be a valid email address/],
     [['--email', 'not-an-email', '--password-stdin'], /--email must be a valid email address/],
     [['--email', 'admin@example.com', '--password-stdin', '--password', 'x'], /Unknown option/],
@@ -37,22 +35,6 @@ describe('parseCreateUserArgs', () => {
   ])('rejects %j', (argv, message) => {
     expect(() => parseCreateUserArgs(argv)).toThrow(UsageError);
     expect(() => parseCreateUserArgs(argv)).toThrow(message);
-  });
-});
-
-describe('passwordFromStdin', () => {
-  it('removes a BOM and exactly one trailing line ending', () => {
-    expect(passwordFromStdin('correct horse battery\n')).toBe('correct horse battery');
-    expect(passwordFromStdin(String.fromCharCode(0xfeff) + 'correct horse battery\r\n')).toBe(
-      'correct horse battery',
-    );
-    expect(passwordFromStdin(' spaces are kept  \n\n')).toBe(' spaces are kept  \n');
-  });
-
-  it('enforces the password policy', () => {
-    expect(() => passwordFromStdin('short\n')).toThrow(UsageError);
-    expect(() => passwordFromStdin('short\n')).toThrow('Password must be at least 12 characters');
-    expect(() => passwordFromStdin('')).toThrow(UsageError);
   });
 });
 

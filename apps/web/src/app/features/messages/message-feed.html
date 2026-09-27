@@ -9,7 +9,7 @@
 <div class="summary">
   <p class="count" aria-live="polite">
     @if (total() !== null) {
-      {{ total() | number }} {{ noun() }}
+      {{ total() | number }}{{ totalCapped() ? '+' : '' }} {{ noun() }}
     }
   </p>
   <button

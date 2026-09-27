@@ -120,4 +120,46 @@ export class SessionService {
     }
     await this.prisma.session.deleteMany({ where: { tokenHash: hashSessionToken(token) } });
   }
+
+  /** The user's sessions that have not expired, the most recently used first. */
+  listForUser(userId: string, now: Date = new Date()): Promise<SessionRecord[]> {
+    return this.prisma.session.findMany({
+      where: { userId, expiresAt: { gt: now }, absoluteExpiresAt: { gt: now } },
+      orderBy: [{ lastSeenAt: 'desc' }, { id: 'desc' }],
+      select: SESSION_RECORD,
+    });
+  }
+
+  /** Ends one of the user's sessions; false when the user has no such session. */
+  async revokeById(userId: string, sessionId: string): Promise<boolean> {
+    const { count } = await this.prisma.session.deleteMany({ where: { id: sessionId, userId } });
+    return count > 0;
+  }
+
+  /** Ends every session of the user except `keepSessionId`; returns how many ended. */
+  async revokeOthers(userId: string, keepSessionId: string): Promise<number> {
+    const { count } = await this.prisma.session.deleteMany({
+      where: { userId, id: { not: keepSessionId } },
+    });
+    return count;
+  }
+}
+
+const SESSION_RECORD = {
+  id: true,
+  createdAt: true,
+  lastSeenAt: true,
+  expiresAt: true,
+  ip: true,
+  userAgent: true,
+} as const;
+
+/** What the sessions list shows about a session (never its token hash). */
+export interface SessionRecord {
+  id: string;
+  createdAt: Date;
+  lastSeenAt: Date;
+  expiresAt: Date;
+  ip: string | null;
+  userAgent: string | null;
 }

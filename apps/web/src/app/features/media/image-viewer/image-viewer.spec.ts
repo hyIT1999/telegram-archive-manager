@@ -101,6 +101,107 @@ describe('ImageViewer', () => {
     ref.close();
   });
 
+  describe('with the mouse, fingers and full screen', () => {
+    const stage = () => pane().querySelector<HTMLElement>('.stage') as HTMLElement;
+
+    /** A pointer event (jsdom has no PointerEvent: a MouseEvent carrying a pointer id). */
+    function pointer(type: string, pointerId: number, clientX: number, clientY = 100): void {
+      const event = new MouseEvent(type, { clientX, clientY, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'pointerId', { value: pointerId });
+      stage().dispatchEvent(event);
+      TestBed.tick();
+    }
+
+    it('zooms with a double click or the wheel', async () => {
+      const ref = await openAt(0);
+      stage().dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      TestBed.tick();
+      expect(image()?.style.transform).toContain('scale(2.5)');
+      expect(image()?.classList).toContain('zoomed');
+      stage().dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      TestBed.tick();
+      expect(image()?.style.transform).toContain('scale(1)');
+
+      stage().dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true }),
+      );
+      TestBed.tick();
+      expect(image()?.style.transform).toContain('scale(1.2)');
+      stage().dispatchEvent(
+        new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }),
+      );
+      TestBed.tick();
+      expect(image()?.style.transform).toContain('scale(1)');
+      ref.close();
+    });
+
+    it('moves between images with a swipe at normal size, not with a short or upward drag', async () => {
+      const ref = await openAt(0);
+      pointer('pointerdown', 1, 300);
+      pointer('pointerup', 1, 280);
+      expect(pane().textContent).toContain('1 / 2');
+      pointer('pointerdown', 1, 300, 100);
+      pointer('pointerup', 1, 220, 300);
+      expect(pane().textContent).toContain('1 / 2');
+
+      pointer('pointerdown', 1, 300);
+      pointer('pointerup', 1, 150);
+      expect(pane().textContent).toContain('2 / 2');
+      pointer('pointerdown', 1, 150);
+      pointer('pointerup', 1, 300);
+      expect(pane().textContent).toContain('1 / 2');
+      ref.close();
+    });
+
+    it('zooms with two fingers, and a zoomed image does not swipe', async () => {
+      const ref = await openAt(0);
+      pointer('pointerdown', 1, 100);
+      pointer('pointerdown', 2, 200);
+      pointer('pointermove', 2, 300);
+      expect(image()?.style.transform).toContain('scale(2)');
+      pointer('pointerup', 2, 300);
+      pointer('pointerup', 1, 100);
+
+      pointer('pointerdown', 1, 300);
+      pointer('pointermove', 1, 200);
+      pointer('pointerup', 1, 100);
+      expect(pane().textContent).toContain('1 / 2');
+      ref.close();
+    });
+
+    it('goes full screen with its button or F, and says so', async () => {
+      const ref = await openAt(0);
+      const host = pane();
+      let fullscreenElement: Element | null = null;
+      Object.defineProperty(document, 'fullscreenElement', {
+        configurable: true,
+        get: () => fullscreenElement,
+      });
+      host.requestFullscreen = vi.fn(async () => {
+        fullscreenElement = host;
+        document.dispatchEvent(new Event('fullscreenchange'));
+      });
+      document.exitFullscreen = vi.fn(async () => {
+        fullscreenElement = null;
+        document.dispatchEvent(new Event('fullscreenchange'));
+      });
+
+      tool('Full screen')?.click();
+      await vi.waitFor(() => {
+        TestBed.tick();
+        expect(tool('Leave full screen')).not.toBeNull();
+      });
+      host.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }));
+      await vi.waitFor(() => {
+        TestBed.tick();
+        expect(tool('Full screen')).not.toBeNull();
+      });
+      expect(document.exitFullscreen).toHaveBeenCalled();
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+      ref.close();
+    });
+  });
+
   it('closes with its button', async () => {
     const ref = await openAt(1);
     const closed = vi.fn();

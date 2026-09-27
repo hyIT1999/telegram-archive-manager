@@ -6,9 +6,9 @@ import { verifyPassword } from '../../src/auth/password.js';
 import {
   createUser,
   parseCreateUserArgs,
-  passwordFromStdin,
   UserExistsError,
 } from '../../src/cli/create-user.command.js';
+import { passwordFromStdin } from '../../src/cli/password-input.js';
 import { createTestPrisma, resetDatabase } from './support/database.js';
 import { nextClientIp } from './support/http.js';
 import { createTestApp } from './support/test-app.js';

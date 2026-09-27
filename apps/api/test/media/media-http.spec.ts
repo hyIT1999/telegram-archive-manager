@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseByteRange } from '../../src/media/byte-range.js';
+import { ifRangeMatches, parseByteRange } from '../../src/media/byte-range.js';
 import { contentDisposition, isInlineType } from '../../src/media/content-disposition.js';
 
 describe('parseByteRange', () => {
@@ -46,6 +46,8 @@ describe('content disposition', () => {
       'application/javascript',
       'video/quicktime',
       'application/zip',
+      'audio/x-list+xml',
+      'AUDIO/XML',
     ]) {
       expect(isInlineType(type)).toBe(false);
     }
@@ -58,5 +60,35 @@ describe('content disposition', () => {
     expect(contentDisposition('inline', "it's (new).mp4")).toBe(
       `inline; filename="it's (new).mp4"; filename*=UTF-8''it%27s%20%28new%29.mp4`,
     );
+  });
+
+  it('drops the characters that reverse or hide part of a name', () => {
+    expect(contentDisposition('attachment', 'invoice‮fdp.exe')).toBe(
+      `attachment; filename="invoicefdp.exe"; filename*=UTF-8''invoicefdp.exe`,
+    );
+    expect(contentDisposition('attachment', 'a⁦b‏c\r\nd.txt')).toBe(
+      `attachment; filename="abcd.txt"; filename*=UTF-8''abcd.txt`,
+    );
+    expect(contentDisposition('attachment', '‮')).toBe(
+      `attachment; filename="file"; filename*=UTF-8''file`,
+    );
+  });
+});
+
+describe('ifRangeMatches', () => {
+  const modified = new Date('2026-09-26T10:00:00.000Z');
+
+  it('honours ranges without If-Range, or with our strong ETag or exact date', () => {
+    expect(ifRangeMatches(undefined, '"abc"', null)).toBe(true);
+    expect(ifRangeMatches('"abc"', '"abc"', null)).toBe(true);
+    expect(ifRangeMatches('Sat, 26 Sep 2026 10:00:00 GMT', '"abc"', modified)).toBe(true);
+  });
+
+  it('sends the whole file for another version or a weak ETag', () => {
+    expect(ifRangeMatches('"old"', '"abc"', modified)).toBe(false);
+    expect(ifRangeMatches('W/"abc"', 'W/"abc"', modified)).toBe(false);
+    expect(ifRangeMatches('Sat, 26 Sep 2026 09:59:59 GMT', '"abc"', modified)).toBe(false);
+    expect(ifRangeMatches('Sat, 26 Sep 2026 10:00:00 GMT', '"abc"', null)).toBe(false);
+    expect(ifRangeMatches('not a date', '"abc"', modified)).toBe(false);
   });
 });

@@ -73,34 +73,22 @@ export class TelegramLifecycle implements OnApplicationBootstrap, OnModuleDestro
     while (!signal.aborted) {
       let retryAfterMs = ERROR_RETRY_MS;
       try {
-        if (!(await this.connection.acquireLease())) {
+        // No `continue` in here: it would skip the pause below and retry at once, in a loop.
+        if (await this.connection.acquireLease()) {
+          await this.serve(signal);
+          if (!signal.aborted) {
+            this.status.setTelegram(
+              TelegramConnectionState.ERROR,
+              'Lost the Telegram owner lease; reconnecting',
+            );
+          }
+        } else {
           this.status.setTelegram(
             TelegramConnectionState.STANDBY,
             'Another worker process owns the Telegram connection',
           );
-          retryAfterMs = LEASE_RETRY_MS;
-          continue;
         }
-        const leaseLost = new Promise<void>((resolve) => this.connection.onLeaseLost(resolve));
-        this.status.setTelegram(TelegramConnectionState.CONNECTING);
-        await this.connection.connect();
-        const state = await this.auth.initialize();
-        await this.rpc.start();
-        this.status.setTelegram(TelegramConnectionState.CONNECTED);
-        this.logger.log(`Connected to Telegram (login state: ${state})`);
-        if (state === TelegramAuthState.READY) {
-          await this.startUpdates();
-          await this.refreshStaleDialogs();
-        }
-
-        await Promise.race([leaseLost, aborted(signal)]);
-        if (!signal.aborted) {
-          this.status.setTelegram(
-            TelegramConnectionState.ERROR,
-            'Lost the Telegram owner lease; reconnecting',
-          );
-          retryAfterMs = LEASE_RETRY_MS;
-        }
+        retryAfterMs = LEASE_RETRY_MS;
       } catch (error) {
         if (!signal.aborted) {
           this.logger.error(`Telegram connection failed: ${errorMessage(error)}`);
@@ -111,6 +99,22 @@ export class TelegramLifecycle implements OnApplicationBootstrap, OnModuleDestro
       }
       await sleep(retryAfterMs, signal);
     }
+  }
+
+  /** Connects with the lease held and serves until the lease is lost or the worker stops. */
+  private async serve(signal: AbortSignal): Promise<void> {
+    const leaseLost = new Promise<void>((resolve) => this.connection.onLeaseLost(resolve));
+    this.status.setTelegram(TelegramConnectionState.CONNECTING);
+    await this.connection.connect();
+    const state = await this.auth.initialize();
+    await this.rpc.start();
+    this.status.setTelegram(TelegramConnectionState.CONNECTED);
+    this.logger.log(`Connected to Telegram (login state: ${state})`);
+    if (state === TelegramAuthState.READY) {
+      await this.startUpdates();
+      await this.refreshStaleDialogs();
+    }
+    await Promise.race([leaseLost, aborted(signal)]);
   }
 
   /** RPC first (no new work), then the client, then the lease — never the other way round. */

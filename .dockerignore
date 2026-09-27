@@ -4,6 +4,8 @@
 **/dist
 **/.angular
 **/coverage
+**/test-results
+**/playwright-report
 **/*.tsbuildinfo
 **/*.log
 packages/database/src/generated

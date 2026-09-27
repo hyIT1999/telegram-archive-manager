@@ -4,19 +4,21 @@ import { TestBed } from '@angular/core/testing';
 import { MATERIAL_ANIMATIONS } from '@angular/material/core';
 import {
   makeReadyStatus,
+  makeSession,
   makeSettings,
   makeStorageCheck,
   makeStorageList,
   makeStorageLocation,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
+import { ACCOUNT_ENDPOINTS } from '../account/account-api';
 import { STORAGE_ENDPOINTS } from '../storage/storage-api';
 import { SETTINGS_ENDPOINT } from './settings-api';
 import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { SettingsPage } from './settings-page';
 
 describe('SettingsPage', () => {
-  it('shows the Telegram account, storage locations, download and sync settings, and the appearance', async () => {
+  it('shows the account, Telegram account, storage locations, download and sync settings, and the appearance', async () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -29,6 +31,7 @@ describe('SettingsPage', () => {
     TestBed.tick();
 
     const computer = makeStorageLocation({ name: 'This computer', builtIn: true, isDefault: true });
+    (await nextRequest(http, ACCOUNT_ENDPOINTS.sessions)).flush([makeSession()]);
     http.expectOne(TELEGRAM_ENDPOINTS.status).flush(makeReadyStatus());
     http.expectOne(STORAGE_ENDPOINTS.locations).flush(makeStorageList([computer]));
     // The download and the sync settings each read them.
@@ -45,6 +48,7 @@ describe('SettingsPage', () => {
     const page = fixture.nativeElement as HTMLElement;
     const headings = Array.from(page.querySelectorAll('h2')).map((title) => title.textContent);
     expect(headings).toEqual([
+      'Your account',
       'Telegram account',
       'Storage locations',
       'Media downloads',

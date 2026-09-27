@@ -1,9 +1,35 @@
 import type { Prisma } from './generated/prisma/client.js';
 
+/** How a download that was running ended (ACTIVE → one of these). */
+export type FinishedDownloadStatus = 'COMPLETED' | 'FAILED' | 'SKIPPED';
+
 /**
- * Recomputes an import job's media counters from its download jobs. They are never incremented,
- * so a repeated page, a retried download or a changed setting can never count twice. The worker
- * (imports, downloads) and the api (settings, retries) both keep them current.
+ * Counts one running file of an import job as finished, without recounting the job's files
+ * (a recount reads every file: ~150 ms for 100 000). A running file only counts in total_media
+ * and total_bytes, so leaving ACTIVE adds it to exactly one counter. Call it in the transaction
+ * that moved the download from ACTIVE, and only then; everything else recounts.
+ */
+export async function countFinishedFile(
+  tx: Prisma.TransactionClient,
+  importJobId: string,
+  downloadJobId: string,
+  status: FinishedDownloadStatus,
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE import_jobs AS j
+    SET downloaded_files = j.downloaded_files + (${status}::text = 'COMPLETED')::int,
+        failed_files = j.failed_files + (${status}::text = 'FAILED')::int,
+        skipped_files = j.skipped_files + (${status}::text = 'SKIPPED')::int,
+        downloaded_bytes = j.downloaded_bytes
+          + CASE WHEN ${status}::text = 'COMPLETED' THEN coalesce(d.size, 0) ELSE 0 END
+    FROM download_jobs AS d
+    WHERE j.id = ${importJobId}::uuid AND d.id = ${downloadJobId}::uuid`;
+}
+
+/**
+ * Recomputes an import job's media counters from its download jobs, so a repeated page, a retried
+ * download or a changed setting can never count twice. The worker (import pages) and the api
+ * (settings, retries, cancels) recount; only a single download ending uses countFinishedFile.
  */
 export async function refreshMediaCounters(
   tx: Prisma.TransactionClient,

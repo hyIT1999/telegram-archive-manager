@@ -34,6 +34,8 @@ export interface StoredContent {
   mimeType: string;
   /** The name a download gets. */
   fileName: string;
+  /** SHA-256 of the stored bytes (lowercase hex), recorded when the download completed. */
+  checksum: string | null;
 }
 
 /** Download states a request can (re)start: everything but running and done. */
@@ -206,6 +208,7 @@ export class MediaService {
       key,
       mimeType: media.mimeType ?? 'application/octet-stream',
       fileName: media.filename ?? key.slice(key.lastIndexOf('/') + 1),
+      checksum: media.checksum,
     };
   }
 

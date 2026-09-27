@@ -2,7 +2,7 @@
 # NestJS API image. Build context: repository root.
 #   docker build -f apps/api/Dockerfile --target runtime -t tam-api .
 # Targets:
-#   runtime  (default) the API, plus the create-user CLI used by the compose `bootstrap` service
+#   runtime  (default) the API and the user CLIs (create-user, reset-password)
 #   migrate  one-shot `prisma migrate deploy` (has the Prisma CLI, migrations and prisma.config.ts)
 
 ARG NODE_IMAGE=node:24-trixie-slim
@@ -25,20 +25,27 @@ COPY packages/telegram/package.json packages/telegram/
 COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/web/package.json apps/web/
+COPY apps/e2e/package.json apps/e2e/
 
 # ---- build: full dev dependencies of the api and the database package (Prisma CLI) ----
 FROM manifests AS build
+# Prisma's engines look for OpenSSL, which the slim image does not have.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm ci --include-workspace-root -w @tam/database -w @tam/api
 COPY tsconfig.base.json tsconfig.node.json tsconfig.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
-# prisma generate needs no database (prisma.config.ts falls back to an empty URL).
-RUN npm run build:packages && npm run build -w @tam/api
+# prisma generate needs no database (prisma.config.ts falls back to an empty URL). tsc -b follows
+# the api's project references only: packages/telegram belongs to the worker.
+RUN npm run db:generate && npx tsc -b apps/api
 
 # ---- migrate: one-shot `prisma migrate deploy` (compose service `migrate`) ----
 FROM build AS migrate
 WORKDIR /app/packages/database
 ENV NODE_ENV=production
+USER node
 CMD ["npx", "--no-install", "prisma", "migrate", "deploy"]
 
 # ---- prod-deps: runtime dependencies only ----

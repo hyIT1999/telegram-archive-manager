@@ -24,7 +24,9 @@ const TOP = 'Unofficial Telegram Archive';
 /** A PUT that carries bytes of a resumable upload (not a "how much do you have" query). */
 function isDataChunk(input: string | URL | Request, init?: RequestInit): boolean {
   const range = (init?.headers as Record<string, string> | undefined)?.['content-range'] ?? '';
-  return String(input).includes('upload_id=') && init?.method === 'PUT' && /^bytes \d+-/.test(range);
+  return (
+    String(input).includes('upload_id=') && init?.method === 'PUT' && /^bytes \d+-/.test(range)
+  );
 }
 const KEY = 'Physics (-100123)/2026-09/7 - notes.pdf';
 
@@ -76,7 +78,9 @@ describe('GoogleDriveStorageDriver', () => {
   }
 
   const folderCount = (parentId: string, name: string) =>
-    google.childrenOf(parentId).filter((file) => file.name === name && file.mimeType === DRIVE_FOLDER_MIME_TYPE).length;
+    google
+      .childrenOf(parentId)
+      .filter((file) => file.name === name && file.mimeType === DRIVE_FOLDER_MIME_TYPE).length;
 
   it('creates the top folder once and reuses it', async () => {
     expect((await ensureTopFolder(drive, TOP)).id).toBe(rootId);
@@ -84,15 +88,32 @@ describe('GoogleDriveStorageDriver', () => {
   });
 
   it('uploads a small file into readable nested folders and reads it back', async () => {
-    const info = await driver.putFile(KEY, await source('lecture notes'), { contentType: 'application/pdf' });
+    const info = await driver.putFile(KEY, await source('lecture notes'), {
+      contentType: 'application/pdf',
+    });
     expect(info).toEqual({ key: KEY, size: 13, contentType: 'application/pdf' });
 
     const stored = google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf');
     expect(stored?.content.toString()).toBe('lecture notes');
-    expect(await driver.stat(KEY)).toMatchObject({ key: KEY, size: 13, contentType: 'application/pdf' });
+    expect(await driver.stat(KEY)).toMatchObject({
+      key: KEY,
+      size: 13,
+      contentType: 'application/pdf',
+    });
     expect(await text(await driver.openReadStream(KEY))).toBe('lecture notes');
     expect(await text(await driver.openReadStream(KEY, { start: 8, end: 12 }))).toBe('notes');
     expect(driver.localPath()).toBeNull();
+  });
+
+  it('reads what a stat just found with a single request (seeking in a video)', async () => {
+    await driver.putFile(KEY, await source('lecture notes'));
+    const info = await driver.stat(KEY);
+    expect(info?.ref).toEqual(expect.any(String));
+    google.requests.length = 0;
+    expect(
+      await text(await driver.openReadStream(KEY, { start: 8, end: 12 }, info ?? undefined)),
+    ).toBe('notes');
+    expect(google.requests).toHaveLength(1);
   });
 
   it('replaces the content of an existing file instead of adding a second one', async () => {
@@ -109,7 +130,9 @@ describe('GoogleDriveStorageDriver', () => {
     const info = await driver.putFile(KEY, await source(content), { contentType: 'video/mp4' });
 
     expect(info.size).toBe(content.length);
-    expect(google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content)).toBe(true);
+    expect(
+      google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content),
+    ).toBe(true);
     expect(google.requests.filter((request) => request.method === 'PUT').length).toBeGreaterThan(5);
     expect((await buffer(await driver.openReadStream(KEY))).equals(content)).toBe(true);
   });
@@ -123,7 +146,10 @@ describe('GoogleDriveStorageDriver', () => {
   it('creates each folder once when uploads run in parallel', async () => {
     await Promise.all(
       Array.from({ length: 6 }, async (_, index) =>
-        driver.putFile(`Physics (-100123)/2026-09/${index} - file.bin`, await source(`file ${index}`)),
+        driver.putFile(
+          `Physics (-100123)/2026-09/${index} - file.bin`,
+          await source(`file ${index}`),
+        ),
       ),
     );
     expect(folderCount(rootId, 'Physics (-100123)')).toBe(1);
@@ -176,7 +202,13 @@ describe('GoogleDriveStorageDriver', () => {
       if (limited > 0 && String(input).includes('/drive/v3/about')) {
         limited -= 1;
         return Response.json(
-          { error: { code: 403, message: 'Rate limit', errors: [{ reason: 'userRateLimitExceeded' }] } },
+          {
+            error: {
+              code: 403,
+              message: 'Rate limit',
+              errors: [{ reason: 'userRateLimitExceeded' }],
+            },
+          },
           { status: 403 },
         );
       }
@@ -192,7 +224,13 @@ describe('GoogleDriveStorageDriver', () => {
     fetchFn = async (input, init) =>
       String(input).includes('uploadType=multipart')
         ? Response.json(
-            { error: { code: 403, message: 'The user has exceeded their Drive storage quota', errors: [{ reason: 'storageQuotaExceeded' }] } },
+            {
+              error: {
+                code: 403,
+                message: 'The user has exceeded their Drive storage quota',
+                errors: [{ reason: 'storageQuotaExceeded' }],
+              },
+            },
             { status: 403 },
           )
         : fetch(input, init);
@@ -212,7 +250,9 @@ describe('GoogleDriveStorageDriver', () => {
     };
     await driver.putFile(KEY, await source(content));
     expect(rejected).toBe(1);
-    expect(google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content)).toBe(true);
+    expect(
+      google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content),
+    ).toBe(true);
   });
 
   it('waits as long as Google asks when chunks are rate limited, and keeps the reason', async () => {
@@ -238,7 +278,13 @@ describe('GoogleDriveStorageDriver', () => {
       if (limited > 0 && isDataChunk(input, init)) {
         limited -= 1;
         return Response.json(
-          { error: { code: 403, message: 'User rate limit exceeded.', errors: [{ reason: 'userRateLimitExceeded' }] } },
+          {
+            error: {
+              code: 403,
+              message: 'User rate limit exceeded.',
+              errors: [{ reason: 'userRateLimitExceeded' }],
+            },
+          },
           { status: 403, headers: { 'retry-after': '7' } },
         );
       }
@@ -247,10 +293,14 @@ describe('GoogleDriveStorageDriver', () => {
     const content = randomBytes(600 * 1024);
     await limitedDriver.putFile(KEY, await source(content));
     expect(waits).toEqual([7_000, 7_000]);
-    expect(google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content)).toBe(true);
+    expect(
+      google.fileAt(TOP, 'Physics (-100123)', '2026-09', '7 - notes.pdf')?.content.equals(content),
+    ).toBe(true);
 
     limited = Number.POSITIVE_INFINITY;
-    const failure = await limitedDriver.putFile(KEY, await source(content)).catch((error: unknown) => error);
+    const failure = await limitedDriver
+      .putFile(KEY, await source(content))
+      .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(GoogleApiError);
     expect(failure).toMatchObject({ status: 403, reason: 'userRateLimitExceeded' });
     expect(classifyStorageFailure(failure)).toBe('rate-limited');
@@ -273,7 +323,9 @@ describe('GoogleDriveStorageDriver', () => {
   it('reports upload progress and stops when asked', async () => {
     const content = randomBytes(1024 * 1024);
     const progress: number[] = [];
-    await driver.putFile(KEY, await source(content), { onProgress: (bytes) => progress.push(bytes) });
+    await driver.putFile(KEY, await source(content), {
+      onProgress: (bytes) => progress.push(bytes),
+    });
     expect(progress.length).toBeGreaterThan(2);
     expect(progress.at(-1)).toBe(content.length);
     expect(progress).toEqual([...progress].sort((a, b) => a - b));

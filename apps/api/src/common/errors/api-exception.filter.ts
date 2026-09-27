@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { RetryAfterException } from './retry-after.exception.js';
 import { toApiErrorBody } from './to-api-error-body.js';
 
 /** Global filter: every error response has the ApiErrorBody shape. */
@@ -33,6 +34,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
       // Too late for a JSON error; drop the connection so the client sees a failure.
       response.destroy();
       return;
+    }
+    if (exception instanceof RetryAfterException) {
+      response.setHeader('Retry-After', String(exception.retryAfterSeconds));
     }
     response.status(errorBody.statusCode).json(errorBody);
   }

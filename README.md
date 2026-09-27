@@ -26,7 +26,7 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 5 | Dashboard đầy đủ, Channels (kèm forum topic), Messages, trình xem media | ✅ Hoàn thành |
 | 6 | Search, Tags, Favorites, Filters | ✅ Hoàn thành |
 | 7 | Tiến trình realtime (SSE), sync message mới | ✅ Hoàn thành |
-| 8 | Test bổ sung, bảo mật, hiệu năng, Docker production | ⏳ Tiếp theo |
+| 8 | Test bổ sung, bảo mật, hiệu năng, Docker production, pm2 | ✅ Hoàn thành |
 
 Đã dùng được:
 - Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu), **Settings → Telegram account**, **Settings → Storage locations**.
@@ -41,6 +41,12 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
     - sync ngay khi Telegram báo có message mới, cộng thêm lượt kiểm tra định kỳ chỉnh được trong **Settings → Sync**;
     - công tắc sync ở bước Start của wizard;
     - bộ lọc All/Imports/Syncs trên trang Import Jobs.
+- Phase 8:
+  - **Chạy production** trên máy Windows này bằng pm2 (`npm run prod:start`, http://localhost:8080; API phục vụ luôn giao diện web), tự chạy lại khi lỗi và khi máy khởi động; hoặc bằng **Docker Compose** trên máy Linux trong LAN (§11).
+  - **Settings → Your account:** đổi mật khẩu, xem các trình duyệt đang đăng nhập và đăng xuất từ xa. Đăng nhập sai 10 lần thì email bị khoá 15 phút. Lệnh `reset-password` đặt lại mật khẩu khi quên (§11).
+  - Bảo mật HTTP (Host header, CSP chạy được trên HTTP, `X-Forwarded-For` không giả được sau nginx), font tự host (không tải gì từ Google), media có ETag/304.
+  - Hiệu năng đo trên archive giả 150 000 message: hàng đợi tải từ 344 ms xuống 0,5 ms mỗi lượt, trang channel và mục Media downloads nhanh gấp 4–5 lần (§11).
+  - Bộ test trình duyệt (Playwright), coverage và CI cho GitHub Actions (§7).
 
 ## Kiến trúc tổng quan
 
@@ -78,13 +84,17 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
     - channel và download gửi gợi ý để trang tự đọc lại.
   - Mất kết nối `LISTEN` thì API tự nối lại, rồi báo `resync` để các trang đọc lại dữ liệu.
 - **Sync** là một import job loại `SYNC`, chỉ đọc message mới hơn message mới nhất đã lưu, chạy trong queue riêng `telegram-sync` để không phải chờ sau một import dài. Chỉ `SyncScheduler` của worker tạo sync tự động (mục §10).
+- **Production** (§11) có hai cách:
+  - Trên Windows: pm2 chạy `tam-api` và `tam-worker`, và API phục vụ luôn bản build của web (`WEB_DIST_DIR`) trên một cổng.
+  - Trên Linux: Docker Compose, với nginx phục vụ web và chuyển `/api/` sang API.
 
 Cấu trúc monorepo (npm workspaces, ESM, TypeScript 6.0.3):
 
 ```
 apps/web           Angular 22 (standalone, zoneless, signals, Material 3)
-apps/api           NestJS 12 REST + SSE (/api/events), CLI create-user
+apps/api           NestJS 12 REST + SSE (/api/events), phục vụ web ở production; CLI create-user, reset-password
 apps/worker        NestJS 12 standalone + BullMQ
+apps/e2e           Test trình duyệt (Playwright) trên bản build thật
 packages/shared    Contract dùng chung: enums, zod schemas, DTO, tên queue, event
 packages/crypto    SecretBox (AES-256-GCM) cho bí mật lưu trong DB: session Telegram, token Google
 packages/database  Prisma schema + migrations + generated client
@@ -103,6 +113,8 @@ packages/storage   StorageDriver: thư mục trên máy, Google Drive (OAuth dev
 | PostgreSQL | **18** | Cần hàm `uuidv7()` và extension `pg_trgm`, `unaccent` (có sẵn trong contrib) |
 | Redis | 7.4 (tối thiểu 6.2) | BullMQ 6; bắt buộc `maxmemory-policy noeviction`; nên bật AOF |
 | Docker Engine + Compose v2 | mới | Chỉ cho production trên **Linux** |
+| pm2 | 7 (đã kiểm thử 7.0.4) | Production không dùng Docker (máy Windows này): `npm install -g pm2` |
+| Google Chrome | mới | Chỉ cho test trình duyệt (`npm run test:e2e`); CI dùng Chromium của Playwright |
 | Tài khoản Telegram + `api_id`/`api_hash` | — | Cần từ Phase 2 |
 
 Dung lượng đĩa: `node_modules` khoảng 0.6–1 GB. Media tải về có thể rất lớn, nên cho channel lưu vào thư mục ở ổ còn nhiều chỗ (`STORAGE_LOCAL_ROOTS`) hoặc vào Google Drive (mục 9).
@@ -138,13 +150,16 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `COOKIE_SECURE` | api | `false` | `true` khi chạy sau HTTPS. `false` chỉ dùng cho HTTP local/LAN, vì trình duyệt bỏ cookie `Secure` trên http |
 | `SESSION_TTL_HOURS` | api | `168` | Hạn phiên kiểu trượt (gia hạn khi còn dùng) |
 | `SESSION_ABSOLUTE_TTL_DAYS` | api | `30` | Hạn tối đa tính từ lúc đăng nhập |
-| `CSRF_TRUSTED_ORIGINS` | api | (rỗng) | Danh sách origin cách nhau bằng dấu phẩy, dạng `scheme://host[:port]`, **không có path** |
-| `TRUST_PROXY` | api | `loopback` | Giá trị "trust proxy" của Express: `true`/`false`, số hop, hoặc danh sách `loopback`, `linklocal`, `uniquelocal`, IP/CIDR. Sau nginx trong Docker: `loopback, uniquelocal` |
+| `CSRF_TRUSTED_ORIGINS` | api | (rỗng) | Danh sách origin cách nhau bằng dấu phẩy, dạng `scheme://host[:port]`, **không có path**. Tên host của chúng cũng là tên API trả lời (xem dòng dưới) |
+| `ALLOWED_HOSTS` | api | (rỗng) | Thêm tên host API trả lời, cách nhau bằng dấu phẩy (vd. `archive.lan,*.example.com`). IP và `localhost` luôn được; Host header khác nhận `421 HOST_NOT_ALLOWED` (chống DNS rebinding) |
+| `TRUST_PROXY` | api | `loopback` | Giá trị "trust proxy" của Express: `true`/`false`, số hop, hoặc danh sách `loopback`, `linklocal`, `uniquelocal`, IP/CIDR. Không có proxy (pm2): `false`. Sau nginx trong Docker: `1` |
+| `WEB_DIST_DIR` | api | — | Thư mục build của web (`apps/web/dist/web/browser`, đường dẫn tuyệt đối). Có giá trị thì API phục vụ luôn giao diện web (production với pm2, `ecosystem.config.cjs` tự đặt). Để trống khi dev và trong Docker |
 | `TELEGRAM_RPC_TIMEOUT_MS` | api | `30000` | Thời gian API chờ worker trả lời một thao tác Telegram (500–120000), quá hạn thì trả `504 TELEGRAM_TIMEOUT` |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | **chỉ worker** | — | Từ my.telegram.org. Phải đặt cả hai cùng lúc; hash là 32 ký tự hex |
 | `TELEGRAM_SESSION_DATABASE_URL` | worker | — | DB riêng cho session Telegram (`…/tam_tg`) |
 | `TELEGRAM_SESSION_KEY` | worker | — | 32 byte base64, dùng mã hoá auth key và trạng thái đăng nhập |
 | `WORKER_HEARTBEAT_INTERVAL_MS` | worker | `5000` | Chu kỳ heartbeat (1000–60000); key có TTL = 3 × chu kỳ |
+| `WORKER_ALIVE_FILE` | worker | — | File được chạm sau mỗi heartbeat, cho healthcheck của container (image Docker tự đặt) |
 | `IMPORT_PAGE_DELAY_MS` | worker | `1000` | Nghỉ giữa hai trang lịch sử (100 message) khi import (0–60000), để tránh giới hạn tần suất của Telegram. Channel 10.000 message mất khoảng 2–3 phút |
 | `STORAGE_LOCAL_ROOT` | api, worker | — | Thư mục của nơi lưu có sẵn "This computer". **Dùng đường dẫn tuyệt đối**, vì api và worker chạy ở thư mục khác nhau |
 | `STORAGE_LOCAL_ROOTS` | api | = `STORAGE_LOCAL_ROOT` | Các thư mục, ngăn cách bằng `;`, mà web được phép thêm làm nơi lưu (và thư mục con bên trong). Web không bao giờ ghi được ra ngoài các thư mục này |
@@ -154,9 +169,13 @@ Mọi biến nằm trong **một file `.env` ở thư mục gốc**; mẫu là `
 | `DOWNLOAD_STAGING_DIR` | worker | `<STORAGE_LOCAL_ROOT>/.tam-tmp` | Nơi file chờ trước khi upload lên Google Drive; cần chỗ cho file lớn nhất (1–4 GB) |
 | `THUMBNAIL_DIR` | api, worker | `<STORAGE_LOCAL_ROOT>/.tam-thumbnails` | Ảnh xem trước nhỏ lấy từ Telegram (vài chục KB mỗi file). Api và worker phải cùng một thư mục |
 | `S3_*` | — | — | Dự kiến cho storage S3-compatible, chưa dùng |
-| `POSTGRES_PASSWORD`, `REDIS_PASSWORD` | docker compose | — | Nên dùng chuỗi **hex** (`openssl rand -hex 24`), vì chúng nằm trong URL |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | docker compose (`bootstrap`) | — | Admin web đầu tiên; mật khẩu tối thiểu 12 ký tự |
+| `POSTGRES_PASSWORD` | docker compose | — | Mật khẩu của role `tam` (không phải superuser) mà api, worker và migration dùng. Nên dùng chuỗi **hex** (`openssl rand -hex 24`), vì nó nằm trong URL |
+| `POSTGRES_SUPERUSER_PASSWORD` | docker compose | — | Mật khẩu superuser `postgres`, chỉ dùng khi tạo volume lần đầu |
+| `REDIS_PASSWORD` | docker compose | — | Chuỗi hex như trên |
+| `WEB_ORIGINS` | docker compose | `http://localhost:8080` | Các địa chỉ bạn mở archive, cách nhau bằng dấu phẩy (vd. `http://192.168.1.20:8080,http://nas.lan:8080`). Thành `CSRF_TRUSTED_ORIGINS` của api trong Docker |
 | `WEB_PORT` | docker compose | `8080` | Cổng host của container web (nginx) |
+
+Khi `NODE_ENV=production`, api và worker **không chịu khởi động** nếu một URL hay secret vẫn còn giá trị mẫu `CHANGE_ME` của `.env.example` (thông báo ghi tên biến, không in giá trị).
 
 Tạo `TELEGRAM_SESSION_KEY` và `STORAGE_SECRET_KEY` (mỗi biến một key riêng, chạy lệnh hai lần):
 
@@ -198,37 +217,49 @@ Quy ước:
 
 ## 6. Docker
 
-`docker-compose.yml` dành cho **Linux host**. Windows Server 2019 không chạy được Linux containers.
+`docker-compose.yml` dành cho **Linux host** trong mạng LAN (HTTP thường). Windows Server 2019 không chạy được Linux containers; máy này chạy production bằng pm2 (§11).
 
 | Service | Vai trò |
 |---|---|
-| `postgres` | PostgreSQL 18.6 (volume `pgdata`); script init tạo thêm DB `tam_tg` |
-| `redis` | Redis 7.4.11, có mật khẩu, AOF, `noeviction` (volume `redisdata`) |
-| `migrate` | One-shot `prisma migrate deploy` |
-| `bootstrap` | One-shot tạo admin từ `ADMIN_EMAIL`/`ADMIN_PASSWORD` nếu chưa có. Mật khẩu truyền qua stdin |
+| `postgres` | PostgreSQL 18.6 (volume `pgdata`). Superuser `postgres` chỉ dùng lúc tạo volume: script `docker/postgres/init/10-create-databases.sh` tạo role **`tam` (không phải superuser)** làm chủ hai DB `tam` và `tam_tg` |
+| `redis` | Redis 7.4.11, có mật khẩu, AOF, `noeviction` (volume `redisdata`), chạy bằng user `redis` |
+| `migrate` | One-shot `prisma migrate deploy`, chạy bằng role `tam` (chủ DB đủ quyền tạo bảng, trigger và extension `pg_trgm`/`unaccent`) |
 | `api` | NestJS API (cổng nội bộ 3100, healthcheck `/api/health/live`); volume `media` để kiểm tra và phục vụ nơi lưu |
-| `worker` | BullMQ worker. **Đúng 1 replica**; `stop_grace_period: 60s`; volume `media` |
-| `web` | nginx phục vụ Angular và proxy `/api/`, cổng `${WEB_PORT:-8080}` |
+| `worker` | BullMQ worker. **Đúng 1 replica**; `stop_grace_period: 60s`; volume `media`; healthcheck đọc tuổi của file heartbeat (`WORKER_ALIVE_FILE`) |
+| `web` | nginx (image `nginx-unprivileged`, cổng 8080 trong container) phục vụ Angular và proxy `/api/`, cổng host `${WEB_PORT:-8080}` |
 
 ```bash
 cp .env.example .env
-# Điền: POSTGRES_PASSWORD, REDIS_PASSWORD (hex), ADMIN_EMAIL, ADMIN_PASSWORD, TELEGRAM_*,
-#       COOKIE_SECURE=true nếu có HTTPS phía trước, CSRF_TRUSTED_ORIGINS=https://<domain>
+# Điền phần "Docker Compose only": POSTGRES_PASSWORD, POSTGRES_SUPERUSER_PASSWORD, REDIS_PASSWORD
+# (hex), WEB_ORIGINS (địa chỉ bạn mở archive), cùng TELEGRAM_* (mục 4)
 docker compose up -d --build
-docker compose ps          # migrate/bootstrap: Exited (0); api/web: healthy
-# Mở http://localhost:8080 và đăng nhập bằng ADMIN_EMAIL / ADMIN_PASSWORD
+docker compose ps          # migrate: Exited (0); api, worker, web: healthy
+# Tạo tài khoản web đầu tiên (hỏi mật khẩu 2 lần, không hiện ra màn hình):
+docker compose exec api node apps/api/dist/cli/create-user.js --email you@example.com
+# Mở http://<địa chỉ máy>:8080
 ```
 
-Smoke test toàn stack (build → chạy với secret tạm → health → đăng nhập → kiểm tra CSRF → gỡ sạch, kể cả volume):
+**Cứng hoá:**
+- Mỗi service chỉ nhận đúng các biến nó cần: secret Telegram chỉ vào `worker`, mật khẩu superuser chỉ vào `postgres`, credential DB không vào `web`. Không mật khẩu nào nằm trên dòng lệnh; tài khoản web tạo bằng CLI nên không có mật khẩu admin trong `docker inspect`.
+- `api`, `worker`, `web` và `redis`: user không phải root, `cap_drop: ALL`, `no-new-privileges`, filesystem gốc chỉ đọc (ghi được `/tmp` và volume). `postgres` giữ quyền cần để tạo cluster, cùng `no-new-privileges`.
+- Log mỗi container tối đa 5 file × 10 MB.
+- nginx ghi **đè** `X-Forwarded-For` bằng địa chỉ thật của client và API tin đúng một proxy (`TRUST_PROXY=1`), nên không ai né được giới hạn đăng nhập bằng header giả.
+- nginx tìm lại địa chỉ `api` khi container được tạo lại (`resolve`), giữ kết nối keep-alive tới API, và không cần IPv6 trên host.
+- API chỉ trả lời IP, `localhost` và các tên có trong `WEB_ORIGINS`/`ALLOWED_HOSTS` (`421` cho tên khác).
+- File build có hash trong tên được cache một năm (`immutable`); `index.html` và file không hash luôn được kiểm tra lại, nên bản mới hiện ngay sau khi deploy.
+- SPA có CSP `script-src 'self'` và chỉ tải từ chính nó (font nằm trong bản build): script khởi tạo theme là file riêng (`theme-init.js`) và build đã tắt inline critical CSS. Không có `upgrade-insecure-requests` vì setup LAN là HTTP.
+
+**Smoke test toàn stack** (build → chạy với secret tạm → tạo user bằng CLI → health, header, cache, Host lạ, `X-Forwarded-For` giả, SSE, restart api, healthcheck worker, không service nào chạy bằng root, role `tam` không phải superuser → gỡ sạch, kể cả volume):
 
 ```bash
 bash scripts/compose-smoke.sh              # cổng 18080; đổi bằng SMOKE_WEB_PORT=9090
 ```
 
-- Mỗi service chỉ nhận đúng các biến nó cần: secret Telegram chỉ vào `worker`, credential DB không vào `web`.
+CI (`.github/workflows/ci.yml`) chạy smoke test này mỗi lần push, vì máy dev không chạy được Docker.
+
 - Nơi lưu "This computer" trong Docker là volume `media` (`/data/storage`). Muốn cho phép thêm thư mục khác (ổ NAS, ổ phụ), mount thư mục đó vào **cả** `api` và `worker` (ví dụ `/mnt/nas:/data/nas`), rồi đặt `STORAGE_LOCAL_ROOTS: /data/storage;/data/nas` cho `api` trong `docker-compose.yml`.
-- `nginx` gửi `Host $http_host` (giữ cả port), vì CSRF fallback của API so sánh `Origin` với `Host`.
-- SPA có CSP `script-src 'self'`: script khởi tạo theme nằm ở file riêng (`theme-init.js`) và build đã tắt inline critical CSS.
+- `nginx` gửi `Host $http_host` (giữ cả port), vì API kiểm tra tên host và CSRF fallback so sánh `Origin` với `Host`.
+- Cài đặt, cập nhật, HTTPS phía trước và sao lưu: xem §11.
 
 ## 7. Run development
 
@@ -268,18 +299,18 @@ copy .env.example .env               # rồi điền DATABASE_URL, SHADOW_DATABA
 npm install
 npm run db:deploy                    # tạo bảng
 npm run build                        # lần đầu: tạo apps/api/dist (cần cho CLI tạo user)
-'<mật-khẩu-≥12-ký-tự>' | node apps/api/dist/cli/create-user.js --email admin@example.com --password-stdin
+node apps/api/dist/cli/create-user.js --email admin@example.com   # hỏi mật khẩu 2 lần, không hiện ra
 npm run dev                          # build packages → tsc watch + api :3100 + worker + web :4300
 ```
 
 - Mở <http://localhost:4300>. Angular dev server proxy `/api/` sang `http://127.0.0.1:3100`, nên cookie phiên là same-origin.
-- CLI tạo user (`create-user`):
-  - mật khẩu **chỉ nhận qua stdin**, không truyền trên dòng lệnh;
-  - email phải có tên miền đầy đủ (ví dụ `admin@example.com`; `admin@local` bị từ chối);
-  - `--if-missing` bỏ qua nếu email đã tồn tại;
-  - exit code: 0 thành công, 1 lỗi (ví dụ email đã có), 2 sai cú pháp.
-  - Trong bash/cmd có thể dùng `echo '<pw>' | npm run user:create -- --email … --password-stdin`. Trong **PowerShell**, khi pipe vào `npm`, dấu `--` bị nuốt, nên hãy gọi thẳng `node apps/api/dist/cli/create-user.js` như ví dụ trên.
-  - PowerShell 5.1 có thể làm hỏng ký tự không phải ASCII khi pipe, nên dùng mật khẩu ASCII.
+- **Không chạy dev khi production đang chạy trên cùng máy** (§11): hai worker không bao giờ được chạy cùng lúc. Dừng production trước (`npm run prod:stop`, và `npm run prod:disable` để watchdog không bật lại khi máy khởi động lại), chạy lại sau bằng `npm run prod:start` / `prod:enable`.
+- CLI tạo user (`create-user`) và đặt lại mật khẩu (`reset-password`, §11):
+  - mật khẩu **không bao giờ nằm trên dòng lệnh**: lệnh hỏi 2 lần trong terminal mà không hiện chữ (Ctrl+C để huỷ), hoặc đọc từ stdin với `--password-stdin` (script, Docker);
+  - email phải có tên miền đầy đủ (ví dụ `admin@example.com`; `admin@local` bị từ chối); mật khẩu tối thiểu 12 ký tự;
+  - `create-user --if-missing` bỏ qua nếu email đã tồn tại;
+  - exit code: 0 thành công, 1 lỗi (ví dụ email đã có, huỷ bằng Ctrl+C), 2 sai cú pháp.
+  - Với `--password-stdin` trong **PowerShell**, pipe thẳng vào `node apps/api/dist/cli/create-user.js`: khi pipe vào `npm`, dấu `--` bị nuốt. PowerShell 5.1 có thể làm hỏng ký tự không phải ASCII khi pipe, nên khi đó dùng mật khẩu ASCII.
 - Health: `curl http://127.0.0.1:3100/api/health/ready` trả trạng thái database, redis và worker (`alive`/`missing`).
 
 ### Kiểm tra chất lượng
@@ -290,10 +321,28 @@ npm run dev                          # build packages → tsc watch + api :3100 
 | `npm run lint` | ESLint 10 cho toàn repo (web dùng `apps/web/eslint.config.js`) |
 | `npm test` | Unit test (Vitest) của mọi workspace, gồm component/service/routing test của Angular |
 | `npm run test:integration` | Integration/e2e với PostgreSQL và Redis thật |
+| `npm run test:e2e` | Test trình duyệt (Playwright, Chrome đã cài trên máy) trên **bản build**: cần `npm run build` trước, hoặc dùng `npm run test:e2e:full` |
+| `npm run test:coverage` | Unit + integration của mọi workspace kèm line coverage, in một bảng; dưới mức tối thiểu của workspace thì lỗi. Cần PostgreSQL và Redis |
 | `npm run build` | Build production toàn bộ |
 | `npm run db:check` | Không có drift giữa migrations và schema |
+| `npm audit --omit=dev` | Lỗ hổng trong dependency chạy thật (hiện 0) |
 
-Integration test **không bao giờ đụng dữ liệu dev**. Chúng tự xoá và tạo lại các DB tạm `tam_test_db`, `tam_test_api`, `tam_test_worker`, và dùng Redis db 14/15 với prefix riêng. Chạy riêng một workspace: `npm run test -w @tam/api`, `npm run test:integration -w @tam/worker`, …
+- Integration test **không bao giờ đụng dữ liệu dev**. Chúng tự xoá và tạo lại các DB tạm `tam_test_db`, `tam_test_api`, `tam_test_worker`, và dùng Redis db 14/15 với prefix riêng. Chạy riêng một workspace: `npm run test -w @tam/api`, `npm run test:integration -w @tam/worker`, …
+- **Test trình duyệt** (`apps/e2e`): tạo lại DB `tam_test_e2e` với một archive nhỏ (forum 2 topic, ảnh PNG và PDF thật trong thư mục tạm, tag, favorite, một import đang chạy), rồi chạy API đã build trên cổng 3190, phục vụ luôn web đã build như production. Không có worker, không gì đi tới Telegram. Các test: đăng nhập sai rồi đúng và đăng xuất; duyệt channel → topic → ảnh (kể cả tải lại trang); PDF trong trang; tìm theo tên file (có tô sáng) và không dấu; favorite và tag; trang job cập nhật live khi DB đổi mà không polling; đổi mật khẩu thì trình duyệt kia bị đưa về trang đăng nhập; header bảo mật, font tự host, không request nào ra khỏi archive; Host lạ bị `421`. `PW_CHANNEL=bundled` dùng Chromium của Playwright thay cho Chrome.
+- **Coverage (dòng code)** lúc kết thúc Phase 8, unit và integration gộp lại:
+
+  | Workspace | Hiện tại | Tối thiểu |
+  |---|---:|---:|
+  | `apps/api` | 90,4 % | 87 % |
+  | `apps/worker` | 87,0 % | 84 % |
+  | `apps/web` | 92,1 % | 89 % |
+  | `packages/shared` / `crypto` | 98,8 % / 100 % | 95 % / 97 % |
+  | `packages/storage` / `telegram` | 88,7 % / 84,9 % | 85 % / 81 % |
+  | `packages/database` | 55,3 % | 52 % |
+
+  `packages/database` thấp vì phần lớn là công cụ cho dev và test (`db:recreate`, tạo DB test); schema, trigger và change feed đều có integration test.
+- **CI** (`.github/workflows/ci.yml`, chạy khi repo được push lên GitHub): typecheck, lint, unit test; integration + coverage với PostgreSQL 18 và Redis 7.4; test trình duyệt; smoke test Docker Compose. Không cần secret nào.
+- **Đo hiệu năng** (§11): `node scripts/perf/seed.mjs` tạo DB `tam_perf` (150 000 message, khoảng 200 MB), `node scripts/perf/measure.mjs` in bảng thời gian (API cần build trước), `node scripts/perf/seed.mjs --drop` xoá DB.
 
 ## 8. Telegram authentication
 
@@ -421,8 +470,8 @@ API tải media (đều cần đăng nhập web):
 | `PATCH /api/channels/:id` | `{downloadMedia}` bật/tắt tải tự động (áp dụng cả group cũ của supergroup); `{storageLocationId}` đổi nơi lưu; `{syncEnabled}` bật/tắt sync (§10) |
 | `POST /api/channels/:id/downloads/retry` | Đưa mọi file lỗi của channel trở lại hàng đợi |
 | `GET /api/media/:id` | Thông tin một file (không có đường dẫn trên server) |
-| `GET /api/media/:id/content` | Nội dung file đã tải, hỗ trợ `Range` (`206`/`416`). Chỉ ảnh, video/audio trình duyệt phát được và PDF được mở ngay; loại khác luôn tải xuống. `?download=1` để tải xuống. `409 MEDIA_NOT_DOWNLOADED` nếu chưa tải |
-| `GET /api/media/:id/thumbnail` | Ảnh xem trước (`404` nếu không có) |
+| `GET /api/media/:id/content` | Nội dung file đã tải, hỗ trợ `Range` (`206`/`416`) và `If-Range`. `ETag` là SHA-256 của file: trình duyệt hỏi lại mỗi lần (vẫn kiểm tra phiên) và nhận `304` không kèm nội dung; `HEAD` không đọc file. Chỉ ảnh, video/audio trình duyệt phát được và PDF được mở ngay; loại khác (kể cả mọi loại XML) luôn tải xuống, tên file bỏ ký tự đảo chiều chữ. `?download=1` để tải xuống. `409 MEDIA_NOT_DOWNLOADED` nếu chưa tải |
+| `GET /api/media/:id/thumbnail` | Ảnh xem trước (`404` nếu không có), có `ETag`/`304` |
 | `POST /api/media/:id/download` | Tải ngay: `202` khi vào hàng đợi, `200` nếu đã tải hoặc đang tải, `422 CHAT_PROTECTED` |
 | `POST /api/media/:id/cancel` | Huỷ file đang chờ hoặc đang tải (`409 INVALID_DOWNLOAD_STATE`) |
 
@@ -466,7 +515,7 @@ API xem archive (đều cần đăng nhập web):
 
 | Endpoint | Ý nghĩa |
 |---|---|
-| `GET /api/messages` | Mới nhất trước. Lọc: `channelId` (gồm cả group cũ của supergroup), `topicId` (cần `channelId`; `1` = General), `types` (vd. `VIDEO,ANIMATION`; mặc định mọi loại trừ `SERVICE`), `from`/`to` (ngày theo UTC hoặc ISO date-time có offset), `downloaded=true/false`, `sort=newest/oldest`. Phân trang `cursor`/`limit` (≤ 100); `total` chỉ có ở trang đầu |
+| `GET /api/messages` | Mới nhất trước. Lọc: `channelId` (gồm cả group cũ của supergroup), `topicId` (cần `channelId`; `1` = General), `types` (vd. `VIDEO,ANIMATION`; mặc định mọi loại trừ `SERVICE`), `from`/`to` (ngày theo UTC hoặc ISO date-time có offset), `downloaded=true/false`, `sort=newest/oldest`. Phân trang `cursor`/`limit` (≤ 100); `total` chỉ có ở trang đầu và đếm tối đa 10 000 (`totalCapped: true` khi nhiều hơn, web ghi "10,000+"), nên trang đầu nhanh như nhau với archive cỡ nào |
 | `GET /api/messages/:id` | Message kèm file, album, reply thật (message trong topic không tính là reply), topic, `previousId`/`nextId` cùng topic và loại, `telegramUrl` |
 | `GET /api/channels/:id/topics` | Topic của forum theo thứ tự tạo, với số message theo loại và khoảng ngày; `forum:false` nếu không phải forum |
 | `POST /api/channels/:id/topics/refresh` | Đọc lại tên topic từ Telegram qua worker. `422 NOT_A_FORUM`; `503`/`504`/`429` như các lệnh Telegram khác |
@@ -597,13 +646,184 @@ Sau khi import, **sync** giữ channel luôn đủ message mới:
 
 ## 11. Production deployment
 
-Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
-- Chạy trên **Linux** bằng Docker Compose (mục 6) và kiểm tra trước bằng `scripts/compose-smoke.sh`.
-- **Đặt HTTPS phía trước** (reverse proxy/TLS terminator, bật HTTP/2 vì SSE giữ kết nối lâu), rồi đặt `COOKIE_SECURE=true` và `CSRF_TRUSTED_ORIGINS=https://<domain>`.
-- **Đúng một worker**: không scale `worker`, và luôn dừng worker cũ trước khi chạy bản mới.
-- Backup định kỳ các volume `pgdata` (bao gồm `tam_tg`) và `media`. Giữ `.env` ở nơi an toàn.
-- Mật khẩu PostgreSQL/Redis dùng chuỗi hex dài. Không public cổng PostgreSQL/Redis ra ngoài.
-- Nếu chạy trực tiếp trên host bằng pm2 thay vì Docker: worker dùng `exec_mode: fork` với `instances: 1`, `shutdown_with_message: true` và `kill_timeout` ≥ 60000 (Phase 8 sẽ thêm `ecosystem.config.cjs`).
+Hai cách chạy, cùng một mã nguồn:
+
+| | Máy Windows này (pm2) | Máy Linux trong LAN (Docker Compose) |
+|---|---|---|
+| Mở web | <http://localhost:8080> trong trình duyệt của phiên RDP | `http://<IP hoặc tên máy>:8080` từ mọi máy trong LAN |
+| Phục vụ web | API phục vụ luôn bản build (`WEB_DIST_DIR`) | nginx, proxy `/api/` sang API |
+| PostgreSQL, Redis | Service Windows có sẵn (§7) | Container, volume riêng |
+| Tự chạy lại | pm2 khi app lỗi; scheduled task khi máy khởi động | `restart: unless-stopped` |
+| Kiểm chứng | Đang chạy trên máy này | `scripts/compose-smoke.sh` (CI) |
+
+### Trên máy Windows này (pm2)
+
+Máy này chỉ có IP public, nên API chỉ nghe `127.0.0.1:8080` và **không mở cổng nào trên firewall**. Dùng web qua RDP. Muốn mở từ máy khác thì dùng SSH tunnel hoặc VPN, hoặc đặt HTTPS phía trước (bên dưới).
+
+Lần đầu (PowerShell, Administrator):
+
+```powershell
+Get-Service postgresql-x64-18, Redis74      # cả hai phải Running
+npm install -g pm2                          # nếu chưa có
+npm install
+npm run build
+npm run db:deploy
+npm run prod:start                          # kiểm tra, rồi chạy tam-api và tam-worker
+powershell -ExecutionPolicy Bypass -File scripts\prod\install-startup-task.ps1
+icacls .env /inheritance:r /grant:r "Administrators:F" "SYSTEM:F"   # chỉ admin đọc được .env
+```
+
+- `.env` ở gốc repo dùng chung với dev: cùng DB, Redis, session Telegram và nơi lưu. `ecosystem.config.cjs` chỉ đặt thêm `NODE_ENV=production`, `API_HOST=127.0.0.1`, `API_PORT=8080`, `TRUST_PROXY=false`, `CSRF_TRUSTED_ORIGINS` và `WEB_DIST_DIR`.
+- `prod:start` từ chối chạy khi chưa build, khi DB chưa migrate, hoặc khi API dev đang chạy ở cổng 3100: **hai worker không bao giờ được chạy cùng lúc**.
+
+| Lệnh | Tác dụng |
+|---|---|
+| `npm run prod:status` | Trạng thái, PID, thời gian chạy, số lần restart, RAM của hai app |
+| `npm run prod:logs` | Log của hai app (JSON) |
+| `npm run prod:restart` | Khởi động lại (đọc lại `ecosystem.config.cjs`) |
+| `npm run prod:stop` | Dừng. Watchdog không bật lại app đã dừng bằng tay |
+| `npm run prod:update` | Build, `db:deploy`, rồi khởi động lại |
+| `npm run prod:disable` / `prod:enable` | Tắt / bật scheduled task (vd. trước khi chạy `npm run dev`) |
+
+- **Tự chạy lại:**
+  - pm2 khởi động lại app bị crash, chờ tăng dần từ 1 tới 15 giây.
+  - Scheduled task **TAM Archive Manager** chạy `scripts/prod/ensure-running.mjs` một phút sau khi máy khởi động và mỗi 5 phút sau đó. Script start app nào pm2 không có (daemon mới sau reboot) hoặc đã bỏ cuộc (`errored`), và xoay log vượt 20 MB (giữ 5 bản). Nhật ký của nó: `%USERPROFILE%\.pm2\logs\tam-watchdog.log`.
+  - Task chạy bằng tài khoản Administrator kiểu S4U (không lưu mật khẩu), nên chạy cả khi không ai đăng nhập RDP.
+  - Việc task tạo daemon pm2 lúc máy khởi động chỉ kiểm chứng được ở lần reboot kế tiếp: sau khi máy khởi động lại, `npm run prod:status` phải thấy hai app online. Nếu không, xem nhật ký watchdog.
+- **pm2 dùng chung với dự án khác:** trên Windows, mỗi máy chỉ có một daemon pm2, và daemon này đang chạy cả app `xau-confl` của dự án khác.
+  - Chỉ dùng các lệnh `npm run prod:*`, hoặc gọi pm2 với `tam-api`, `tam-worker` hay `ecosystem.config.cjs`.
+  - **Không bao giờ** `pm2 kill`, `pm2 update`, `pm2 restart all`, `pm2 delete all` hay `pm2 save`.
+
+### Trên Linux bằng Docker Compose
+
+Cài đặt ở §6. Cập nhật lên bản mới:
+
+```bash
+git pull
+docker compose up -d --build        # migrate chạy xong rồi mới tới api và worker
+```
+
+- `WEB_ORIGINS` phải có mọi địa chỉ dùng để mở web. Địa chỉ IP luôn được, tên máy thì phải có trong danh sách.
+- Worker có 60 giây để trả job đang chạy về hàng đợi khi bị dừng (`stop_grace_period`).
+- Đúng một worker: không scale `worker`.
+
+### HTTPS phía trước (tuỳ chọn)
+
+Cần khi mở archive qua Internet. Đặt một reverse proxy có TLS (Caddy, Traefik, nginx) trước cổng 8080 (container `web`, hoặc pm2 trên máy này), rồi:
+- Đặt `COOKIE_SECURE=true`. Cookie phiên có cờ `Secure`, và API tự gửi thêm HSTS và `upgrade-insecure-requests`.
+- `WEB_ORIGINS` (Docker) hoặc `CSRF_TRUSTED_ORIGINS` (pm2) là `https://<domain>`.
+- Proxy phải chuyển thẳng `/api/events` (server-sent events), không buffer, timeout ít nhất 1 giờ. Nên bật HTTP/2 ở proxy để tránh giới hạn 6 kết nối mỗi host của HTTP/1.1.
+- Giới hạn đăng nhập tính theo IP của client:
+  - Với pm2, đặt `TRUST_PROXY` là địa chỉ của proxy.
+  - Với Docker, nginx của container `web` chỉ thấy IP của proxy TLS. Thêm `set_real_ip_from <IP proxy>;` và `real_ip_header X-Forwarded-For;` vào `docker/nginx/default.conf`.
+
+### Tài khoản web
+
+- **Settings → Your account** (hoặc menu tài khoản → **Account settings**):
+  - **Change password:** cần mật khẩu hiện tại; mật khẩu mới tối thiểu 12 ký tự. Mọi trình duyệt khác bị đăng xuất, trình duyệt này vẫn đăng nhập.
+  - **Signed-in browsers:** trình duyệt và hệ điều hành, IP, lần dùng gần nhất và ngày đăng nhập. **Sign out** một trình duyệt, hoặc **Sign out all other browsers**. Trình duyệt bị đăng xuất về trang đăng nhập ở request kế tiếp; trang đang mở thì trong vòng một phút.
+- **Khoá tạm:**
+  - Sai 10 lần trong 15 phút (đăng nhập, hoặc mật khẩu hiện tại khi đổi mật khẩu) thì email bị khoá tới hết 15 phút đó: `429 LOGIN_LOCKED` kèm `Retry-After`, và trang đăng nhập nói phải chờ bao lâu.
+  - Email không có tài khoản bị đếm y hệt, nên không ai đoán được email nào tồn tại.
+  - Ngoài ra, mỗi IP chỉ được 5 lần đăng nhập mỗi phút.
+- **Quên mật khẩu, hoặc bị khoá:**
+  - Trên máy này: `node apps/api/dist/cli/reset-password.js --email you@example.com`.
+  - Docker: `docker compose exec api node apps/api/dist/cli/reset-password.js --email you@example.com`.
+  - Lệnh hỏi mật khẩu mới 2 lần (không hiện ra màn hình), đăng xuất mọi trình duyệt và gỡ khoá.
+
+| Endpoint (cần đăng nhập) | Ý nghĩa |
+|---|---|
+| `POST /api/auth/password` | `{currentPassword, newPassword}` → `204`. `422 CURRENT_PASSWORD_WRONG` / `PASSWORD_UNCHANGED`, `429 LOGIN_LOCKED`; giới hạn như đăng nhập |
+| `GET /api/auth/sessions` | Các phiên còn hạn của bạn: `current`, `createdAt`, `lastSeenAt`, `expiresAt`, `ip`, `userAgent` (không bao giờ có token) |
+| `DELETE /api/auth/sessions/:id` | Đăng xuất một phiên (`204`; `404` nếu không phải của bạn). Phiên hiện tại thì như Log out |
+| `POST /api/auth/sessions/revoke-others` | Đăng xuất mọi phiên khác → `{revoked}` |
+
+### Bảo mật
+
+- **Telegram:** chỉ nội dung tài khoản được phép xem. Không bypass private channel, content protection, DRM, và không lưu media tự huỷ (đầu README). Chỉ worker giữ `api_id`/`api_hash` và session, session được mã hoá AES-256-GCM.
+- **Secret:**
+  - Không có secret trong repo; `.env` nằm trong `.gitignore`.
+  - Credential của nơi lưu (token Google) không bao giờ xuống trình duyệt.
+  - Production không chạy khi còn giá trị mẫu `CHANGE_ME`.
+  - Docker: mỗi container chỉ nhận biến của nó, không có mật khẩu admin trong `docker inspect`.
+- **Đăng nhập web:**
+  - Mật khẩu hash bằng argon2id (64 MiB).
+  - Cookie `HttpOnly`, `SameSite=Strict`, chỉ gửi cho `/api` (thêm `Secure` khi có HTTPS). Phiên trượt 7 ngày, tối đa 30 ngày.
+  - Khoá tạm theo email, giới hạn theo IP, đổi mật khẩu và đăng xuất từ xa.
+- **HTTP:**
+  - Chống CSRF (`Sec-Fetch-Site`, dự phòng so `Origin` với `Host`).
+  - Chỉ trả lời tên host được phép (chống DNS rebinding).
+  - CSP chỉ cho tải từ chính archive, `frame-ancestors 'self'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP/CORP.
+  - Response API không được cache; `X-Forwarded-For` chỉ được tin từ proxy đã khai báo.
+- **File:**
+  - Chỉ ảnh, video/audio và PDF được mở trong trình duyệt, với CSP `sandbox` khi mở riêng. XML, HTML, SVG và mọi loại khác luôn tải xuống.
+  - Tên file tải về không giữ ký tự điều khiển hay ký tự đảo chiều chữ.
+  - Không bao giờ đi theo symlink/junction ra khỏi nơi lưu; API không trả đường dẫn trên server.
+- **Dịch vụ:**
+  - PostgreSQL và Redis chỉ nghe localhost (máy này) hoặc mạng nội bộ của Docker, đều có mật khẩu.
+  - Trong Docker, role của ứng dụng không phải superuser và container không chạy bằng root.
+- **Dependency:** `npm audit --omit=dev` báo 0 lỗ hổng. Hai lỗi của Prisma CLI (`deepmerge-ts`, `mysql2`) được vá bằng `overrides` trong `package.json`.
+- **Giới hạn đã biết:**
+  - Setup LAN là HTTP thường: mật khẩu và cookie đi không mã hoá trong mạng đó.
+  - Favorites và tag dùng chung cho mọi tài khoản web.
+  - Vị trí đang xem video nằm trong trình duyệt (localStorage) và còn lại sau khi đăng xuất.
+
+### Sao lưu và khôi phục
+
+Cần sao lưu:
+- DB `tam`: message, file, tag, tài khoản web, job.
+- DB `tam_tg`: session Telegram (đã mã hoá).
+- Thư mục của các nơi lưu (media); thumbnail thì có thể tải lại.
+- **`.env`**: thiếu `TELEGRAM_SESSION_KEY` và `STORAGE_SECRET_KEY` thì session Telegram và token Google trong bản sao lưu không giải mã được. Giữ `.env` ở nơi an toàn, tách khỏi bản sao lưu DB.
+
+```powershell
+# Máy này (pg_dump đọc mật khẩu từ biến PGPASSWORD hoặc file pgpass)
+C:\MYDATA\tools\pgsql\bin\pg_dump.exe -h localhost -U tam -Fc -f <thư mục>\tam.dump tam
+C:\MYDATA\tools\pgsql\bin\pg_dump.exe -h localhost -U tam -Fc -f <thư mục>\tam_tg.dump tam_tg
+```
+
+```bash
+# Docker
+docker compose exec -T postgres pg_dump -U tam -Fc tam > tam.dump
+docker compose exec -T postgres pg_dump -U tam -Fc tam_tg > tam_tg.dump
+docker run --rm -v tam_media:/data:ro -v "$PWD":/backup alpine tar czf /backup/media.tgz -C /data .
+```
+
+Khôi phục:
+1. Dừng api và worker (`npm run prod:stop`, hoặc `docker compose stop api worker`).
+2. `pg_restore --clean --if-exists -h localhost -U tam -d tam tam.dump`, và tương tự cho `tam_tg`.
+3. Chép lại thư mục media.
+4. Chạy lại api và worker.
+
+### Hiệu năng
+
+Đo bằng `scripts/perf` trên archive giả 150 000 message, 120 000 file và 2 000 sync job, gấp khoảng 40 lần archive thật hiện nay. Trung vị 15 lần gọi qua HTTP trên máy dev:
+
+| Trang / việc | Trước Phase 8 | Sau |
+|---|---:|---:|
+| Danh sách channel | 241 ms | 49 ms |
+| Trang channel (forum 100 000 message) | 127 ms | 33 ms |
+| Mục Media downloads của channel | 201 ms | 36 ms |
+| All Messages, trang đầu | 56 ms | 17 ms |
+| Lọc file đã tải | 114 ms | 33 ms |
+| All Messages, trang thứ 1 500 | 61 ms | 60 ms |
+| Tìm kiếm | 52 ms | 38 ms |
+| Worker: chọn file để tải (mỗi vài giây) | 344 ms | 0,6 ms |
+| Worker: một file của job 100 000 file tải xong | 152 ms | 0,1 ms |
+
+- **Đã làm:**
+  - `download_jobs` mang sẵn channel và kích thước file (trigger điền), nên hàng đợi tải và các bộ đếm theo channel đọc một bảng qua index, không nối media với message.
+  - File tải xong cộng dồn vào bộ đếm của job, thay vì đếm lại cả job.
+  - Tổng ở trang đầu chỉ đếm tới 10 000.
+  - Media có `ETag`/`304`; asset có hash được cache một năm; font nằm trong bản build.
+- **Còn trên 100 ms ở quy mô này:**
+  - Danh sách Topics của một forum 100 000 message (~110 ms): phải đếm message theo từng topic.
+  - Việc đếm lại của mỗi trang import trong job 100 000 file (~150 ms mỗi trang), trong khi giữa hai trang đã nghỉ 1 giây.
+  - Cả hai tăng tuyến tính và còn nhỏ so với archive hiện nay.
+- **Không dùng:**
+  - HTTP/2: trình duyệt chỉ dùng HTTP/2 qua TLS; bật ở reverse proxy khi có HTTPS.
+  - X-Accel-Redirect: máy này không có nginx, và Node stream file đủ nhanh cho một người xem.
+  - Nén gzip ở chế độ pm2: web mở qua localhost.
 
 ## 12. Troubleshooting
 
@@ -621,7 +841,7 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | npm cảnh báo `install-scripts … not yet covered` | Xem `npm install-scripts ls`, duyệt package tin cậy bằng `npm install-scripts approve <pkg>` |
 | Ai đó nâng TypeScript lên 7.x | Build Angular/ESLint hỏng. Giữ `typescript ~6.0.3` (đã ghim bằng `overrides`) |
 | Ổ đĩa đầy | Giảm `MIN_FREE_DISK_MB` là không đủ. Hãy thêm ổ khác vào `STORAGE_LOCAL_ROOTS` rồi chọn thư mục ở đó, hoặc chuyển channel sang Google Drive (mục 9). Có thể dọn cache: `npm cache clean --force` |
-| Nhiều tab mở cùng lúc, request bị treo (HTTP/1.1) | Trình duyệt giới hạn 6 kết nối mỗi host cho mọi tab, và mỗi tab giữ một kết nối live updates. Tab ẩn quá 30 giây tự đóng kết nối đó. Dev: đóng bớt tab. Production: bật HTTP/2 ở reverse proxy |
+| Nhiều tab mở cùng lúc, request bị treo (HTTP/1.1) | Trình duyệt giới hạn 6 kết nối mỗi host cho mọi tab, và mỗi tab giữ một kết nối live updates. Tab ẩn quá 30 giây tự đóng kết nối đó. Đóng bớt tab. Khi có HTTPS phía trước (§11): bật HTTP/2 ở reverse proxy |
 | Header có biểu tượng đám mây gạch chéo: "Live updates are reconnecting" | Trang không nhận được `/api/events` quá 10 giây: api đang khởi động lại, hoặc proxy giữ lại (buffer) stream. Nếu proxy giữ một kết nối đã chết, trang nhận ra sau 60 giây không có `ping`. Trong lúc đó trang vẫn tự cập nhật bằng polling. Với nginx, dùng `location = /api/events` của `docker/nginx/default.conf` (`proxy_buffering off`). `DATABASE_URL` của api phải kết nối thẳng tới PostgreSQL: `LISTEN` không chạy qua pooler kiểu transaction (PgBouncer) |
 | Message mới không vào archive ngay | Sync của channel đang tắt (xem lý do dưới công tắc), hoặc Telegram không đẩy update cho channel đó (thường gặp với channel rất lớn). Lượt kiểm tra định kỳ (**Settings → Sync**) vẫn lấy về; muốn ngay thì bấm **Sync now** |
 | Log worker không có "Receiving updates from Telegram" | Tài khoản Telegram chưa đăng nhập. Sync theo update chỉ chạy khi tài khoản ở trạng thái READY; mỗi lượt của scheduler tự thử bật lại |
@@ -669,3 +889,18 @@ Hướng dẫn hiện tại (bản đầy đủ ở Phase 8):
 | Không tạo được tag "toán" khi đã có "Toán" | Tên tag không phân biệt hoa thường. Dùng tag có sẵn, hoặc đổi tên tag cũ ở trang **Tags** |
 | Tag hoặc ♥ ở tài khoản này cũng hiện ở tài khoản khác | Đúng thiết kế: favorites và tag thuộc về archive, dùng chung cho mọi tài khoản web |
 | Dev: sau `npm run db:migrate`, API/worker báo `Unknown argument …` | `tsc -b -w` trong `npm run dev` không build lại Prisma client vừa generate. Dừng `npm run dev`, chạy `npm run build:packages`, rồi chạy lại `npm run dev` |
+| `421 HOST_NOT_ALLOWED`: "This server does not answer for that host name" | Web được mở bằng một tên máy mà API không biết. Thêm địa chỉ đó vào `WEB_ORIGINS` (Docker), `CSRF_TRUSTED_ORIGINS` hoặc `ALLOWED_HOSTS`, rồi restart api. Mở bằng IP hoặc `localhost` thì luôn được |
+| "Too many failed sign-ins for this email" (`429 LOGIN_LOCKED`) | Sai mật khẩu 10 lần trong 15 phút. Chờ hết thời gian trang ghi, hoặc đặt lại bằng `reset-password` (§11), lệnh này gỡ khoá luôn |
+| "Too many sign-in attempts. Wait a minute" | Giới hạn 5 lần mỗi phút cho mỗi IP. Chờ một phút |
+| `422 CURRENT_PASSWORD_WRONG` khi đổi mật khẩu | Mật khẩu hiện tại gõ sai. Lần sai này cũng tính vào khoá tạm |
+| Web ở máy khác bị đưa về trang đăng nhập | Mật khẩu vừa được đổi, hoặc trình duyệt đó bị đăng xuất ở **Signed-in browsers**. Đăng nhập lại |
+| Api/worker production thoát ngay: "still holds the CHANGE_ME placeholder" | Một URL hoặc secret trong `.env` vẫn là giá trị mẫu. Điền giá trị thật |
+| `npm run prod:start`: "The development api answers on port 3100" | `npm run dev` đang chạy. Dừng nó trước: hai worker không được chạy cùng lúc |
+| `npm run prod:start`: "The database is not up to date" / "…is missing: build first" | Chạy `npm run db:deploy` / `npm run build`, hoặc dùng `npm run prod:update` |
+| `npm run prod:status` báo `errored` | App crash liên tục. Xem `npm run prod:logs` (thường là DB/Redis đang dừng, hoặc `.env` sai). Sửa xong thì `npm run prod:restart`; watchdog cũng tự thử lại mỗi 5 phút |
+| Sau khi máy khởi động lại, web ở 8080 không mở | Xem `%USERPROFILE%\.pm2\logs\tam-watchdog.log` và `Get-ScheduledTask -TaskName 'TAM Archive Manager'`. Task đã tắt thì bật bằng `npm run prod:enable`; chưa có thì cài lại (§11). Chạy tay: `Start-ScheduledTask -TaskName 'TAM Archive Manager'` |
+| `EADDRINUSE :8080` | Có chương trình khác dùng cổng 8080. Đổi `PORT` trong `ecosystem.config.cjs` rồi `npm run prod:restart` |
+| Lỡ gõ `pm2 restart all` / `pm2 kill` | Lệnh đó tác động cả app `xau-confl` của dự án khác. Báo cho người quản lý app đó; với archive, chạy `npm run prod:start` |
+| Danh sách ghi "10,000+" thay vì số chính xác | Đúng thiết kế: trang đầu chỉ đếm tới 10 000 message để luôn nhanh |
+| Docker: `docker compose ps` báo worker `unhealthy` | Worker không ghi được heartbeat vào Redis trong 60 giây. Xem `docker compose logs worker` |
+| Docker: web báo `502`/`504` ngay sau khi api khởi động lại | nginx đang tìm lại địa chỉ của api (tối đa 10 giây). Tải lại trang |

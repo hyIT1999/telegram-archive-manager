@@ -1,23 +1,21 @@
 import { parseArgs } from 'node:util';
 import { Prisma, type PrismaClient } from '@tam/database';
-import { emailSchema, newPasswordSchema } from '@tam/shared';
+import { emailSchema } from '@tam/shared';
 import { hashPassword } from '../auth/password.js';
+import { UsageError } from './usage-error.js';
 
-export const CREATE_USER_USAGE = `Usage: node dist/cli/create-user.js --email <email> --password-stdin [--if-missing]
+export const CREATE_USER_USAGE = `Usage: node apps/api/dist/cli/create-user.js --email <email> [--password-stdin] [--if-missing]
 
-Creates a web user. The password is read from stdin, never from the command line:
-  echo "<password>" | npm run user:create -- --email admin@example.com --password-stdin
+Creates a web user. The password is never taken from the command line: the command asks for it
+twice without showing it, or reads it from stdin with --password-stdin (scripts, Docker):
+  node apps/api/dist/cli/create-user.js --email admin@example.com
+  echo "<password>" | node apps/api/dist/cli/create-user.js --email admin@example.com --password-stdin
 
 Options:
   --email <email>    Email address (stored trimmed and lower-cased)
-  --password-stdin   Read the password from stdin (required; one trailing newline is ignored)
+  --password-stdin   Read the password from stdin (one trailing newline is ignored)
   --if-missing       Exit successfully without changes when the email already exists
   -h, --help         Show this help`;
-
-/** Bad invocation or input; the CLI prints the message (and usage) and exits with code 2. */
-export class UsageError extends Error {
-  override readonly name = 'UsageError';
-}
 
 /** The email is taken and --if-missing was not given. */
 export class UserExistsError extends Error {
@@ -33,7 +31,7 @@ export interface CreateUserOptions {
   ifMissing: boolean;
 }
 
-export type CreateUserArgs = CreateUserOptions | { help: true };
+export type CreateUserArgs = (CreateUserOptions & { passwordStdin: boolean }) | { help: true };
 
 export function parseCreateUserArgs(argv: readonly string[]): CreateUserArgs {
   let values: {
@@ -60,27 +58,15 @@ export function parseCreateUserArgs(argv: readonly string[]): CreateUserArgs {
   if (values.help) {
     return { help: true };
   }
-  if (!values['password-stdin']) {
-    throw new UsageError('--password-stdin is required: pipe the password into the command');
-  }
   const email = emailSchema.safeParse(values.email ?? '');
   if (!email.success) {
     throw new UsageError('--email must be a valid email address');
   }
-  return { email: email.data, ifMissing: values['if-missing'] ?? false };
-}
-
-const BYTE_ORDER_MARK = String.fromCharCode(0xfeff);
-
-/** Strips a UTF-8 BOM and the single line ending that `echo` or a pipe appends. */
-export function passwordFromStdin(raw: string): string {
-  const withoutBom = raw.startsWith(BYTE_ORDER_MARK) ? raw.slice(1) : raw;
-  const password = withoutBom.replace(/\r?\n$/, '');
-  const checked = newPasswordSchema.safeParse(password);
-  if (!checked.success) {
-    throw new UsageError(checked.error.issues.map((issue) => issue.message).join('; '));
-  }
-  return checked.data;
+  return {
+    email: email.data,
+    ifMissing: values['if-missing'] ?? false,
+    passwordStdin: values['password-stdin'] ?? false,
+  };
 }
 
 export type CreateUserOutcome =

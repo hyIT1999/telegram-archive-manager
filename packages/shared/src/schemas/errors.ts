@@ -10,6 +10,14 @@ export const ApiErrorCode = {
   NOT_FOUND: 'NOT_FOUND',
   CONFLICT: 'CONFLICT',
   RATE_LIMITED: 'RATE_LIMITED',
+  /** Too many failed sign-ins for this email; Retry-After says when to try again. */
+  LOGIN_LOCKED: 'LOGIN_LOCKED',
+  /** A password change named the wrong current password. */
+  CURRENT_PASSWORD_WRONG: 'CURRENT_PASSWORD_WRONG',
+  /** The new password is the current one. */
+  PASSWORD_UNCHANGED: 'PASSWORD_UNCHANGED',
+  /** The Host header names a host this server does not answer for (DNS rebinding guard). */
+  HOST_NOT_ALLOWED: 'HOST_NOT_ALLOWED',
   /** No worker heartbeat: the background worker is not running. */
   WORKER_UNAVAILABLE: 'WORKER_UNAVAILABLE',
   /** The worker runs but nothing holds the Telegram connection (unconfigured or starting). */

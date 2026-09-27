@@ -2,6 +2,7 @@ import { Injectable, type OnModuleInit, UnauthorizedException } from '@nestjs/co
 import { PrismaService } from '@tam/database/nest';
 import { ApiErrorCode, type AuthUserDto, type LoginRequest } from '@tam/shared';
 import { toAuthUserDto, type SessionClientInfo } from './auth.types.js';
+import { LoginAttempts } from './login-attempts.js';
 import {
   createDummyPasswordHash,
   hashPassword,
@@ -24,6 +25,7 @@ export class AuthService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sessions: SessionService,
+    private readonly attempts: LoginAttempts,
   ) {}
 
   /** Prepared at startup so even the first unknown-email login costs a full verification. */
@@ -31,15 +33,23 @@ export class AuthService implements OnModuleInit {
     this.dummyPasswordHash = await createDummyPasswordHash();
   }
 
+  /**
+   * A locked email is refused before any password check (no CPU spent on guessing). Known and
+   * unknown emails fail, count and lock the same way.
+   */
   async login(credentials: LoginRequest, client: SessionClientInfo): Promise<LoginResult> {
+    await this.attempts.assertNotLocked(credentials.email);
     const user = await this.prisma.user.findUnique({ where: { email: credentials.email } });
     if (!user) {
       await verifyPassword(this.dummyPasswordHash, credentials.password);
+      await this.attempts.recordFailure(credentials.email);
       throw invalidCredentials();
     }
     if (!(await verifyPassword(user.passwordHash, credentials.password))) {
+      await this.attempts.recordFailure(credentials.email);
       throw invalidCredentials();
     }
+    await this.attempts.clear(credentials.email);
 
     const now = new Date();
     const rehash = passwordNeedsRehash(user.passwordHash)

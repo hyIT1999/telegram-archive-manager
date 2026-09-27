@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { migrateDeploy, recreateDatabase, withDatabaseName } from '@tam/database';
+import { Redis } from 'ioredis';
 import type { TestProject } from 'vitest/node';
 import { envFileParser, envFilePaths } from '../../src/config/env-files.js';
 
@@ -15,6 +16,8 @@ declare module 'vitest' {
 const E2E_DATABASE = 'tam_test_api';
 /** Separate logical Redis database; the suite never flushes it (other suites may share it). */
 const E2E_REDIS_DB = 15;
+/** BULLMQ_PREFIX of the suite (setup-env.ts). */
+const E2E_BULLMQ_PREFIX = 'tamtest';
 
 const apiRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -42,10 +45,26 @@ function withRedisDatabase(redisUrl: string, db: number): string {
   return url.toString();
 }
 
+/** Failed sign-ins counted by an earlier run would otherwise lock the suite's test emails. */
+async function forgetFailedSignIns(redisUrl: string): Promise<void> {
+  const redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1 });
+  try {
+    await redis.connect();
+    const keys = await redis.keys(`${E2E_BULLMQ_PREFIX}:auth:*`);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } finally {
+    redis.disconnect();
+  }
+}
+
 export default async function setup(project: TestProject): Promise<void> {
   const databaseUrl = withDatabaseName(baseSetting('DATABASE_URL'), E2E_DATABASE);
   await recreateDatabase(databaseUrl);
   await migrateDeploy(databaseUrl);
+  const redisUrl = withRedisDatabase(baseSetting('REDIS_URL'), E2E_REDIS_DB);
+  await forgetFailedSignIns(redisUrl);
   project.provide('databaseUrl', databaseUrl);
-  project.provide('redisUrl', withRedisDatabase(baseSetting('REDIS_URL'), E2E_REDIS_DB));
+  project.provide('redisUrl', redisUrl);
 }

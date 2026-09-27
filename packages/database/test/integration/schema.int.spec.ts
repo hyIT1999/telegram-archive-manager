@@ -5,7 +5,11 @@ let prisma: PrismaClient;
 let chatSeq = 0n;
 
 beforeAll(() => {
-  prisma = createPrismaClient({ url: inject('databaseUrl'), max: 4, applicationName: 'tam-db-tests' });
+  prisma = createPrismaClient({
+    url: inject('databaseUrl'),
+    max: 4,
+    applicationName: 'tam-db-tests',
+  });
 });
 
 afterAll(async () => {
@@ -19,7 +23,11 @@ function newChannel(title = 'Channel') {
   });
 }
 
-function messageRow(channelId: string, telegramMessageId: number, extra: { text?: string; caption?: string } = {}) {
+function messageRow(
+  channelId: string,
+  telegramMessageId: number,
+  extra: { text?: string; caption?: string } = {},
+) {
   return {
     channelId,
     telegramMessageId,
@@ -83,10 +91,17 @@ describe('idempotent message storage', () => {
 
   it('generates uuid v7 ids in the database and cascades channel deletion', async () => {
     const channel = await newChannel();
-    expect(channel.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(channel.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
     const message = await prisma.message.create({ data: messageRow(channel.id, 1) });
     await prisma.media.create({
-      data: { messageId: message.id, telegramFileId: 'x', telegramFileUniqueId: 'u', type: 'PHOTO' },
+      data: {
+        messageId: message.id,
+        telegramFileId: 'x',
+        telegramFileUniqueId: 'u',
+        type: 'PHOTO',
+      },
     });
     await prisma.channel.delete({ where: { id: channel.id } });
     expect(await prisma.message.count({ where: { channelId: channel.id } })).toBe(0);
@@ -135,7 +150,9 @@ describe('accent-insensitive full-text search', () => {
     const channel = await newChannel();
     const nfdText = 'Tài liệu học tập'.normalize('NFD');
     expect(nfdText).not.toBe(nfdText.normalize('NFC'));
-    const message = await prisma.message.create({ data: messageRow(channel.id, 200, { text: nfdText }) });
+    const message = await prisma.message.create({
+      data: messageRow(channel.id, 200, { text: nfdText }),
+    });
 
     expect(await searchIds('tài liệu')).toContain(message.id);
     expect(await searchIds('tai lieu'.normalize('NFD'))).toContain(message.id);
@@ -143,11 +160,16 @@ describe('accent-insensitive full-text search', () => {
 
   it('recomputes search_vector only when text or caption change', async () => {
     const channel = await newChannel();
-    const message = await prisma.message.create({ data: messageRow(channel.id, 300, { text: 'alpha' }) });
+    const message = await prisma.message.create({
+      data: messageRow(channel.id, 300, { text: 'alpha' }),
+    });
 
     // A sentinel written directly survives updates of other columns (trigger does not fire)…
     await prisma.$executeRaw`UPDATE messages SET search_vector = to_tsvector('simple', 'sentinel') WHERE id = ${message.id}::uuid`;
-    await prisma.message.update({ where: { id: message.id }, data: { isFavorite: true, views: 42 } });
+    await prisma.message.update({
+      where: { id: message.id },
+      data: { isFavorite: true, views: 42 },
+    });
     expect(await searchIds('sentinel')).toContain(message.id);
 
     // …and is replaced as soon as the caption changes.
@@ -159,16 +181,26 @@ describe('accent-insensitive full-text search', () => {
 
 describe('file names in the search document', () => {
   function fileRow(messageId: string, filename: string, uniqueId: string) {
-    return { messageId, telegramFileId: 'f', telegramFileUniqueId: uniqueId, type: 'VIDEO' as const, filename };
+    return {
+      messageId,
+      telegramFileId: 'f',
+      telegramFileUniqueId: uniqueId,
+      type: 'VIDEO' as const,
+      filename,
+    };
   }
 
   it('finds a message by the words of its file name, split at dots and underscores', async () => {
     const channel = await newChannel();
-    const message = await prisma.message.create({ data: { ...messageRow(channel.id, 500), type: 'VIDEO' } });
+    const message = await prisma.message.create({
+      data: { ...messageRow(channel.id, 500), type: 'VIDEO' },
+    });
     expect(await searchIds('zone')).not.toContain(message.id);
 
     // Stored after the message, as imports do.
-    await prisma.media.create({ data: fileRow(message.id, 'Phương_Pháp_02_Time_Zone.mp4', 'doc-500') });
+    await prisma.media.create({
+      data: fileRow(message.id, 'Phương_Pháp_02_Time_Zone.mp4', 'doc-500'),
+    });
 
     expect(await searchIds('zone')).toContain(message.id);
     expect(await searchIds('phuong phap 02')).toContain(message.id);
@@ -177,11 +209,18 @@ describe('file names in the search document', () => {
 
   it('keeps file names when the caption changes, and follows a renamed file', async () => {
     const channel = await newChannel();
-    const message = await prisma.message.create({ data: { ...messageRow(channel.id, 501), type: 'PHOTO' } });
-    const media = await prisma.media.create({ data: fileRow(message.id, 'IMG_20240101.jpg', 'doc-501') });
+    const message = await prisma.message.create({
+      data: { ...messageRow(channel.id, 501), type: 'PHOTO' },
+    });
+    const media = await prisma.media.create({
+      data: fileRow(message.id, 'IMG_20240101.jpg', 'doc-501'),
+    });
     expect(await searchIds('20240101')).toContain(message.id);
 
-    await prisma.message.update({ where: { id: message.id }, data: { caption: 'Harbour at dawn' } });
+    await prisma.message.update({
+      where: { id: message.id },
+      data: { caption: 'Harbour at dawn' },
+    });
     expect(await searchIds('harbour 20240101')).toContain(message.id);
 
     await prisma.media.update({ where: { id: media.id }, data: { filename: 'sunrise.jpg' } });
@@ -230,5 +269,55 @@ describe('filename search', () => {
     const indexes = await prisma.$queryRaw<{ indexdef: string }[]>`
       SELECT indexdef FROM pg_indexes WHERE indexname = 'media_filename_trgm_idx'`;
     expect(indexes[0]?.indexdef).toContain('gin_trgm_ops');
+  });
+});
+
+describe('download queue columns', () => {
+  async function fileIn(channelId: string, messageId: number, size: bigint | null) {
+    const message = await prisma.message.create({ data: messageRow(channelId, messageId) });
+    return prisma.media.create({
+      data: {
+        messageId: message.id,
+        telegramFileId: `chat:${messageId}:q-${messageId}`,
+        telegramFileUniqueId: `q-${messageId}`,
+        type: 'VIDEO',
+        size,
+      },
+    });
+  }
+
+  it('gives every download job the channel and size of its file, whoever inserts it', async () => {
+    const channel = await newChannel('Queue');
+    const [small, unknown] = [
+      await fileIn(channel.id, 1, 5_000n),
+      await fileIn(channel.id, 2, null),
+    ];
+    await prisma.downloadJob.createMany({ data: [{ mediaId: small.id }] });
+    await prisma.$executeRaw`INSERT INTO download_jobs (media_id) VALUES (${unknown.id}::uuid)`;
+
+    const jobs = await prisma.downloadJob.findMany({
+      where: { mediaId: { in: [small.id, unknown.id] } },
+      orderBy: { size: 'asc' },
+      select: { mediaId: true, channelId: true, size: true },
+    });
+    expect(jobs).toEqual([
+      { mediaId: small.id, channelId: channel.id, size: 5_000n },
+      { mediaId: unknown.id, channelId: channel.id, size: null },
+    ]);
+  });
+
+  it('follows a corrected file size, and ignores what a writer claims', async () => {
+    const channel = await newChannel('Sizes');
+    const other = await newChannel('Elsewhere');
+    const media = await fileIn(channel.id, 3, 1_000n);
+    await prisma.downloadJob.create({ data: { mediaId: media.id, channelId: other.id, size: 7n } });
+    expect(
+      await prisma.downloadJob.findUniqueOrThrow({ where: { mediaId: media.id } }),
+    ).toMatchObject({ channelId: channel.id, size: 1_000n });
+
+    await prisma.media.update({ where: { id: media.id }, data: { size: 2_500n } });
+    expect(
+      (await prisma.downloadJob.findUniqueOrThrow({ where: { mediaId: media.id } })).size,
+    ).toBe(2_500n);
   });
 });

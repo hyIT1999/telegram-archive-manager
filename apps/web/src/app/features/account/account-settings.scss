@@ -1,0 +1,101 @@
+:host {
+  display: grid;
+  gap: 12px;
+}
+
+.signed-in {
+  margin: 0;
+}
+
+.muted {
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.subtitle {
+  margin: 12px 0 0;
+  font: var(--mat-sys-title-medium);
+}
+
+.password-form {
+  display: grid;
+  gap: 4px;
+  max-width: 420px;
+
+  mat-hint {
+    white-space: normal;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+
+.sessions {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 12px;
+  border: 1px solid var(--mat-sys-outline-variant);
+  border-radius: var(--mat-sys-corner-medium);
+  background: var(--mat-sys-surface-container-lowest);
+
+  &.current {
+    border-color: var(--mat-sys-primary);
+  }
+}
+
+.icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--mat-sys-corner-medium);
+  background: var(--mat-sys-primary-container);
+  color: var(--mat-sys-on-primary-container);
+}
+
+.text {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  font: var(--mat-sys-title-small);
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 0 8px;
+  border-radius: var(--mat-sys-corner-full);
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+  font: var(--mat-sys-label-small);
+  vertical-align: middle;
+}
+
+.meta {
+  color: var(--mat-sys-on-surface-variant);
+  font: var(--mat-sys-body-small);
+  overflow-wrap: anywhere;
+}
+
+.sign-out-others {
+  justify-self: start;
+}

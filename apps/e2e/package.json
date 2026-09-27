@@ -1,0 +1,19 @@
+{
+  "name": "@tam/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Browser tests (Playwright): the built web app served by the built api, against a seeded test database.",
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@tam/database": "0.0.0",
+    "@tam/storage": "0.0.0",
+    "argon2": "0.45.1",
+    "ioredis": "5.11.1",
+    "pg": "8.23.0"
+  }
+}

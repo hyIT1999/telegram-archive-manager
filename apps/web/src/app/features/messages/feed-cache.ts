@@ -6,6 +6,8 @@ export interface FeedSnapshot {
   readonly items: readonly MessageSummaryDto[];
   readonly nextCursor: string | null;
   readonly total: number | null;
+  /** More messages match than the server counts ("10,000+"). */
+  readonly totalCapped: boolean;
 }
 
 /** Feeds kept for Back navigation. */

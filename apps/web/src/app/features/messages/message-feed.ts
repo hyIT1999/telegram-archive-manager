@@ -160,6 +160,7 @@ export class MessageFeed {
               items: page.items,
               nextCursor: page.nextCursor,
               total: page.total,
+              totalCapped: page.totalCapped,
             })),
           );
     },
@@ -175,6 +176,7 @@ export class MessageFeed {
   });
   protected readonly nextCursor = linkedSignal(() => this.loaded()?.nextCursor ?? null);
   protected readonly total = computed(() => this.loaded()?.total ?? null);
+  protected readonly totalCapped = computed(() => this.loaded()?.totalCapped ?? false);
   protected readonly loadingMore = signal(false);
   protected readonly loadMoreError = signal<string | null>(null);
 
@@ -259,6 +261,7 @@ export class MessageFeed {
         items: this.items(),
         nextCursor: this.nextCursor(),
         total: page.total,
+        totalCapped: page.totalCapped,
       };
       this.cache.set(
         untracked(() => this.request().key),

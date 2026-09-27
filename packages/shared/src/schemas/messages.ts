@@ -138,9 +138,17 @@ export interface MessageSummaryDto {
   matches?: MessageMatchesDto;
 }
 
+/** First pages count the matches up to this many; beyond it lists say "10,000+". */
+export const MESSAGE_TOTAL_LIMIT = 10_000;
+
 export interface MessagePageDto extends Page<MessageSummaryDto> {
-  /** How many messages match; only on the first page (requested without a cursor). */
+  /**
+   * How many messages match; only on the first page (requested without a cursor). Counted up to
+   * MESSAGE_TOTAL_LIMIT, so the first page costs the same in any archive: with more matches it is
+   * MESSAGE_TOTAL_LIMIT and totalCapped is true.
+   */
   total: number | null;
+  totalCapped: boolean;
 }
 
 /** Formatting the web renders. Anything else Telegram sends (custom emoji, user ids…) is left out. */

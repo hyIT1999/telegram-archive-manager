@@ -45,6 +45,7 @@ describe('envSchema', () => {
       SESSION_TTL_HOURS: 168,
       SESSION_ABSOLUTE_TTL_DAYS: 30,
       CSRF_TRUSTED_ORIGINS: [],
+      ALLOWED_HOSTS: [],
       TELEGRAM_RPC_TIMEOUT_MS: 30_000,
       MIN_FREE_DISK_MB: 2048,
       TRUST_PROXY: ['loopback'],
@@ -145,13 +146,50 @@ describe('envSchema', () => {
     expect(message).toContain('STORAGE_LOCAL_ROOT: must be an absolute path');
     expect(message).toContain('STORAGE_LOCAL_ROOTS.0: must be an absolute path');
     expect(message).toContain('STORAGE_SECRET_KEY: must be 32 random bytes');
-    expect(message).toContain('GOOGLE_OAUTH_CLIENT_ID: must be the client ID of a Google OAuth client');
+    expect(message).toContain(
+      'GOOGLE_OAUTH_CLIENT_ID: must be the client ID of a Google OAuth client',
+    );
     expect(message).not.toContain('hunter2');
   });
 
   it('requires the Google client ID and secret together', () => {
     expect(errorsOf({ GOOGLE_OAUTH_CLIENT_ID: '1234-abc.apps.googleusercontent.com' })).toBe(
       'GOOGLE_OAUTH_CLIENT_ID: GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    );
+  });
+
+  it('reads the allowed host names and the folder of the web app', () => {
+    const webDir = path.resolve('/srv/tam/web');
+    expect(
+      parse({ ALLOWED_HOSTS: ' Archive.LAN , *.example.com ', WEB_DIST_DIR: webDir }).data,
+    ).toMatchObject({ ALLOWED_HOSTS: ['archive.lan', '*.example.com'], WEB_DIST_DIR: webDir });
+  });
+
+  it.each(['http://archive.lan', 'archive.lan:8080', 'two words', '*.', 'bad_name'])(
+    'rejects the host name %j',
+    (host) => {
+      expect(errorsOf({ ALLOWED_HOSTS: host })).toMatch(/^ALLOWED_HOSTS\.0: .* is not a host name/);
+    },
+  );
+
+  it('rejects a relative web app folder', () => {
+    expect(errorsOf({ WEB_DIST_DIR: 'apps/web/dist' })).toBe(
+      'WEB_DIST_DIR: must be an absolute path',
+    );
+  });
+
+  it('refuses the .env.example placeholder in production only', () => {
+    const placeholder = {
+      DATABASE_URL: 'postgresql://tam:CHANGE_ME@localhost:5432/tam',
+      REDIS_URL: 'redis://:CHANGE_ME@127.0.0.1:6380/0',
+    };
+    expect(parse(placeholder).success).toBe(true);
+    const errors = errorsOf({ ...placeholder, NODE_ENV: 'production' });
+    expect(errors).toBe(
+      [
+        'DATABASE_URL: still holds the CHANGE_ME placeholder from .env.example',
+        'REDIS_URL: still holds the CHANGE_ME placeholder from .env.example',
+      ].join('\n'),
     );
   });
 
