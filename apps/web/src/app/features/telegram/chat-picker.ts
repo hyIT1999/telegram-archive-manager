@@ -13,12 +13,14 @@ import { Skeleton } from '../../shared/components/skeleton/skeleton';
 import { type TelegramDialogDto, toApiError } from '../../shared/models';
 import { channelHandle, channelInitials, chatTypeLabel } from '../channels/channel-labels';
 import { TelegramChats } from './telegram-chats';
-import type { ChatFilter } from './telegram-labels';
+import { type ChatFilter, archivable } from './telegram-labels';
 
 interface ChatRow {
   readonly chat: TelegramDialogDto;
   readonly initials: string;
   readonly description: string;
+  /** Why the chat cannot be archived; null when it can. */
+  readonly why: string | null;
 }
 
 const FILTERS: readonly { readonly value: ChatFilter; readonly label: string }[] = [
@@ -29,7 +31,8 @@ const FILTERS: readonly { readonly value: ChatFilter; readonly label: string }[]
 
 /**
  * The Telegram chats the account can access, as a searchable single-choice list. Chats with
- * content protection are shown but cannot be picked. Needs TelegramChats from the page.
+ * content protection, and chats that receive backups, are shown but cannot be picked. Needs
+ * TelegramChats from the page.
  */
 @Component({
   selector: 'app-chat-picker',
@@ -63,6 +66,7 @@ export class ChatPicker {
       chat,
       initials: channelInitials(chat.title),
       description: this.describe(chat),
+      why: archivable(chat) ? null : whyNot(chat),
     })),
   );
 
@@ -82,4 +86,10 @@ export class ChatPicker {
     }
     return parts.join(' · ');
   }
+}
+
+function whyNot(chat: TelegramDialogDto): string {
+  return chat.isProtected
+    ? 'Content protection is on, so this chat cannot be archived.'
+    : 'This chat receives backups, so it is not archived.';
 }

@@ -3,17 +3,22 @@ import { ConfigService } from '@nestjs/config';
 import type { Prisma } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
+  BACKUP_SETTINGS_KEY,
+  type BackupSettings,
   DOWNLOAD_SETTINGS_KEY,
   type DownloadSettings,
   SYNC_SETTINGS_KEY,
   type SettingsDto,
   type SyncSettings,
   type UpdateSettingsRequest,
+  backupSettingsSchema,
   downloadSettingsSchema,
+  readBackupSettings,
   readDownloadSettings,
   readSyncSettings,
   syncSettingsSchema,
 } from '@tam/shared';
+import { loadBackupSettings, stopRunningBackups } from '../backups/backup-rules.js';
 import type { Env } from '../config/env.js';
 import {
   applyDownloadPolicy,
@@ -26,7 +31,10 @@ const TRANSACTION_OPTIONS = { timeout: 60_000, maxWait: 5_000 } as const;
 
 type Tx = Prisma.TransactionClient;
 
-/** Archive settings people change in the web: how media files download, and how often to sync. */
+/**
+ * Archive settings people change in the web: how media files download, how often to sync, and
+ * whether Telegram backups run.
+ */
 @Injectable()
 export class SettingsService {
   constructor(
@@ -35,18 +43,20 @@ export class SettingsService {
   ) {}
 
   async get(): Promise<SettingsDto> {
-    const [downloads, sync] = await Promise.all([
+    const [downloads, sync, backups] = await Promise.all([
       loadDownloadSettings(this.prisma),
       loadSyncSettings(this.prisma),
+      loadBackupSettings(this.prisma),
     ]);
-    return this.toDto(downloads, sync);
+    return this.toDto(downloads, sync, backups);
   }
 
   /**
    * Saves the given settings (the others keep their value). Download settings apply at once:
    * files the new types and size allow go back in line, waiting files they no longer allow are
    * skipped, and pausing stops running downloads (they resume from their partial files later).
-   * The sync interval applies from the worker's next round.
+   * The sync interval applies from the worker's next round. Pausing backups takes running ones
+   * back, except a send already under way.
    */
   async update(request: UpdateSettingsRequest): Promise<SettingsDto> {
     const saved = await this.prisma.$transaction(async (tx) => {
@@ -56,15 +66,23 @@ export class SettingsService {
       const sync = request.sync
         ? await saveSyncSettings(tx, request.sync)
         : await loadSyncSettings(tx);
-      return { downloads, sync };
+      const backups = request.backups
+        ? await saveBackupSettings(tx, request.backups)
+        : await loadBackupSettings(tx);
+      return { downloads, sync, backups };
     }, TRANSACTION_OPTIONS);
-    return this.toDto(saved.downloads, saved.sync);
+    return this.toDto(saved.downloads, saved.sync, saved.backups);
   }
 
-  private toDto(downloads: DownloadSettings, sync: SyncSettings): SettingsDto {
+  private toDto(
+    downloads: DownloadSettings,
+    sync: SyncSettings,
+    backups: BackupSettings,
+  ): SettingsDto {
     return {
       downloads,
       sync,
+      backups,
       disk: { minFreeDiskMb: this.config.get('MIN_FREE_DISK_MB', { infer: true }) },
     };
   }
@@ -108,5 +126,18 @@ async function saveSyncSettings(
   const current = readSyncSettings(await lockedSetting(tx, SYNC_SETTINGS_KEY));
   const next: SyncSettings = syncSettingsSchema.parse({ ...current, ...changes });
   await tx.appSetting.update({ where: { key: SYNC_SETTINGS_KEY }, data: { value: next } });
+  return next;
+}
+
+async function saveBackupSettings(
+  tx: Tx,
+  changes: NonNullable<UpdateSettingsRequest['backups']>,
+): Promise<BackupSettings> {
+  const current = readBackupSettings(await lockedSetting(tx, BACKUP_SETTINGS_KEY));
+  const next: BackupSettings = backupSettingsSchema.parse({ ...current, ...changes });
+  await tx.appSetting.update({ where: { key: BACKUP_SETTINGS_KEY }, data: { value: next } });
+  if (next.paused && !current.paused) {
+    await stopRunningBackups(tx);
+  }
   return next;
 }

@@ -11,17 +11,24 @@ interface Batch {
   jobs: Set<string>;
   channels: Set<string>;
   downloads: Set<string>;
+  backups: Set<string>;
   resync: boolean;
 }
 
 function emptyBatch(): Batch {
-  return { jobs: new Set(), channels: new Set(), downloads: new Set(), resync: false };
+  return {
+    jobs: new Set(),
+    channels: new Set(),
+    downloads: new Set(),
+    backups: new Set(),
+    resync: false,
+  };
 }
 
 /**
  * Turns database changes into the events of the live updates stream, once for every client of
  * this process. Changes are gathered for a short window: a job goes out whole (as the import-jobs
- * endpoints return it), channels and downloads as a hint to read again. Nothing is prepared
+ * endpoints return it), channels, downloads and backups as a hint to read again. Nothing is prepared
  * while nobody listens.
  */
 @Injectable()
@@ -75,7 +82,9 @@ export class LiveEvents implements OnModuleDestroy {
           ? this.batch.jobs
           : kind === 'channel'
             ? this.batch.channels
-            : this.batch.downloads;
+            : kind === 'backups'
+              ? this.batch.backups
+              : this.batch.downloads;
       target.add(id);
     }
     this.timer ??= setTimeout(() => this.flush(), this.settings.batchMs);
@@ -118,6 +127,9 @@ export class LiveEvents implements OnModuleDestroy {
     }
     for (const channelId of batch.downloads) {
       events.push({ type: 'downloads.changed', channelId });
+    }
+    for (const channelId of batch.backups) {
+      events.push({ type: 'backups.changed', channelId });
     }
     return events;
   }

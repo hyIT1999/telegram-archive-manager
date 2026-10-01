@@ -53,5 +53,7 @@ import { ThumbnailFetcher } from './thumbnail-fetcher.js';
     DownloadReconciler,
     ThumbnailFetcher,
   ],
+  // Backups read downloaded copies through the same drivers, and the cached previews.
+  exports: [LOCATION_DRIVERS, MEDIA_SETTINGS],
 })
 export class MediaModule {}

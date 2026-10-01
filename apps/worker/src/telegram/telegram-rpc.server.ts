@@ -22,6 +22,10 @@ import { TELEGRAM_REDIS } from './telegram.tokens.js';
 /** How long shutdown waits for requests that are being handled. */
 const DRAIN_TIMEOUT_MS = 10_000;
 
+/** Requests another module answers (it registers them): the backups' Verify. */
+export type ExternalRpcMethod = 'backup.verify';
+type ExternalRpcCall = Extract<TelegramRpcCall, { method: ExternalRpcMethod }>;
+
 /**
  * Serves the api's Telegram requests (login steps, chat list and forum topic refreshes) over Redis pub/sub while
  * this process owns the Telegram connection. Payloads carry login codes and passwords: they are
@@ -33,6 +37,10 @@ export class TelegramRpcServer {
   private subscriber: Redis | undefined;
   private readonly inFlight = new Set<Promise<void>>();
   private readonly channels: TelegramRpcChannels;
+  private readonly handlers = new Map<
+    ExternalRpcMethod,
+    (call: ExternalRpcCall) => Promise<void>
+  >();
 
   constructor(
     private readonly config: ConfigService<WorkerEnv, true>,
@@ -42,6 +50,11 @@ export class TelegramRpcServer {
     private readonly topics: ForumTopicsService,
   ) {
     this.channels = telegramRpcChannels(config.get('BULLMQ_PREFIX', { infer: true }));
+  }
+
+  /** Lets a module that imports this one answer a request (it would otherwise be circular). */
+  register(method: ExternalRpcMethod, handler: (call: ExternalRpcCall) => Promise<void>): void {
+    this.handlers.set(method, handler);
   }
 
   async start(): Promise<void> {
@@ -140,6 +153,21 @@ export class TelegramRpcServer {
         // Answers once the topics are stored, so the api's next read shows them.
         await this.topics.refresh(call.channelId);
         return;
+      case 'backup.checkChat':
+        // Answers once the chat is stored with its rights; the api decides from there.
+        await this.dialogs.checkChat(call.telegramChatId);
+        return;
+      case 'backup.verify': {
+        const handler = this.handlers.get(call.method);
+        if (!handler) {
+          throw new TelegramError(
+            'This worker does not verify backups',
+            TelegramErrorCode.TELEGRAM_ERROR,
+          );
+        }
+        await handler(call);
+        return;
+      }
     }
   }
 

@@ -136,6 +136,11 @@
   color: var(--mat-sys-on-tertiary-container);
 }
 
+.badge-backup {
+  background: var(--mat-sys-secondary-container);
+  color: var(--mat-sys-on-secondary-container);
+}
+
 .badge-archived {
   background: var(--mat-sys-primary-container);
   color: var(--mat-sys-on-primary-container);

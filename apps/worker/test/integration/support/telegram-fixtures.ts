@@ -41,6 +41,23 @@ export function createFakeTelegramApi() {
       throw new Error('No fake file was set up');
     }),
     getThumbnails: vi.fn<TelegramApi['getThumbnails']>(async () => new Map()),
+    // Backups: scripted by FakeBackupChat (fake-backup-chat.ts) in the backup tests.
+    openBackupSource: vi.fn<TelegramApi['openBackupSource']>(async () => {
+      throw new Error('No fake backup chat was set up');
+    }),
+    uploadBackupFile: vi.fn<TelegramApi['uploadBackupFile']>(async () => {
+      throw new Error('No fake backup chat was set up');
+    }),
+    sendBackup: vi.fn<TelegramApi['sendBackup']>(async () => {
+      throw new Error('No fake backup chat was set up');
+    }),
+    createForumTopic: vi.fn<TelegramApi['createForumTopic']>(async () => {
+      throw new Error('No fake backup chat was set up');
+    }),
+    getBackupMessages: vi.fn<TelegramApi['getBackupMessages']>(async () => []),
+    getBackupHistory: vi.fn<TelegramApi['getBackupHistory']>(async () => []),
+    readBackupFileHead: vi.fn<TelegramApi['readBackupFileHead']>(async () => 0),
+    deleteBackupMessages: vi.fn<TelegramApi['deleteBackupMessages']>(async () => undefined),
   } satisfies TelegramApi;
   const provider: TelegramApiProvider = { api };
   return { api, provider };
@@ -57,6 +74,8 @@ export function chat(id: string, overrides: Partial<Chat> = {}): Chat {
     isProtected: false,
     memberCount: 10,
     migratedFromChatId: null,
+    canPost: false,
+    canManageTopics: false,
     ...overrides,
   };
 }
@@ -86,6 +105,7 @@ export function forumTopic(id: number, overrides: Partial<ForumTopic> = {}): For
     isPinned: false,
     isHidden: false,
     date: new Date(Date.UTC(2026, 0, 1) + id * 60_000),
+    createdByMe: false,
     ...overrides,
   };
 }

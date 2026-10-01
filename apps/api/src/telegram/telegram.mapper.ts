@@ -48,7 +48,11 @@ export function toTelegramStatusDto(
   };
 }
 
-export function toTelegramDialogDto(dialog: TelegramDialog, archivedChannelId: string | null): TelegramDialogDto {
+export function toTelegramDialogDto(
+  dialog: TelegramDialog,
+  archivedChannelId: string | null,
+  backupLocationId: string | null = null,
+): TelegramDialogDto {
   return {
     telegramChatId: dialog.telegramChatId.toString(),
     title: dialog.title,
@@ -58,6 +62,9 @@ export function toTelegramDialogDto(dialog: TelegramDialog, archivedChannelId: s
     isForum: dialog.isForum,
     memberCount: dialog.memberCount,
     archivedChannelId,
+    canPost: dialog.canPost,
+    canManageTopics: dialog.canManageTopics,
+    backupLocationId,
     lastSeenAt: dialog.lastSeenAt.toISOString(),
   };
 }

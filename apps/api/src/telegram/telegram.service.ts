@@ -52,13 +52,26 @@ export class TelegramService {
         select: { dialogsRefreshedAt: true },
       }),
     ]);
-    const archived = await this.prisma.channel.findMany({
-      where: { telegramChatId: { in: rows.map((row) => row.telegramChatId) } },
-      select: { id: true, telegramChatId: true },
-    });
+    const [archived, backupChats] = await Promise.all([
+      this.prisma.channel.findMany({
+        where: { telegramChatId: { in: rows.map((row) => row.telegramChatId) } },
+        select: { id: true, telegramChatId: true },
+      }),
+      this.prisma.storageLocation.findMany({
+        where: { kind: 'TELEGRAM' },
+        select: { id: true, target: true },
+      }),
+    ]);
     const channelIdByChat = new Map(archived.map((channel) => [channel.telegramChatId, channel.id]));
+    const backupIdByChat = new Map(backupChats.map((location) => [location.target, location.id]));
     return {
-      items: rows.map((row) => toTelegramDialogDto(row, channelIdByChat.get(row.telegramChatId) ?? null)),
+      items: rows.map((row) =>
+        toTelegramDialogDto(
+          row,
+          channelIdByChat.get(row.telegramChatId) ?? null,
+          backupIdByChat.get(row.telegramChatId.toString()) ?? null,
+        ),
+      ),
       refreshing: refreshing === 1,
       refreshedAt: account?.dialogsRefreshedAt?.toISOString() ?? null,
     };

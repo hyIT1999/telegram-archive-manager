@@ -1,7 +1,13 @@
 import type { Readable } from 'node:stream';
 
-/** Mirrors the StorageKind enum of the database. */
+/** The kinds of storage location files are written to (they have a driver). */
 export type StorageKind = 'LOCAL' | 'GOOGLE_DRIVE';
+
+/**
+ * Mirrors the StorageKind enum of the database: the download kinds, and TELEGRAM, a backup chat
+ * that receives copies of messages from the worker and never holds files through a driver.
+ */
+export type LocationKind = StorageKind | 'TELEGRAM';
 
 export interface StoredObjectInfo {
   key: string;

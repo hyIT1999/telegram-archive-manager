@@ -1,17 +1,30 @@
 import { z } from 'zod';
-import type { StorageKind } from '../enums.js';
+import type { ChatType, StorageKind } from '../enums.js';
+import { telegramIdSchema } from './common.js';
 
 /** Folder the app creates in My Drive when none is named. */
 export const DEFAULT_DRIVE_FOLDER_NAME = 'Unofficial Telegram Archive';
+
+/** The Telegram chat behind a backup location (kind TELEGRAM). */
+export interface TelegramBackupChatDto {
+  /** Marked chat id (-100…), for t.me links. */
+  telegramChatId: string;
+  type: ChatType;
+  username: string | null;
+  /** Forum topics of an archived forum are recreated in it. */
+  isForum: boolean;
+}
 
 export interface StorageLocationDto {
   id: string;
   kind: StorageKind;
   name: string;
-  /** Where files go, for people: an absolute folder, or "My Drive › <folder>". */
+  /** Where files go, for people: an absolute folder, "My Drive › <folder>" or "Telegram › <chat>". */
   displayPath: string;
   /** The Google account the location writes with (Google Drive only). */
   accountEmail: string | null;
+  /** The backup chat (Telegram only). */
+  telegram: TelegramBackupChatDto | null;
   /** Used by channels that did not choose a location. */
   isDefault: boolean;
   /** Follows STORAGE_LOCAL_ROOT on the server; cannot be removed. */
@@ -19,9 +32,12 @@ export interface StorageLocationDto {
   /** Outcome of the last check, or why downloads to it wait; null when it worked (or never ran). */
   lastError: string | null;
   lastCheckedAt: string | null;
-  /** Downloads to this location wait until then (full, rate limited, access lost); see lastError. */
+  /**
+   * Downloads to this location (backups, for a Telegram chat) wait until then (full, rate
+   * limited, access lost); see lastError.
+   */
   unavailableUntil: string | null;
-  /** Channels that save their media here. */
+  /** Channels that save their media here, or back up here (Telegram). */
   channelCount: number;
   createdAt: string;
 }
@@ -48,6 +64,11 @@ export interface StorageCapabilitiesDto {
     /** Why not, when unavailable (server settings to add). */
     reason: string | null;
   };
+  /** Backup chats need the archive's Telegram account to be signed in. */
+  telegram: {
+    available: boolean;
+    reason: string | null;
+  };
 }
 
 export interface StorageLocationListDto {
@@ -69,6 +90,17 @@ export const createLocalLocationRequestSchema = z.object({
   subfolder: folderNameSchema.optional(),
 });
 export type CreateLocalLocationRequest = z.infer<typeof createLocalLocationRequestSchema>;
+
+/**
+ * POST /api/storage/telegram — a Telegram chat of the account (from its chat list) that receives
+ * backup copies. The worker checks that the account may post there (and create topics in a forum).
+ */
+export const createTelegramLocationRequestSchema = z.object({
+  telegramChatId: telegramIdSchema,
+  /** Defaults to the chat's title. */
+  name: storageLocationNameSchema.optional(),
+});
+export type CreateTelegramLocationRequest = z.infer<typeof createTelegramLocationRequestSchema>;
 
 /** GET /api/storage/local/folders?path= — without a path, lists the allowed roots. */
 export const localFoldersQuerySchema = z.object({

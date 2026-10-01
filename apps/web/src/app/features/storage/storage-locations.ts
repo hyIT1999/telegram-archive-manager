@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  type StorageKind,
   type StorageLocationDto,
   type StorageLocationListDto,
   type StorageSpaceDto,
@@ -15,20 +16,35 @@ export interface LocationCheck {
 }
 
 /**
- * The storage locations shown by one list (wizard step, settings), each checked once when the
- * list arrives so the page shows fresh free space and notices broken locations (revoked Google
- * access, removed folders) before anything is saved there.
+ * Whether a location is checked on its own when the list arrives. A Telegram chat is checked by
+ * asking Telegram, which is left to the Check button: its stored state is shown instead.
+ */
+function checksItself(location: StorageLocationDto): boolean {
+  return location.kind !== 'TELEGRAM';
+}
+
+/**
+ * The storage locations shown by one list (wizard step, settings, backup chat choice), each
+ * folder and Drive checked once when the list arrives so the page shows fresh free space and
+ * notices broken locations (revoked Google access, removed folders) before anything is saved there.
  */
 @Injectable()
 export class StorageLocations {
   private readonly api = inject(StorageApi);
   private readonly destroyRef = inject(DestroyRef);
   private readonly resource = rxResource({ stream: () => this.api.list() });
+  /** The kinds the list shows (null: every kind). */
+  private readonly kinds = signal<() => readonly StorageKind[] | null>(() => null);
 
   readonly list = computed<StorageLocationListDto | undefined>(() =>
     this.resource.hasValue() ? this.resource.value() : undefined,
   );
-  readonly items = computed(() => this.list()?.items ?? []);
+  /** The locations of the kinds shown. */
+  readonly items = computed(() => {
+    const kinds = this.kinds()();
+    const items = this.list()?.items ?? [];
+    return kinds === null ? items : items.filter((item) => kinds.includes(item.kind));
+  });
   readonly error = computed(() => this.resource.error());
   readonly defaultLocation = computed(() => this.items().find((item) => item.isDefault) ?? null);
 
@@ -37,18 +53,23 @@ export class StorageLocations {
 
   constructor() {
     effect(() => {
-      const items = this.list()?.items;
-      if (!items) {
+      if (!this.list()) {
         return;
       }
+      const items = this.items();
       untracked(() => {
         for (const item of items) {
-          if (!this.checkStates().has(item.id)) {
+          if (checksItself(item) && !this.checkStates().has(item.id)) {
             this.check(item.id);
           }
         }
       });
     });
+  }
+
+  /** Shows (and checks) only locations of these kinds; null shows every kind. */
+  showOnly(kinds: () => readonly StorageKind[] | null): void {
+    this.kinds.set(kinds);
   }
 
   reload(): void {
@@ -74,7 +95,10 @@ export class StorageLocations {
       });
   }
 
-  /** A location created or reconnected elsewhere (dialog): shown and checked right away. */
+  /**
+   * A location created or reconnected elsewhere (dialog): shown, and checked right away (a
+   * Telegram chat was checked when it was added).
+   */
   upsert(location: StorageLocationDto): void {
     const list = this.list();
     if (!list) {
@@ -87,7 +111,9 @@ export class StorageLocations {
         ? list.items.map((item) => (item.id === location.id ? location : item))
         : [...list.items, location],
     });
-    this.check(location.id);
+    if (checksItself(location)) {
+      this.check(location.id);
+    }
   }
 
   /** Removes a location from the list after the server deleted it. */

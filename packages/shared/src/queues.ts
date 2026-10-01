@@ -29,6 +29,11 @@ export const REDIS_KEYS = {
   telegramDialogsRefreshing: 'tam:tg:dialogs:refreshing',
 } as const;
 
+/** Present (with a TTL) while the worker verifies the backup copies of a channel. */
+export function backupVerifyingKey(channelId: string): string {
+  return `tam:backup:verifying:${channelId}`;
+}
+
 export interface ImportJobData {
   importJobId: string;
   runSeq: number;

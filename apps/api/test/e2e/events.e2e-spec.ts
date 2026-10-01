@@ -170,6 +170,23 @@ describe('live updates (e2e)', () => {
     await prisma.downloadJob.create({ data: { mediaId: media.id } });
     await stream.next(eventOf('downloads.changed', (data) => data.channelId === oldGroup.id));
     await stream.next(eventOf('downloads.changed', (data) => data.channelId === supergroup.id));
+
+    const chat = await prisma.storageLocation.create({
+      data: {
+        kind: 'TELEGRAM',
+        name: 'Backups',
+        displayPath: 'Telegram › Backups',
+        target: `-100${Date.now()}`,
+        config: {},
+      },
+    });
+    await prisma.messageBackup.create({
+      data: { messageId: message.id, storageLocationId: chat.id, channelId: oldGroup.id },
+    });
+    await stream.next(eventOf('backups.changed', (data) => data.channelId === oldGroup.id));
+    await stream.next(eventOf('backups.changed', (data) => data.channelId === supergroup.id));
+    await prisma.messageBackup.deleteMany({ where: { storageLocationId: chat.id } });
+    await prisma.storageLocation.delete({ where: { id: chat.id } });
   });
 
   it('asks to read everything again when too much changed at once', async () => {

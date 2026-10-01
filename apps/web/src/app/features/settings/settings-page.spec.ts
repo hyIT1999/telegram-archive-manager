@@ -18,7 +18,7 @@ import { TELEGRAM_ENDPOINTS } from '../telegram/telegram-api';
 import { SettingsPage } from './settings-page';
 
 describe('SettingsPage', () => {
-  it('shows the account, Telegram account, storage locations, download and sync settings, and the appearance', async () => {
+  it('shows the account, Telegram account, storage locations, download, sync and backup settings, and the appearance', async () => {
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
@@ -34,9 +34,9 @@ describe('SettingsPage', () => {
     (await nextRequest(http, ACCOUNT_ENDPOINTS.sessions)).flush([makeSession()]);
     http.expectOne(TELEGRAM_ENDPOINTS.status).flush(makeReadyStatus());
     http.expectOne(STORAGE_ENDPOINTS.locations).flush(makeStorageList([computer]));
-    // The download and the sync settings each read them.
+    // The download, sync and backup settings each read them.
     const settings = http.match(SETTINGS_ENDPOINT);
-    expect(settings).toHaveLength(2);
+    expect(settings).toHaveLength(3);
     for (const request of settings) {
       request.flush(makeSettings());
     }
@@ -53,6 +53,7 @@ describe('SettingsPage', () => {
       'Storage locations',
       'Media downloads',
       'Sync',
+      'Telegram backup',
       'Appearance',
     ]);
     expect(page.querySelector('app-sync-settings mat-select')?.textContent).toContain(
@@ -61,6 +62,7 @@ describe('SettingsPage', () => {
     expect(page.querySelector('app-download-settings')?.textContent).toContain(
       'Pause all downloads',
     );
+    expect(page.querySelector('app-backup-settings')?.textContent).toContain('Pause all backups');
     expect(page.querySelector('app-telegram-connect .account-name')?.textContent).toContain(
       'An Archivist',
     );

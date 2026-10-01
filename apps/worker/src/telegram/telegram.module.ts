@@ -64,6 +64,10 @@ import {
     TelegramCooldown,
     ForumTopicsService,
     TelegramUpdates,
+    // Backups answer their own requests (backup.verify) through it.
+    TelegramRpcServer,
+    TelegramDialogsService,
+    TELEGRAM_REDIS,
   ],
 })
 export class TelegramModule {}

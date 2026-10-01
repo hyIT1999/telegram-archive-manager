@@ -28,6 +28,9 @@ import {
 export const LEASE_TTL_MS = 30_000;
 export const LEASE_RENEW_INTERVAL_MS = 10_000;
 
+/** The parts of an upload (backups): their waits concern the backups alone. */
+const UPLOAD_METHODS = new Set(['upload.saveFilePart', 'upload.saveBigFilePart']);
+
 type MtcuteClient = ReturnType<typeof createMtcuteClient>;
 
 /**
@@ -98,7 +101,12 @@ export class TelegramConnection implements TelegramApiProvider {
       appVersion: APP_VERSION,
       logLevel: mtcuteLogLevel(this.config.get('LOG_LEVEL', { infer: true })),
       onFloodWait: (method, seconds) => {
-        this.cooldown.note(seconds);
+        // A backup upload waiting must not stop reading, downloading and syncing.
+        if (UPLOAD_METHODS.has(method)) {
+          this.cooldown.noteUpload(seconds);
+        } else {
+          this.cooldown.note(seconds);
+        }
         this.logger.warn(`Telegram rate limit on ${method}: waiting ${seconds} s`);
       },
     });

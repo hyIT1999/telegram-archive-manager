@@ -3,9 +3,12 @@ import pg from 'pg';
 /** The notification channel of the change triggers (migration phase7_live_sync). */
 export const CHANGE_CHANNEL = 'tam_changes';
 
-export type ChangeKind = 'job' | 'channel' | 'downloads';
+export type ChangeKind = 'job' | 'channel' | 'downloads' | 'backups';
 
-/** One committed change: an import job, a channel, or the downloads of a channel. */
+/**
+ * One committed change: an import job, a channel, or the downloads or Telegram backups of a
+ * channel.
+ */
 export interface Change {
   kind: ChangeKind;
   /** The import job or channel id. */
@@ -13,7 +16,7 @@ export interface Change {
 }
 
 const PAYLOAD =
-  /^(job|channel|downloads):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+  /^(job|channel|downloads|backups):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 /** Reads a trigger payload ("job:<uuid>"…); null for anything else. */
 export function parseChange(payload: string | undefined): Change | null {

@@ -5,6 +5,7 @@ import { ERRORS_SHOWN_INLINE } from '../../core/interceptors/server-error-interc
 import type {
   ConnectGoogleDriveRequest,
   CreateLocalLocationRequest,
+  CreateTelegramLocationRequest,
   GoogleDriveConnectDto,
   GoogleDrivePollDto,
   LocalFolderListDto,
@@ -18,6 +19,7 @@ export const STORAGE_ENDPOINTS = {
   locations: '/api/storage/locations',
   folders: '/api/storage/local/folders',
   googleConnect: '/api/storage/google/connect',
+  telegram: '/api/storage/telegram',
 } as const;
 
 /** Actions report their failures where they were started (dialog, location card). */
@@ -25,7 +27,10 @@ function inlineErrors(): { context: HttpContext } {
   return { context: new HttpContext().set(ERRORS_SHOWN_INLINE, true) };
 }
 
-/** Storage locations: folders on the server and Google Drive folders. */
+/**
+ * Storage locations: folders on the server and Google Drive folders, where media downloads, and
+ * Telegram chats that receive backups.
+ */
 @Injectable({ providedIn: 'root' })
 export class StorageApi {
   private readonly http = inject(HttpClient);
@@ -47,6 +52,11 @@ export class StorageApi {
     return this.http.post<StorageLocationDto>(STORAGE_ENDPOINTS.locations, request, inlineErrors());
   }
 
+  /** Adds a Telegram chat of the account as a backup chat, once the worker checked it. */
+  createTelegram(request: CreateTelegramLocationRequest): Observable<StorageLocationDto> {
+    return this.http.post<StorageLocationDto>(STORAGE_ENDPOINTS.telegram, request, inlineErrors());
+  }
+
   update(id: string, request: UpdateStorageLocationRequest): Observable<StorageLocationDto> {
     return this.http.patch<StorageLocationDto>(
       `${STORAGE_ENDPOINTS.locations}/${encodeURIComponent(id)}`,
@@ -55,7 +65,10 @@ export class StorageApi {
     );
   }
 
-  /** Writes, reads back and removes a small file; reports the free space. */
+  /**
+   * Writes, reads back and removes a small file; reports the free space. A Telegram chat is read
+   * again from Telegram instead.
+   */
   check(id: string): Observable<StorageCheckDto> {
     return this.http.post<StorageCheckDto>(
       `${STORAGE_ENDPOINTS.locations}/${encodeURIComponent(id)}/check`,

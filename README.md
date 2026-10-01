@@ -5,7 +5,8 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 - tải media (video/ảnh/tài liệu/audio) về storage riêng;
 - tìm kiếm, lọc, gắn tag, đánh dấu favorite;
 - xem media ngay trên web;
-- đồng bộ message mới.
+- đồng bộ message mới;
+- sao lưu từng message sang một chat Telegram riêng của bạn (tạo lại message mới, không forward).
 
 > **Unofficial** — đây không phải sản phẩm của Telegram. Theo Telegram API Terms, tên ứng dụng dùng API chỉ được chứa chữ "Telegram" khi có "Unofficial" đứng trước.
 > Hệ thống chỉ xử lý nội dung tài khoản được phép truy cập. Nó **không** bypass private channel, access control, DRM hay content protection:
@@ -27,6 +28,7 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
 | 6 | Search, Tags, Favorites, Filters | ✅ Hoàn thành |
 | 7 | Tiến trình realtime (SSE), sync message mới | ✅ Hoàn thành |
 | 8 | Test bổ sung, bảo mật, hiệu năng, Docker production, pm2 | ✅ Hoàn thành |
+| 9 | Sao lưu sang Telegram: nơi lưu thứ ba là một chat Telegram của bạn, mỗi message được tạo lại (không forward) | ✅ Hoàn thành, chờ chạy thử thật |
 
 Đã dùng được:
 - Phase 2: bước 1–4 của wizard **Import Jobs → New import** (kết nối Telegram, danh sách channel/group, thêm chat vào archive, chọn nơi lưu), **Settings → Telegram account**, **Settings → Storage locations**.
@@ -47,6 +49,11 @@ Hệ thống tự host để **lưu trữ và quản lý nội dung** từ các 
   - Bảo mật HTTP (Host header, CSP chạy được trên HTTP, `X-Forwarded-For` không giả được sau nginx), font tự host (không tải gì từ Google), media có ETag/304.
   - Hiệu năng đo trên archive giả 150 000 message: hàng đợi tải từ 344 ms xuống 0,5 ms mỗi lượt, trang channel và mục Media downloads nhanh gấp 4–5 lần (§11).
   - Bộ test trình duyệt (Playwright), coverage và CI cho GitHub Actions (§7).
+- Phase 9 (**Sao lưu sang Telegram**, §9):
+  - loại nơi lưu thứ ba **Telegram chat** trong **Settings → Storage locations**: một channel hoặc supergroup của bạn nhận bản sao của message;
+  - mục **Telegram backup** trên trang channel: chọn chat backup, công tắc **Back up automatically**, tiến độ (message, GiB, tốc độ, thời gian còn lại), file đang upload, **Retry failed**, **Verify backup**;
+  - trang message: trạng thái bản sao, link tới bản sao trong Telegram, **Back up now** / **Back up again**;
+  - lựa chọn backup ở bước 4 và 6 của wizard, và **Settings → Telegram backup** với **Pause all backups**.
 
 ## Kiến trúc tổng quan
 
@@ -58,9 +65,10 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
                                                      │
                                   Worker (apps/worker) — process DUY NHẤT giữ kết nối Telegram (và nhận updates)
                                   queues: telegram-import, telegram-sync, media-download
-                                  + scheduler tải và sync, reconciler, thumbnail và tên topic từ Telegram
+                                  + scheduler tải, sync và backup, reconciler, thumbnail và tên topic từ Telegram
                                                      │
                             Nơi lưu (chọn theo từng channel): thư mục trên máy | Google Drive
+                            Backup (tuỳ chọn, theo từng channel): một chat Telegram của bạn
 ```
 
 - **PostgreSQL là nguồn sự thật duy nhất.** BullMQ chỉ vận chuyển job. Mọi chuyển trạng thái đều là compare-and-set; unique constraint bảo đảm không bao giờ có message hoặc media trùng (idempotency).
@@ -74,14 +82,15 @@ Angular (apps/web) ──HTTP + SSE, cookie session──► NestJS API (apps/ap
   - Nếu Redis không nhận kịp (quá 3 giây), request vẫn thành công. Reconciler của worker (chạy khi khởi động và mỗi phút) thêm lại run cho mọi job `PENDING`/`RUNNING` bị thiếu trong queue, và ghi nhận `FAILED` cho run mà BullMQ đã bỏ cuộc.
   - Worker đọc lại trạng thái job trước mỗi trang và ghi mỗi trang bằng compare-and-set theo `status` + số run. Nhờ vậy Pause, Cancel hay một run mới hơn luôn thắng một run cũ, kể cả khi hai bên chạy cùng lúc.
 - **Tải media:** scheduler trong worker lấy file đang chờ từ `download_jobs` (file được yêu cầu trước, rồi file nhỏ trước) và mỗi lần chỉ đưa vào queue `media-download` số file được phép tải cùng lúc, nên Redis luôn nhỏ dù archive lớn tới đâu. Lượt thử, lỗi và thời điểm thử lại đều nằm trong PostgreSQL; mỗi job BullMQ chỉ là một lượt thử.
+- **Sao lưu sang Telegram:** `BackupScheduler` của worker lấy từng message (hoặc cả album) trong bảng `message_backups`, truyền file của nó (từ Telegram, hoặc từ bản đã tải) thẳng vào một lần upload mới qua bộ nhớ, rồi gửi một message mới vào chat backup. Không forward, không ghi ổ đĩa. `random_id` được lưu trước khi gửi, nên gửi lại không bao giờ tạo bản trùng (§9, "Sao lưu sang Telegram").
 - **Binary media không bao giờ nằm trong PostgreSQL.** File nằm ở nơi lưu mà channel đã chọn, theo cấu trúc dễ đọc: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`.
 - **Tìm kiếm** dùng full-text search của PostgreSQL trên cột `search_vector` (chữ, caption và tên file; trigger tự cập nhật). Phần này nằm sau lớp `SearchProvider` của API, nên sau này có thể thay bằng OpenSearch mà không phải sửa phần còn lại.
 - **Cập nhật realtime** đi từ chính PostgreSQL:
-  - Trigger trên `import_jobs`, `channels` và `download_jobs` gọi `pg_notify` với một payload ngắn: `job:<id>`, `channel:<id>` hoặc `downloads:<channel id>`.
+  - Trigger trên `import_jobs`, `channels`, `download_jobs` và `message_backups` gọi `pg_notify` với một payload ngắn: `job:<id>`, `channel:<id>`, `downloads:<channel id>` hoặc `backups:<channel id>`.
   - Vì vậy chỉ thay đổi đã commit mới được báo; một trang bị rollback khi Pause thì không. Mọi nơi ghi (API, worker, SQL thô) đều tự phát, không cần nhớ publish.
   - Mỗi process API giữ một kết nối `LISTEN` riêng, gom thay đổi trong 250 ms, rồi gửi xuống trình duyệt qua `GET /api/events` (server-sent events):
     - job gửi nguyên `ImportJobDto`;
-    - channel và download gửi gợi ý để trang tự đọc lại.
+    - channel, download và backup gửi gợi ý để trang tự đọc lại.
   - Mất kết nối `LISTEN` thì API tự nối lại, rồi báo `resync` để các trang đọc lại dữ liệu.
 - **Sync** là một import job loại `SYNC`, chỉ đọc message mới hơn message mới nhất đã lưu, chạy trong queue riêng `telegram-sync` để không phải chờ sau một import dài. Chỉ `SyncScheduler` của worker tạo sync tự động (mục §10).
 - **Production** (§11) có hai cách:
@@ -99,7 +108,7 @@ packages/shared    Contract dùng chung: enums, zod schemas, DTO, tên queue, ev
 packages/crypto    SecretBox (AES-256-GCM) cho bí mật lưu trong DB: session Telegram, token Google
 packages/database  Prisma schema + migrations + generated client
 packages/telegram  Interface TelegramClient, adapter mtcute, mapper message/media, session PostgreSQL mã hoá
-packages/storage   StorageDriver: thư mục trên máy, Google Drive (OAuth device flow, upload resumable)
+packages/storage   StorageDriver: thư mục trên máy, Google Drive (OAuth device flow, upload resumable); cấu hình chat backup Telegram
 ```
 
 ---
@@ -387,17 +396,19 @@ Wizard **Import Jobs → New import** gồm 7 bước:
    - Chat có content protection hiện nhãn **Protected** và không chọn được. Chat đã có trong archive hiện nhãn **In archive**.
 3. **Select channel:** bấm **Add to archive** để tạo channel trong archive (`POST /api/channels` với `{telegramChatId}`).
    - Server chỉ nhận chat có trong danh sách cache và lấy mọi thông tin (tên, access hash, cờ protected) từ đó, không tin dữ liệu từ trình duyệt.
-   - Chat không còn trong danh sách trả `404 DIALOG_NOT_FOUND`; chat protected trả `422 CHAT_PROTECTED`.
+   - Chat không còn trong danh sách trả `404 DIALOG_NOT_FOUND`; chat protected trả `422 CHAT_PROTECTED`; chat đang là chat backup (xem "Sao lưu sang Telegram") trả `422 CHAT_IS_BACKUP_TARGET` và hiện nhãn **Backup chat** trong danh sách.
    - Thao tác idempotent: `201` khi tạo mới, `200` khi chat đã có. Gửi trùng hay gửi đồng thời cũng chỉ tạo đúng một channel.
 4. **Storage location:** chọn nơi lưu media của channel (xem "Nơi lưu" bên dưới), rồi bấm **Save location** (`PATCH /api/channels/:id` với `{storageLocationId}`).
    - Nơi lưu mặc định được chọn sẵn.
    - Thêm nơi lưu mới ngay tại đây: **Folder on this computer** hoặc **Google Drive**.
+   - Tuỳ chọn **Also back up to a Telegram chat**: chọn thêm chat nhận bản sao (lưu cùng lúc, `{backupLocationId}`).
 5. **Import mode:**
    - **The whole history:** mọi message, về tới message đầu tiên.
    - **Since a date:** chỉ message gửi từ ngày được chọn trở đi (tính theo múi giờ của trình duyệt). Phần cũ hơn có thể import sau.
 6. **Start:** xem lại channel, chế độ và nơi lưu, rồi bấm **Start import** (`POST /api/channels/:id/import`). Trước đó có thể bật/tắt:
    - **Download media automatically** (mục "Tải media" bên dưới);
-   - **Keep it up to date** (sync, §10). Cả hai đều bật sẵn.
+   - **Keep it up to date** (sync, §10). Cả hai đều bật sẵn;
+   - **Back up to Telegram automatically**, khi đã chọn chat backup ở bước 4. Tắt sẵn; backup chạy sau khi import xong.
 7. **Progress** cập nhật realtime (server-sent events) và hiện:
    - trạng thái, thanh tiến trình, message đã đọc trên tổng dự kiến;
    - media tìm thấy, **phần trăm đã tải** (không tính file bị bỏ qua), số lỗi, và **file đang tải** cùng tiến độ của nó;
@@ -465,9 +476,9 @@ API tải media (đều cần đăng nhập web):
 
 | Endpoint | Ý nghĩa |
 |---|---|
-| `GET /api/settings`, `PATCH /api/settings` | Cài đặt tải `{downloads: {paused, mediaTypes, maxFileSizeMb, concurrency}}` và sync `{sync: {intervalMinutes}}` (§10). PATCH chỉ đổi các trường gửi lên; cài đặt tải áp dụng ngay cho file đang chờ |
+| `GET /api/settings`, `PATCH /api/settings` | Cài đặt tải `{downloads: {paused, mediaTypes, maxFileSizeMb, concurrency}}`, sync `{sync: {intervalMinutes}}` (§10) và backup `{backups: {paused}}`. PATCH chỉ đổi các trường gửi lên; cài đặt tải áp dụng ngay cho file đang chờ |
 | `GET /api/channels/:id/downloads` | Số file và byte theo trạng thái, file đang tải, nơi lưu (chỗ trống, tạm ngưng tới khi nào), `fits` |
-| `PATCH /api/channels/:id` | `{downloadMedia}` bật/tắt tải tự động (áp dụng cả group cũ của supergroup); `{storageLocationId}` đổi nơi lưu; `{syncEnabled}` bật/tắt sync (§10) |
+| `PATCH /api/channels/:id` | `{downloadMedia}` bật/tắt tải tự động (áp dụng cả group cũ của supergroup); `{storageLocationId}` đổi nơi lưu (thư mục hoặc Google Drive, `422 LOCATION_KIND_NOT_ALLOWED` với chat Telegram); `{syncEnabled}` bật/tắt sync (§10); `{backupLocationId}`, `{backupEnabled}` cho backup ("Sao lưu sang Telegram") |
 | `POST /api/channels/:id/downloads/retry` | Đưa mọi file lỗi của channel trở lại hàng đợi |
 | `GET /api/media/:id` | Thông tin một file (không có đường dẫn trên server) |
 | `GET /api/media/:id/content` | Nội dung file đã tải, hỗ trợ `Range` (`206`/`416`) và `If-Range`. `ETag` là SHA-256 của file: trình duyệt hỏi lại mỗi lần (vẫn kiểm tra phiên) và nhận `304` không kèm nội dung; `HEAD` không đọc file. Chỉ ảnh, video/audio trình duyệt phát được và PDF được mở ngay; loại khác (kể cả mọi loại XML) luôn tải xuống, tên file bỏ ký tự đảo chiều chữ. `?download=1` để tải xuống. `409 MEDIA_NOT_DOWNLOADED` nếu chưa tải |
@@ -484,7 +495,7 @@ API import (đều cần đăng nhập web):
 | `GET /api/import-jobs` | Mới nhất trước; lọc `channelId`, `status` (ví dụ `RUNNING,PAUSED`), `type` (`IMPORT` hoặc `SYNC`); phân trang `cursor`/`limit` |
 | `GET /api/import-jobs/:id` | Một job, kèm channel, các bộ đếm, `origin` (vì sao job chạy) và `activeFiles` (file của job đang tải) |
 | `POST /api/import-jobs/:id/pause` / `resume` / `cancel` | Đổi trạng thái; `409 INVALID_JOB_STATE` nếu trạng thái hiện tại không cho phép (`details.status`). Sync không pause được |
-| `GET /api/events` | Cập nhật realtime (server-sent events). Mở đầu bằng `ready`, sau đó là `import.job` (nguyên job), `channel.changed`, `downloads.changed`, `resync` (đọc lại mọi thứ), `session.ended`, và `ping` mỗi 25 giây. Không nhận được gì trong 60 giây thì trang tự mở lại kết nối, vì proxy có thể giữ một kết nối đã chết |
+| `GET /api/events` | Cập nhật realtime (server-sent events). Mở đầu bằng `ready`, sau đó là `import.job` (nguyên job), `channel.changed`, `downloads.changed`, `backups.changed`, `resync` (đọc lại mọi thứ), `session.ended`, và `ping` mỗi 25 giây. Không nhận được gì trong 60 giây thì trang tự mở lại kết nối, vì proxy có thể giữ một kết nối đã chết |
 
 ### Xem archive
 
@@ -516,7 +527,7 @@ API xem archive (đều cần đăng nhập web):
 | Endpoint | Ý nghĩa |
 |---|---|
 | `GET /api/messages` | Mới nhất trước. Lọc: `channelId` (gồm cả group cũ của supergroup), `topicId` (cần `channelId`; `1` = General), `types` (vd. `VIDEO,ANIMATION`; mặc định mọi loại trừ `SERVICE`), `from`/`to` (ngày theo UTC hoặc ISO date-time có offset), `downloaded=true/false`, `sort=newest/oldest`. Phân trang `cursor`/`limit` (≤ 100); `total` chỉ có ở trang đầu và đếm tối đa 10 000 (`totalCapped: true` khi nhiều hơn, web ghi "10,000+"), nên trang đầu nhanh như nhau với archive cỡ nào |
-| `GET /api/messages/:id` | Message kèm file, album, reply thật (message trong topic không tính là reply), topic, `previousId`/`nextId` cùng topic và loại, `telegramUrl` |
+| `GET /api/messages/:id` | Message kèm file, album, reply thật (message trong topic không tính là reply), topic, `previousId`/`nextId` cùng topic và loại, `telegramUrl`, và `backups` (bản sao trong chat backup) |
 | `GET /api/channels/:id/topics` | Topic của forum theo thứ tự tạo, với số message theo loại và khoảng ngày; `forum:false` nếu không phải forum |
 | `POST /api/channels/:id/topics/refresh` | Đọc lại tên topic từ Telegram qua worker. `422 NOT_A_FORUM`; `503`/`504`/`429` như các lệnh Telegram khác |
 
@@ -556,18 +567,20 @@ API tìm kiếm, tag và yêu thích (đều cần đăng nhập web):
 
 ### Nơi lưu (storage locations)
 
-Mỗi channel lưu media vào một nơi lưu. Quản lý ở **Settings → Storage locations**, hoặc ngay tại bước 4 của wizard.
+Mỗi channel lưu media vào một nơi lưu. Quản lý ở **Settings → Storage locations**, hoặc ngay tại bước 4 của wizard. Chat Telegram trong danh sách này không nhận file tải về: chúng nhận **bản sao của message** (xem "Sao lưu sang Telegram" bên dưới).
 
 | Loại | Chi tiết |
 |---|---|
 | **This computer** (có sẵn) | Thư mục `STORAGE_LOCAL_ROOT`. Là nơi lưu mặc định lúc đầu, và không xoá được |
 | **Folder on this computer** | Thư mục trên máy chạy archive (máy chạy api/worker, không phải máy đang mở trình duyệt), chọn bằng trình duyệt thư mục. Chỉ được chọn bên trong `STORAGE_LOCAL_ROOTS`, nên web không thể ghi vào chỗ nhạy cảm, kể cả qua symlink/junction. Có thể tạo thư mục con mới khi thêm |
 | **Google Drive** | Một thư mục trong My Drive, do ứng dụng tạo (mặc định "Unofficial Telegram Archive"). Ứng dụng chỉ có quyền `drive.file`: chỉ thấy các file và thư mục nó tạo ra, không đọc được file khác của bạn |
+| **Telegram chat** (chỉ để backup) | Một channel hoặc supergroup của bạn, nơi tài khoản Telegram được đăng bài. Không bao giờ là nơi tải media về, không đặt làm mặc định được |
 
 - **Cấu trúc file** trong mọi loại nơi lưu, dễ xem như một bản sao của channel: `<Tên channel (chat id)>/<YYYY-MM>/<message id> - <tên file gốc>`, ví dụ `Học tập Vật Lý (-1001234567890)/2026-09/1523 - Bài giảng 5.pdf`.
   - Tên được làm sạch để hợp lệ trên Windows, Linux và Google Drive: bỏ ký tự cấm, giữ tiếng Việt.
   - Tên thư mục channel được giữ cố định từ lần chọn đầu, nên đổi tên channel trên Telegram không làm tách file ra hai thư mục.
 - **Kiểm tra (Check):** ghi, đọc lại rồi xoá một file nhỏ, sau đó báo dung lượng trống (với Google Drive là quota của tài khoản). Web tự kiểm tra mỗi nơi lưu khi mở danh sách, nên nơi lưu hỏng (thư mục bị xoá, quyền Google bị thu hồi) hiện lỗi ngay.
+  - Chat Telegram thì không tự kiểm tra khi mở danh sách (việc đó hỏi Telegram); trang hiện kết quả đã lưu. **Check again** nhờ worker đọc lại chat và quyền đăng bài.
 - **Đổi nơi lưu** của một channel chỉ áp dụng cho file tải sau đó. File đã lưu vẫn ở chỗ cũ, vì mỗi file ghi nhớ nơi lưu của nó.
 - **Xoá nơi lưu** chỉ được khi không còn channel hay file nào dùng. Các file đã lưu trong thư mục hoặc Drive vẫn còn nguyên. Với Google Drive, ứng dụng thu hồi luôn quyền truy cập.
 
@@ -583,6 +596,7 @@ API (đều cần đăng nhập web):
 | `DELETE /api/storage/locations/:id` | Xoá nơi lưu không còn dùng (`409 LOCATION_IN_USE` / `LOCATION_BUILT_IN`) |
 | `POST /api/storage/google/connect` | Bắt đầu đăng nhập Google bằng mã thiết bị: `{name, folderName?, locationId?}` |
 | `POST /api/storage/google/connect/:flowId/poll` | Hỏi Google đã được đồng ý chưa: `pending` / `authorized` / `denied` / `expired` |
+| `POST /api/storage/telegram` | Thêm chat backup `{telegramChatId, name?}` (xem "Sao lưu sang Telegram") |
 
 ### Kết nối Google Drive
 
@@ -606,6 +620,61 @@ Làm một lần, giống việc tạo `api_id` cho Telegram. Tài khoản Googl
 7. Trên web: **Settings → Storage locations → Google Drive** (hoặc bước 4 của wizard) → **Get a code**. Mở <https://www.google.com/device> trên bất kỳ thiết bị nào, nhập mã hiển thị, chọn tài khoản rồi cho phép. Giữ nguyên dấu tích quyền Google Drive.
 
 Vì sao dùng mã thiết bị: cách này không cần redirect URI, nên dùng được dù bạn mở archive bằng `localhost`, IP LAN hay domain. Refresh token được mã hoá bằng `STORAGE_SECRET_KEY` và không bao giờ gửi xuống trình duyệt.
+
+### Sao lưu sang Telegram
+
+Giữ một bản sao của archive ngay trên Telegram, trong một chat của bạn. Mỗi message nguồn được **tạo lại thành message mới**, file được **upload lại**: không forward, không `sendCopy`. Database lưu mapping message nguồn → message backup, nên khi tin gốc bị xoá, bản backup vẫn còn và vẫn mở được.
+
+**Chuẩn bị (một lần, trong Telegram)**
+- Tạo một **channel private**, hoặc một **supergroup private bật Topics** nếu muốn giữ topic của các forum đã archive.
+- Tài khoản Telegram đang đăng nhập archive phải là chủ, hoặc admin được đăng bài (với forum: được tạo topic). Không cần thêm biến nào vào `.env`, không dùng thêm tài khoản.
+
+**Bật backup**
+1. **Settings → Storage locations → Telegram chat** (hoặc trên trang channel, hoặc bước 4 của wizard): chọn chat trong danh sách. Chỉ chat mà tài khoản đăng được mới hiện; chat vừa tạo thì bấm **Refresh**. Worker đọc lại chat và quyền trước khi thêm.
+2. Trang channel → mục **Telegram backup** → **Choose a backup chat** → **Use this chat**.
+3. Thử vài message trước: **Back up now** trên trang message (chạy cả khi công tắc tắt; cả album đi cùng). Sau đó bật **Back up automatically** để sao lưu toàn bộ, cũ trước; message mới được sync về sau cũng được sao lưu.
+
+**Cách hoạt động**
+- Mỗi (message × chat backup) là một dòng `message_backups`: `PENDING` → `ACTIVE` → `COMPLETED`, hoặc `FAILED` / `SKIPPED`.
+  - Message hệ thống không có dòng. Poll, location… là *Skipped (cannot be recreated)*.
+  - Bật công tắc (hoặc đổi chat) tạo dòng cho mọi message đã có; message mới được worker thêm dòng mỗi phút.
+- Mỗi lúc **chỉ một lô** trên toàn hệ thống: một message, hoặc cả album (tối đa 10 file). Thứ tự: message được yêu cầu trước, rồi message cũ trước. Album chỉ gửi khi chắc đã đủ: archive đã có message mới hơn album, hoặc phần mới nhất của album đã được lưu hơn 2 phút.
+- **File:** nguồn là bản đã tải (thư mục hoặc Google Drive) nếu có, không thì tải từ Telegram (có kiểm tra content protection). File đi qua bộ nhớ (đệm 16 MiB) thẳng vào upload, **không ghi ổ đĩa**: 756 GiB không bao giờ nằm trên máy. Upload xong, file được biến thành media bền trong chat backup (`uploadMedia`), rồi message được gửi bằng **một lệnh duy nhất** (`sendMessage`, `sendMedia`, hoặc `sendMultiMedia` cho album).
+- **Giữ nguyên:** chữ và định dạng (entities), caption, tên file, thời lượng và kích thước video, performer/title của audio, ảnh xem trước đã có. Custom emoji (cần Premium) bị bỏ, chữ giữ nguyên. Caption quá giới hạn thì file được gửi trước, chữ đầy đủ đi thành tin trả lời.
+- **Topic:** chat backup là forum thì mỗi topic nguồn có một topic cùng tên (bảng `backup_topics`), tạo khi cần và dùng lại về sau. Topic bị xoá thì được tạo lại. Nhiều channel dùng chung một forum thì tên topic có thêm tên channel ở đầu. Chat backup là channel thường thì message xếp một dòng theo thời gian.
+- **Không bao giờ gửi trùng:**
+  - Trước khi gửi, worker ghi `stage = SENDING` cùng `random_id` của từng message. Gửi lại cùng `random_id` thì Telegram từ chối (`RANDOM_ID_DUPLICATE`).
+  - Không biết lần gửi trước đã tới chưa (crash, mất mạng đúng lúc gửi): worker đọc lịch sử chat backup để tìm bản đã gửi. Vẫn không chắc thì message thành *Failed* kèm ghi chú, **không gửi mù**.
+  - Bật/tắt công tắc, **Back up now** hay restart worker không gửi lại message đã *Backed up*. Chỉ **Back up again** mới gửi bản mới (tuỳ chọn xoá bản cũ, chỉ trong chat backup).
+- **Chờ mà không tốn lượt thử:**
+  - FloodWait khi upload chỉ làm upload chậm lại. FloodWait khi gửi tạm ngưng riêng chat backup đó, rồi worker giãn khoảng cách giữa hai lần gửi trong 1 giờ.
+  - `PEER_FLOOD` (tài khoản gửi quá nhiều): chat backup tạm ngưng 6 giờ.
+  - Mất quyền đăng bài, hoặc không còn vào được chat backup: tạm ngưng 30 phút, lý do hiện trên trang channel và ở Settings.
+  - Worker chưa kết nối Telegram, tài khoản bị đăng xuất: chờ.
+  - Lỗi khác được thử lại tối đa 8 lần (30 giây tới 1 giờ), rồi *Failed*; trang channel có **Retry failed**.
+- **Không chạy khi:** **Settings → Telegram backup → Pause all backups** đang bật; channel còn import chưa xong (backup chờ import); tài khoản Telegram chưa sẵn sàng.
+- **Chat nguồn bật content protection:** message còn lại thành *Skipped*, công tắc backup của channel tự tắt kèm lý do. Tin gốc đã bị xoá mà chưa từng tải về: *Skipped (not available)*; message chỉ có chữ vẫn gửi được từ database.
+- **Cỡ file:** tối đa 2000 MiB (4000 MiB với Premium); lớn hơn là *Skipped (too large)*.
+- **Chống vòng lặp:** chat backup không thêm vào archive được, chat đã archive không làm chat backup được, và một channel không backup vào chính nó.
+- **Đổi chat backup:** message được sao lưu lại vào chat mới; bản trong chat cũ vẫn còn. Xoá một chat backup khỏi Settings chỉ được khi không còn channel hay bản sao nào dùng nó.
+
+**Verify backup** (trang channel): worker đọc lại từng bản sao, 100 message một lượt, và kiểm tra: còn tồn tại, không phải forward, có file, là file upload mới (không phải file gốc), đúng cỡ, đúng tên, đúng chữ, đúng topic; đọc thử 1 MiB đầu của vài file. Kết quả hiện trên trang channel và trên từng trang message.
+
+**Tốc độ và tài nguyên:** tải xuống và upload chạy cùng lúc trên cùng một file, nên tốc độ ≈ tốc độ chậm hơn trong hai chiều, khoảng 5–8 MB/s với tài khoản thường. 756 GiB mất khoảng 1,5–2,5 ngày chạy liên tục. Ổ đĩa tạm: 0 byte. RAM: vài chục MB. File bị ngắt giữa chừng thì upload lại từ đầu (Telegram không cho upload tiếp).
+
+**Mở bản sao:** trang message có link `t.me/c/<chat>/<message>`; chỉ thành viên của chat backup mở được. Web vẫn phát file từ thư mục/Google Drive, không phát từ bản trên Telegram.
+
+API (đều cần đăng nhập web):
+
+| Endpoint | Ý nghĩa |
+|---|---|
+| `POST /api/storage/telegram` | Thêm chat backup `{telegramChatId, name?}`. Worker kiểm quyền đăng bài (và tạo topic với forum). `409 BACKUP_CHAT_ARCHIVED`, `409 LOCATION_EXISTS`, `422 BACKUP_CHAT_NOT_WRITABLE`, `422 BACKUP_CHAT_NO_TOPICS` |
+| `PATCH /api/channels/:id` | `{backupLocationId}` chọn chat backup (chỉ nơi lưu loại `TELEGRAM`); `{backupEnabled}` bật/tắt backup tự động. `422 LOCATION_KIND_NOT_ALLOWED`, `422 BACKUP_CHAT_MISSING`, `422 CHAT_PROTECTED`, `422 CHANNEL_MIGRATED` (group cũ: backup cùng supergroup) |
+| `GET /api/channels/:id/backup` | Số message và byte theo trạng thái, message đang upload, lỗi gần nhất, trạng thái chat backup, kết quả Verify |
+| `POST /api/channels/:id/backup/retry` | Đưa mọi message lỗi của channel trở lại hàng đợi |
+| `POST /api/channels/:id/backup/verify` | Bắt đầu Verify (`202`); kết quả về qua live updates. `422 BACKUP_CHAT_MISSING` |
+| `POST /api/messages/:id/backup` | **Back up now** (`{}`) hoặc **Back up again** (`{force: true, replacePrevious}`), cả album đi cùng. `202` khi vào hàng đợi, `200` khi không có gì để làm. `409 BACKUP_ACTIVE`, `422 BACKUP_CHAT_MISSING`, `422 BACKUP_NOT_SUPPORTED`, `422 CHAT_PROTECTED` |
+| `GET /api/messages/:id/backups` | Các bản sao của một message (trang message dùng để theo dõi tiến độ) |
 
 ## 10. Start sync
 
@@ -904,3 +973,12 @@ Khôi phục:
 | Danh sách ghi "10,000+" thay vì số chính xác | Đúng thiết kế: trang đầu chỉ đếm tới 10 000 message để luôn nhanh |
 | Docker: `docker compose ps` báo worker `unhealthy` | Worker không ghi được heartbeat vào Redis trong 60 giây. Xem `docker compose logs worker` |
 | Docker: web báo `502`/`504` ngay sau khi api khởi động lại | nginx đang tìm lại địa chỉ của api (tối đa 10 giây). Tải lại trang |
+| Hộp thoại **Telegram chat** không có chat của bạn | Chỉ channel và supergroup mà tài khoản được đăng bài mới hiện (forum: cần thêm quyền tạo topic); chat đã archive bị ẩn. Chat vừa tạo: bấm **Refresh** |
+| `422 BACKUP_CHAT_NOT_WRITABLE` / `BACKUP_CHAT_NO_TOPICS` | Tài khoản không phải chủ hoặc admin được đăng bài, hoặc forum không cho tạo topic. Cấp quyền trong Telegram, bấm **Refresh**, rồi thêm lại |
+| Backup không chạy dù công tắc bật | Xem **Settings → Telegram backup** có đang Pause không, channel có import chưa xong không (backup chờ import), và tài khoản Telegram có đăng nhập không. Lý do chờ của chat backup hiện trên trang channel |
+| Backup chờ: *Telegram asked to wait N min before sending more* | FloodWait khi gửi. Chỉ backup vào chat đó chờ; tải media và sync vẫn chạy. Sau đó worker gửi chậm lại trong 1 giờ |
+| Backup chờ: *PEER_FLOOD* | Telegram giới hạn tài khoản vì gửi quá nhiều. Backup chờ 6 giờ rồi tự tiếp. Đừng dùng thêm tài khoản để lách giới hạn |
+| Backup chờ: *may no longer post in …* / *can no longer reach …* | Tài khoản mất quyền đăng bài, hoặc đã rời chat backup. Cấp lại quyền, rồi **Check again** trên chat đó ở **Settings → Storage locations** |
+| Message backup *Failed*: *…could not be told apart in the backup chat* | Worker dừng đúng lúc gửi, hoặc Telegram báo đã gửi mà không tìm thấy bản sao. Xem chat backup: đã có bản sao thì để nguyên; chưa có thì **Retry failed** |
+| Verify báo *The copy is no longer in the backup chat* | Bản sao đã bị xoá khỏi chat backup. Bấm **Back up again** trên trang message |
+| `422 CHAT_IS_BACKUP_TARGET` khi thêm chat vào archive | Chat đó đang nhận backup; archive nó sẽ sao chép lại chính các bản sao. Dùng chat khác |

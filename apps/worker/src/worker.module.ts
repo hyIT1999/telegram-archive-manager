@@ -5,6 +5,7 @@ import { DiscoveryModule } from '@nestjs/core';
 import { PrismaModule } from '@tam/database/nest';
 import { workerConfigOptions } from './config/config-module.js';
 import type { WorkerEnv } from './config/env.schema.js';
+import { BackupsModule } from './backups/backups.module.js';
 import { DatabaseStartupCheck } from './database/database-startup-check.js';
 import { HeartbeatService } from './heartbeat/heartbeat.service.js';
 import { ImportsModule } from './imports/imports.module.js';
@@ -43,6 +44,8 @@ import { TopicsModule } from './topics/topics.module.js';
     TopicsModule,
     // New messages of synced channels: Telegram's updates and a scheduled check.
     SyncModule,
+    // Copies of archived messages sent to a Telegram chat of the account's.
+    BackupsModule,
   ],
   // HeartbeatService and ShutdownCoordinator must stay here, in the root module: Nest runs
   // onModuleDestroy for the root module first and for global modules (PrismaModule) last.

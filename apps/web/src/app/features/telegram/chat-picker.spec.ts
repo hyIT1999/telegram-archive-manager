@@ -135,6 +135,22 @@ describe('ChatPicker', () => {
     expect(chats.selectedId()).toBe(lessons.telegramChatId);
   });
 
+  it('never picks a chat that receives backups', async () => {
+    const backups = makeDialog({
+      title: 'Backups',
+      canPost: true,
+      backupLocationId: '0199a0b1-0000-7000-8000-5000000000b1',
+    });
+    await showList(makeDialogList([backups]));
+
+    const row = rowOf('Backups');
+    expect(row?.querySelector<HTMLInputElement>('input[type="radio"]')?.disabled).toBe(true);
+    expect(row?.querySelector('.badge-backup')?.textContent).toContain('Backup chat');
+    expect(row?.textContent).toContain('This chat receives backups, so it is not archived.');
+    chats.select(backups);
+    expect(chats.selected()).toBeNull();
+  });
+
   it('refreshes the list and follows the worker until it is done', async () => {
     await showList(makeDialogList([makeDialog({ title: 'Old chat' })]));
 

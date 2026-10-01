@@ -1,0 +1,83 @@
+@for (row of rows(); track row.backup.chat.id) {
+  <div class="copy">
+    <p class="status" [attr.data-status]="row.backup.status">
+      <mat-icon aria-hidden="true">{{ row.icon }}</mat-icon>
+      <span>
+        {{ row.text }}
+        <span class="chat">· {{ row.backup.chat.name }}</span>
+      </span>
+    </p>
+    @if (row.percent !== null) {
+      <mat-progress-bar
+        mode="determinate"
+        [value]="row.percent"
+        aria-label="Upload of the backup copy"
+      />
+    }
+    @switch (row.backup.status) {
+      @case ('ACTIVE') {
+        @if (row.backup.size !== null) {
+          <p class="hint">
+            {{ row.backup.uploadedBytes | bytes }} of {{ row.backup.size | bytes }}
+          </p>
+        }
+      }
+      @case ('FAILED') {
+        <p class="hint">
+          {{ row.backup.error ?? 'The copy could not be sent.' }} · {{ row.backup.attempts }}
+          {{ row.backup.attempts === 1 ? 'attempt' : 'attempts' }}
+        </p>
+      }
+      @case ('COMPLETED') {
+        @if (row.backup.completedAt; as completedAt) {
+          <p class="hint">Sent {{ completedAt | date: 'medium' }}</p>
+        }
+        @if (row.backup.url; as url) {
+          <a class="open" [href]="url" target="_blank" rel="noopener noreferrer">
+            <mat-icon aria-hidden="true">open_in_new</mat-icon>
+            Open the copy in Telegram
+          </a>
+        }
+        @if (row.backup.verifyError; as problem) {
+          <app-notice tone="warning" title="Verify found a problem">{{ problem }}</app-notice>
+        } @else if (row.backup.verifiedAt; as verifiedAt) {
+          <p class="hint">Verified {{ verifiedAt | date: 'medium' }}</p>
+        }
+      }
+    }
+  </div>
+} @empty {
+  <p class="hint">Not backed up to Telegram yet.</p>
+}
+
+@if (album()) {
+  <p class="hint">The whole album is backed up together.</p>
+}
+
+@if (nothingToDo()) {
+  <app-notice tone="success">Already backed up: nothing to send.</app-notice>
+}
+@if (actionError(); as message) {
+  <app-notice tone="error">
+    {{ message }}
+    @if (needsChat()) {
+      <a [routerLink]="['/channels', channelId()]">Open the channel</a>
+    }
+  </app-notice>
+}
+
+@if (action(); as action) {
+  <div class="actions">
+    <button
+      matButton="tonal"
+      type="button"
+      [disabled]="requesting()"
+      [showProgress]="requesting()"
+      (click)="run()"
+    >
+      <mat-icon>{{ action === 'now' ? 'cloud_upload' : 'replay' }}</mat-icon>
+      {{ actionLabel() }}
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+    </button>
+  </div>
+}

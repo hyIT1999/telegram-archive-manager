@@ -2,12 +2,17 @@ import { constants as fsConstants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import {
   type DeleteMessageUpdate,
+  InputMedia,
+  type InputMediaLike,
+  Long,
   type Chat as MtChat,
   type Message as MtMessage,
   type Photo as MtPhoto,
   type RawDocument as MtRawDocument,
+  Photo,
   type SentCode,
   Thumbnail,
+  type UploadedFile,
   User as MtUser,
   getMarkedPeerId,
   tl,
@@ -23,16 +28,22 @@ import {
   LoginStepError,
   MediaUnavailableError,
   TelegramError,
+  UploadIncompleteError,
 } from '../errors.js';
 import { type FileIdParts, decodeFileId } from '../file-id.js';
 import type { SendCodeResult, SignInResult, TelegramLoginApi } from '../login-api.js';
 import type {
+  TelegramBackupWriter,
   TelegramClient,
   TelegramHistoryReader,
   TelegramMediaReader,
 } from '../telegram-client.js';
 import type {
   AuthState,
+  BackupChatMessage,
+  BackupFileInput,
+  BackupPayload,
+  BackupSourceFile,
   Chat,
   DownloadOptions,
   DownloadedFile,
@@ -41,14 +52,27 @@ import type {
   HistoryPageOptions,
   LegacyGroup,
   Message,
+  MessageEntity,
+  SendBackupOptions,
+  SentBackupMessage,
   TelegramUser,
   ThumbnailOptions,
   ThumbnailRequest,
   UpdateEvent,
   UpdateHandler,
+  UploadedBackupFile,
 } from '../types.js';
 import { toTelegramError, translateErrors } from './error-mapping.js';
-import { mapChat, mapForumTopic, mapMessage, mapUser, sizeOf } from './mappers.js';
+import {
+  backupAttributesOf,
+  mapBackupChatMessage,
+  mapChat,
+  mapForumTopic,
+  mapMessage,
+  mapUser,
+  sizeOf,
+  toTlEntities,
+} from './mappers.js';
 
 /** messages.getHistory never returns more than this per call. */
 export const MAX_HISTORY_PAGE = 100;
@@ -77,6 +101,12 @@ const MAX_FORUM_TOPIC_PAGES = 100;
 /** Written data is flushed to disk every so often, so a power cut loses little. */
 const SYNC_EVERY_BYTES = 32 * 1024 * 1024;
 
+/**
+ * Bytes read ahead of a backup upload while its file streams from Telegram: downloading pauses
+ * when this much waits in memory, so a large file never piles up in RAM.
+ */
+export const BACKUP_STREAM_BUFFER = 16 * 1024 * 1024;
+
 type MtFile = MtPhoto | MtRawDocument;
 
 /** Message media that is a downloadable file of the kinds the archive stores. */
@@ -96,7 +126,12 @@ function alignDown(offset: number): number {
  * the worker's database, and mtcute's session storage holds the (encrypted) auth key.
  */
 export class MtcuteTelegramAdapter
-  implements TelegramLoginApi, TelegramHistoryReader, TelegramMediaReader, TelegramClient
+  implements
+    TelegramLoginApi,
+    TelegramHistoryReader,
+    TelegramMediaReader,
+    TelegramBackupWriter,
+    TelegramClient
 {
   /** Whether update handlers are registered on this client (once per client). */
   private listening = false;
@@ -468,6 +503,283 @@ export class MtcuteTelegramAdapter
     return thumbnails;
   }
 
+  async openBackupSource(
+    fileId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<BackupSourceFile> {
+    const parts = toFileIdParts(fileId);
+    options.signal?.throwIfAborted();
+    const file = await this.currentFile(parts);
+    const size = sizeOf(file.fileSize);
+    if (size === null) {
+      throw new TelegramError(
+        'Telegram does not say how large the file is',
+        TelegramErrorCode.TELEGRAM_ERROR,
+      );
+    }
+    return {
+      stream: this.sourceStream(parts, file, size, options.signal),
+      size,
+      attributes: backupAttributesOf(file),
+    };
+  }
+
+  async uploadBackupFile(
+    targetChatId: string,
+    input: BackupFileInput,
+    options: { signal?: AbortSignal; onProgress?: (uploadedBytes: number) => void } = {},
+  ): Promise<UploadedBackupFile> {
+    const { onProgress, signal } = options;
+    const attributes = input.attributes;
+    return translateErrors(async () => {
+      // The size limit depends on Premium, which mtcute reads from the cached account.
+      if (this.tg.storage.self.getCached(true) === null) {
+        await this.tg.getMe();
+      }
+      const uploaded = await this.tg.uploadFile({
+        file: input.stream,
+        fileSize: input.size,
+        fileName: attributes.fileName ?? defaultFileName(attributes.kind),
+        fileMime: attributes.mimeType ?? 'application/octet-stream',
+        ...(onProgress ? { progressCallback: (done: number) => onProgress(done) } : {}),
+        ...(signal ? { abortSignal: signal } : {}),
+      });
+      // Stored by Telegram right away: an album sends once all of its files are stored.
+      const stored = await this.tg.uploadMedia(backupInputMedia(uploaded, input), {
+        peer: toPeerId(targetChatId),
+      });
+      return uploadedFileOf(stored);
+    });
+  }
+
+  async sendBackup(
+    targetChatId: string,
+    payload: BackupPayload,
+    options: SendBackupOptions,
+  ): Promise<SentBackupMessage[]> {
+    const count = payload.kind === 'text' ? 1 : payload.items.length;
+    if (count === 0 || count > 10 || options.randomIds.length !== count) {
+      throw new TelegramError(
+        'A backup sends 1 to 10 messages, each with its own random id',
+        TelegramErrorCode.TELEGRAM_ERROR,
+      );
+    }
+    const randomIds = options.randomIds.map((id) => Long.fromString(id.toString()));
+    const peer = await translateErrors(() => this.tg.resolvePeer(toPeerId(targetChatId)));
+    const replyTo: tl.TypeInputReplyTo | undefined =
+      options.threadId === null
+        ? undefined
+        : { _: 'inputReplyToMessage', replyToMsgId: options.threadId, topMsgId: options.threadId };
+    const common = { peer, silent: true, ...(replyTo ? { replyTo } : {}) };
+    let updates: tl.TypeUpdates;
+    try {
+      if (payload.kind === 'text') {
+        updates = await this.tg.call({
+          _: 'messages.sendMessage',
+          ...common,
+          message: payload.text.text,
+          ...entitiesOf(payload.text.entities),
+          noWebpage: payload.disableWebPreview,
+          randomId: randomIds[0]!,
+        });
+      } else if (payload.items.length === 1) {
+        const [item] = payload.items;
+        updates = await this.tg.call({
+          _: 'messages.sendMedia',
+          ...common,
+          media: storedInputMedia(item!.file),
+          message: item!.caption?.text ?? '',
+          ...entitiesOf(item!.caption?.entities ?? []),
+          randomId: randomIds[0]!,
+        });
+      } else {
+        updates = await this.tg.call({
+          _: 'messages.sendMultiMedia',
+          ...common,
+          multiMedia: payload.items.map((item, index) => ({
+            _: 'inputSingleMedia' as const,
+            media: storedInputMedia(item.file),
+            message: item.caption?.text ?? '',
+            ...entitiesOf(item.caption?.entities ?? []),
+            randomId: randomIds[index]!,
+          })),
+        });
+      }
+    } catch (error) {
+      const translated = toTelegramError(error);
+      // The stored file of an album member can no longer be used: upload that file again.
+      if (translated instanceof FileReferenceExpiredError) {
+        throw new UploadIncompleteError('FILE_REFERENCE_EXPIRED', translated.index);
+      }
+      throw translated;
+    }
+    this.tg.handleClientUpdate(updates, true);
+    return sentMessagesOf(updates, randomIds);
+  }
+
+  async createForumTopic(targetChatId: string, title: string): Promise<number> {
+    const message = await translateErrors(() =>
+      this.tg.createForumTopic({ chatId: toPeerId(targetChatId), title }),
+    );
+    return message.id;
+  }
+
+  async getBackupMessages(
+    targetChatId: string,
+    messageIds: number[],
+  ): Promise<BackupChatMessage[]> {
+    if (messageIds.length === 0) {
+      return [];
+    }
+    const messages = await translateErrors(() =>
+      this.tg.getMessages(toPeerId(targetChatId), messageIds.slice(0, MAX_HISTORY_PAGE)),
+    );
+    return messages.flatMap((message) => (message ? [mapBackupChatMessage(message)] : []));
+  }
+
+  async getBackupHistory(
+    targetChatId: string,
+    afterMessageId: number,
+    limit = MAX_HISTORY_PAGE,
+  ): Promise<BackupChatMessage[]> {
+    const messages = await translateErrors(() =>
+      this.tg.getHistory(toPeerId(targetChatId), {
+        limit: clampLimit(limit),
+        reverse: true,
+        offset: { id: afterMessageId + 1, date: 0 },
+      }),
+    );
+    return messages
+      .filter((message) => message.id > afterMessageId)
+      .map(mapBackupChatMessage)
+      .sort((a, b) => a.id - b.id);
+  }
+
+  async readBackupFileHead(
+    targetChatId: string,
+    messageId: number,
+    bytes: number,
+  ): Promise<number> {
+    const [message] = await translateErrors(() =>
+      this.tg.getMessages(toPeerId(targetChatId), [messageId]),
+    );
+    if (!message) {
+      throw new MediaUnavailableError('MESSAGE_DELETED');
+    }
+    const file = fileOf(message);
+    if (!file) {
+      throw new MediaUnavailableError('MEDIA_REPLACED');
+    }
+    const total = sizeOf(file.fileSize);
+    const wanted = Math.max(1, Math.min(bytes, total ?? bytes));
+    const stop = new AbortController();
+    let read = 0;
+    try {
+      for await (const chunk of this.tg.downloadAsIterable(file, {
+        limit: wanted,
+        abortSignal: stop.signal,
+        stallTimeout: DEFAULT_STALL_TIMEOUT_MS,
+        ...(total === null ? {} : { fileSize: total }),
+      })) {
+        read += chunk.length;
+        if (read >= wanted) {
+          break;
+        }
+      }
+    } catch (error) {
+      throw toTelegramError(error);
+    } finally {
+      stop.abort();
+    }
+    return read;
+  }
+
+  async deleteBackupMessages(targetChatId: string, messageIds: number[]): Promise<void> {
+    if (messageIds.length === 0) {
+      return;
+    }
+    await translateErrors(() =>
+      this.tg.deleteMessagesById(toPeerId(targetChatId), messageIds, { revoke: true }),
+    );
+  }
+
+  /**
+   * The bytes of a file as the upload consumes them: Telegram is read BACKUP_STREAM_BUFFER ahead
+   * at most. An expired file reference is fetched again and reading goes on where it stopped
+   * (from the last whole MiB, skipping what was already passed on).
+   */
+  private sourceStream(
+    parts: FileIdParts,
+    first: MtFile,
+    size: number,
+    signal?: AbortSignal,
+  ): ReadableStream<Uint8Array> {
+    let file = first;
+    let position = 0;
+    let skip = 0;
+    let refreshes = 0;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const open = (): ReadableStreamDefaultReader<Uint8Array> => {
+      const start = alignDown(position);
+      skip = position - start;
+      return this.tg
+        .downloadAsStream(file, {
+          offset: start,
+          fileSize: size,
+          highWaterMark: BACKUP_STREAM_BUFFER,
+          ...(signal ? { abortSignal: signal } : {}),
+        })
+        .getReader();
+    };
+    return new ReadableStream<Uint8Array>({
+      pull: async (controller) => {
+        for (;;) {
+          reader ??= open();
+          try {
+            const { value, done } = await reader.read();
+            if (done) {
+              if (position !== size) {
+                throw new TelegramError(
+                  `Telegram sent ${position} of ${size} bytes`,
+                  TelegramErrorCode.TELEGRAM_ERROR,
+                );
+              }
+              controller.close();
+              return;
+            }
+            let chunk = value;
+            if (skip > 0) {
+              if (chunk.length <= skip) {
+                skip -= chunk.length;
+                continue;
+              }
+              chunk = chunk.subarray(skip);
+              skip = 0;
+            }
+            position += chunk.length;
+            controller.enqueue(chunk);
+            return;
+          } catch (error) {
+            signal?.throwIfAborted();
+            const translated = toTelegramError(error);
+            if (
+              !(translated instanceof FileReferenceExpiredError) ||
+              refreshes >= MAX_REFERENCE_REFRESHES
+            ) {
+              throw translated;
+            }
+            refreshes += 1;
+            reader = null;
+            file = await this.currentFile(parts);
+          }
+        }
+      },
+      cancel: async (reason) => {
+        await reader?.cancel(reason);
+      },
+    });
+  }
+
   /** The file as Telegram has it now (fresh file reference), checked against the archived one. */
   private async currentFile(parts: FileIdParts): Promise<MtFile> {
     const [message] = await translateErrors(() =>
@@ -543,6 +855,142 @@ function mimeTypeOf(file: MtFile): string | null {
 
 function fileNameOf(file: MtFile): string | null {
   return file.type === 'photo' ? null : ((file as MtRawDocument).fileName ?? null);
+}
+
+/** A name for a file Telegram has none for (photos, some videos). */
+function defaultFileName(kind: BackupFileInput['attributes']['kind']): string {
+  switch (kind) {
+    case 'photo':
+      return 'photo.jpg';
+    case 'video':
+    case 'animation':
+    case 'video_note':
+      return 'video.mp4';
+    case 'audio':
+      return 'audio.mp3';
+    case 'voice':
+      return 'voice.ogg';
+    default:
+      return 'file';
+  }
+}
+
+/** How an uploaded file is described to Telegram, with the attributes of the original. */
+function backupInputMedia(uploaded: UploadedFile, input: BackupFileInput): InputMediaLike {
+  const attributes = input.attributes;
+  const named = {
+    ...(attributes.fileName ? { fileName: attributes.fileName } : {}),
+    ...(attributes.mimeType ? { fileMime: attributes.mimeType } : {}),
+  };
+  const thumb = input.thumbnail ? { thumb: input.thumbnail } : {};
+  switch (attributes.kind) {
+    case 'photo':
+      return InputMedia.photo(uploaded);
+    case 'video':
+    case 'animation':
+    case 'video_note':
+      return InputMedia.video(uploaded, {
+        ...named,
+        ...thumb,
+        ...(attributes.width === null ? {} : { width: attributes.width }),
+        ...(attributes.height === null ? {} : { height: attributes.height }),
+        ...(attributes.duration === null ? {} : { duration: attributes.duration }),
+        supportsStreaming: attributes.supportsStreaming,
+        isAnimated: attributes.kind === 'animation',
+        isRound: attributes.kind === 'video_note',
+      });
+    case 'audio':
+      return InputMedia.audio(uploaded, {
+        ...named,
+        ...thumb,
+        ...(attributes.duration === null ? {} : { duration: attributes.duration }),
+        ...(attributes.performer ? { performer: attributes.performer } : {}),
+        ...(attributes.title ? { title: attributes.title } : {}),
+      });
+    case 'voice':
+      return InputMedia.voice(uploaded, {
+        ...(attributes.mimeType ? { fileMime: attributes.mimeType } : {}),
+        ...(attributes.duration === null ? {} : { duration: attributes.duration }),
+      });
+    default:
+      return InputMedia.document(uploaded, { ...named, ...thumb });
+  }
+}
+
+/** The stored photo or document behind an upload, kept so it can be sent later. */
+function uploadedFileOf(stored: MtPhoto | MtRawDocument): UploadedBackupFile {
+  if (stored instanceof Photo) {
+    const input = stored.inputPhoto;
+    if (input._ !== 'inputPhoto') {
+      throw new TelegramError('Telegram did not store the photo', TelegramErrorCode.TELEGRAM_ERROR);
+    }
+    return {
+      kind: 'photo',
+      id: input.id.toString(),
+      accessHash: input.accessHash.toString(),
+      fileReference: Buffer.from(input.fileReference).toString('base64'),
+    };
+  }
+  const input = stored.inputDocument;
+  return {
+    kind: 'document',
+    id: input.id.toString(),
+    accessHash: input.accessHash.toString(),
+    fileReference: Buffer.from(input.fileReference).toString('base64'),
+  };
+}
+
+/** A stored upload as the media of a new message. */
+function storedInputMedia(file: UploadedBackupFile): tl.TypeInputMedia {
+  const reference = {
+    id: Long.fromString(file.id),
+    accessHash: Long.fromString(file.accessHash),
+    fileReference: new Uint8Array(Buffer.from(file.fileReference, 'base64')),
+  };
+  return file.kind === 'photo'
+    ? { _: 'inputMediaPhoto', id: { _: 'inputPhoto', ...reference } }
+    : { _: 'inputMediaDocument', id: { _: 'inputDocument', ...reference } };
+}
+
+/** Formatting for a send; Telegram takes no empty list. */
+function entitiesOf(entities: readonly MessageEntity[]): { entities?: tl.TypeMessageEntity[] } {
+  const converted = toTlEntities(entities);
+  return converted.length > 0 ? { entities: converted } : {};
+}
+
+/** The ids of the messages a send created, in the order of their random ids. */
+function sentMessagesOf(updates: tl.TypeUpdates, randomIds: readonly Long[]): SentBackupMessage[] {
+  if (updates._ === 'updateShortSentMessage') {
+    return [{ messageId: updates.id, groupedId: null }];
+  }
+  if (updates._ !== 'updates' && updates._ !== 'updatesCombined') {
+    throw new TelegramError(
+      'Telegram did not say which messages were sent',
+      TelegramErrorCode.TELEGRAM_ERROR,
+    );
+  }
+  const idByRandom = new Map<string, number>();
+  const groupOf = new Map<number, string | null>();
+  for (const update of updates.updates) {
+    if (update._ === 'updateMessageID') {
+      idByRandom.set(update.randomId.toString(), update.id);
+    } else if (
+      (update._ === 'updateNewChannelMessage' || update._ === 'updateNewMessage') &&
+      update.message._ === 'message'
+    ) {
+      groupOf.set(update.message.id, update.message.groupedId?.toString() ?? null);
+    }
+  }
+  return randomIds.map((randomId) => {
+    const messageId = idByRandom.get(randomId.toString());
+    if (messageId === undefined) {
+      throw new TelegramError(
+        'Telegram did not say which messages were sent',
+        TelegramErrorCode.TELEGRAM_ERROR,
+      );
+    }
+    return { messageId, groupedId: groupOf.get(messageId) ?? null };
+  });
 }
 
 function fromSentCode(code: SentCode): SendCodeResult {

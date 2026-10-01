@@ -1,0 +1,127 @@
+<h2 mat-dialog-title>Telegram chat for backups</h2>
+<mat-dialog-content>
+  @if (!data.available) {
+    <app-notice tone="warning" title="Telegram is not signed in">{{ data.reason }}</app-notice>
+  } @else {
+    <p class="lead">
+      Backups are new messages that this Telegram account posts, with their files uploaded again:
+      nothing is forwarded. Use a private channel, or a supergroup with Topics to keep the topics of
+      forums apart. Create it in Telegram first, then refresh the list.
+    </p>
+
+    <div class="toolbar">
+      <mat-form-field class="search" subscriptSizing="dynamic">
+        <mat-label>Search chats</mat-label>
+        <mat-icon matPrefix>search</mat-icon>
+        <input
+          matInput
+          type="search"
+          autocomplete="off"
+          [value]="chats.query()"
+          (input)="onSearch($event)"
+        />
+      </mat-form-field>
+      <button
+        matButton="tonal"
+        type="button"
+        [disabled]="chats.refreshing()"
+        [showProgress]="chats.refreshing()"
+        (click)="chats.refresh()"
+      >
+        <mat-icon>refresh</mat-icon>
+        Refresh
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+
+    @if (chats.refreshError(); as message) {
+      <app-notice tone="error">{{ message }}</app-notice>
+    }
+
+    @if (chats.error()) {
+      <app-notice tone="error" title="Your chats could not be loaded">
+        {{ loadErrorMessage() }}
+      </app-notice>
+    } @else if (chats.list(); as list) {
+      @if (chats.refreshing() && list.items.length === 0) {
+        <app-skeleton variant="line" [count]="4" label="Reading your chats from Telegram…" />
+      } @else if (rows().length === 0) {
+        <p class="empty">
+          @if (candidates() > 0) {
+            No chat matches the search.
+          } @else if (list.refreshedAt) {
+            None of your chats can receive backups yet.
+          } @else {
+            Your chats are not loaded yet: refresh the list.
+          }
+        </p>
+      } @else {
+        <fieldset class="chat-list">
+          <legend class="sr-only">Chats where this account may post</legend>
+          @for (row of rows(); track row.chat.telegramChatId) {
+            <label class="chat" [class.selected]="row.chat.telegramChatId === selectedId()">
+              <input
+                type="radio"
+                name="backup-chat"
+                class="radio"
+                [value]="row.chat.telegramChatId"
+                [checked]="row.chat.telegramChatId === selectedId()"
+                (change)="select(row.chat)"
+              />
+              <span class="avatar" aria-hidden="true">{{ row.initials }}</span>
+              <span class="text">
+                <span class="title">{{ row.chat.title }}</span>
+                <span class="meta">{{ row.description }}</span>
+              </span>
+              @if (row.chat.isForum) {
+                <span class="badge">
+                  <mat-icon aria-hidden="true">topic</mat-icon>
+                  Topics
+                </span>
+              }
+            </label>
+          }
+        </fieldset>
+      }
+      <p class="hint">
+        Only channels and supergroups where this account may post are listed (in a forum, it must
+        also be allowed to create topics). Chats of the archive are left out.
+      </p>
+    } @else {
+      <app-skeleton variant="line" [count]="4" label="Loading your chats…" />
+    }
+
+    @if (selected(); as chat) {
+      <mat-form-field>
+        <mat-label>Name in the archive</mat-label>
+        <input
+          matInput
+          autocomplete="off"
+          [placeholder]="chat.title"
+          [value]="name()"
+          (input)="onName($event)"
+        />
+        <mat-hint>Leave it empty to use the chat's title.</mat-hint>
+      </mat-form-field>
+    }
+
+    @if (saveError(); as message) {
+      <app-notice tone="error">{{ message }}</app-notice>
+    }
+  }
+</mat-dialog-content>
+<mat-dialog-actions align="end">
+  <button matButton type="button" [mat-dialog-close]="undefined">Cancel</button>
+  @if (data.available) {
+    <button
+      matButton="filled"
+      type="button"
+      [disabled]="!selected() || saving()"
+      [showProgress]="saving()"
+      (click)="save()"
+    >
+      Use this chat
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+    </button>
+  }
+</mat-dialog-actions>

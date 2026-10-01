@@ -9,15 +9,18 @@ import {
   makeStorageCheck,
   makeStorageList,
   makeStorageLocation,
+  makeTelegramLocation,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
 import { ConfirmService } from '../../core/services/confirm-service';
 import { NotifyService } from '../../core/services/notify-service';
-import type { StorageLocationDto } from '../../shared/models';
+import type { StorageKind, StorageLocationDto } from '../../shared/models';
 import { GoogleDriveDialog } from './google-drive-dialog';
 import { LocalFolderDialog } from './local-folder-dialog';
 import { STORAGE_ENDPOINTS } from './storage-api';
+import { BACKUP_KINDS, DOWNLOAD_KINDS } from './storage-kinds';
 import { StorageLocationList } from './storage-location-list';
+import { TelegramChatDialog } from './telegram-chat-dialog';
 
 describe('StorageLocationList', () => {
   let fixture: ComponentFixture<StorageLocationList>;
@@ -35,7 +38,9 @@ describe('StorageLocationList', () => {
     accountEmail: 'teacher@example.com',
   });
 
-  function setup(selectable = false): void {
+  const backups = makeTelegramLocation({ lastCheckedAt: '2026-09-26T08:00:00.000Z' });
+
+  function setup(selectable = false, kinds: readonly StorageKind[] | null = null): void {
     dialogResult = undefined;
     confirm.ask.mockReset();
     notify.success.mockReset();
@@ -54,6 +59,7 @@ describe('StorageLocationList', () => {
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(StorageLocationList);
     fixture.componentRef.setInput('selectable', selectable);
+    fixture.componentRef.setInput('kinds', kinds);
     TestBed.tick();
   }
 
@@ -204,6 +210,102 @@ describe('StorageLocationList', () => {
 
     await vi.waitFor(() => expect(cardOf('Drive')).toBeUndefined());
     expect(notify.success).toHaveBeenCalledWith('Drive was removed.');
+  });
+
+  it('shows a Telegram backup chat from what is stored, and checks it only when asked', async () => {
+    setup();
+    await showList([computer, backups]);
+    await answerCheck(computer);
+    // Checking a chat asks Telegram: the list does not do it on its own.
+    http.expectNone(`${STORAGE_ENDPOINTS.locations}/${backups.id}/check`);
+
+    const card = cardOf('Backups');
+    expect(card?.querySelector('mat-icon')?.textContent).toBe('send');
+    expect(card?.textContent).toContain('Telegram › Backups');
+    expect(card?.textContent).toContain('Private · Supergroup with topics');
+    expect(card?.querySelector('.status')?.textContent).toContain('Ready for backups');
+
+    const check = await menuItem(card, 'Check again');
+    // A backup chat is never where media downloads to.
+    const labels = Array.from(document.querySelectorAll('.mat-mdc-menu-item')).map((item) =>
+      item.textContent?.trim(),
+    );
+    expect(labels.some((label) => label?.includes('Use as default'))).toBe(false);
+    check?.click();
+    await answerCheck(
+      backups,
+      makeStorageCheck(
+        { ...backups, lastError: 'This Telegram account may not post in this chat.' },
+        { ok: false, space: null },
+      ),
+    );
+    expect(cardOf('Backups')?.querySelector('.status')?.textContent).toContain(
+      'This Telegram account may not post in this chat.',
+    );
+  });
+
+  it('says that a chat stops receiving backups when it is removed', async () => {
+    setup();
+    await showList([computer, backups]);
+    await answerCheck(computer);
+
+    confirm.ask.mockResolvedValueOnce(false);
+    (await menuItem(cardOf('Backups'), 'Remove'))?.click();
+    await vi.waitFor(() =>
+      expect(confirm.ask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'The archive stops sending backups to this chat. Copies already there stay in Telegram.',
+        }),
+      ),
+    );
+  });
+
+  it('lists only where media downloads to when choosing a download location', async () => {
+    setup(true, DOWNLOAD_KINDS);
+    await showList([computer, backups, drive]);
+    await answerCheck(computer);
+    await answerCheck(drive);
+
+    expect(cardOf('Backups')).toBeUndefined();
+    expect(page().querySelectorAll('.location')).toHaveLength(2);
+    expect(button('Telegram chat')).toBeUndefined();
+    expect(button('Google Drive')).toBeDefined();
+    expect(fixture.componentInstance.selectedId()).toBe(computer.id);
+  });
+
+  it('picks a backup chat among Telegram chats only, and adds one', async () => {
+    setup(true, BACKUP_KINDS);
+    await showList([computer, backups], { telegram: { available: true, reason: null } });
+    // Nothing else is checked, and the default folder is no choice here.
+    http.expectNone(`${STORAGE_ENDPOINTS.locations}/${computer.id}/check`);
+    expect(cardOf('This computer')).toBeUndefined();
+    expect(fixture.componentInstance.selectedId()).toBeNull();
+    expect(page().querySelector('[role="radiogroup"]')?.getAttribute('aria-label')).toBe(
+      'Backup chats',
+    );
+    expect(button('Folder on this computer')).toBeUndefined();
+    expect(button('Google Drive')).toBeUndefined();
+
+    const added = makeTelegramLocation({ name: 'Course copies', displayPath: 'Telegram › Course copies' });
+    dialogResult = added;
+    button('Telegram chat')?.click();
+    expect(dialog.open).toHaveBeenCalledWith(
+      TelegramChatDialog,
+      expect.objectContaining({ data: { available: true, reason: null } }),
+    );
+    await fixture.whenStable();
+    // The worker checked it as it was added.
+    http.expectNone(`${STORAGE_ENDPOINTS.locations}/${added.id}/check`);
+    expect(cardOf('Course copies')).toBeDefined();
+    expect(fixture.componentInstance.selectedId()).toBe(added.id);
+  });
+
+  it('asks for a Telegram chat of the account when there is none', async () => {
+    setup(true, BACKUP_KINDS);
+    await showList([computer]);
+    expect(page().textContent).toContain('No backup chat yet');
+    expect(page().textContent).not.toContain('STORAGE_LOCAL_ROOTS');
   });
 
   it('shows an error state when the list cannot be loaded, and retries', async () => {

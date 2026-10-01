@@ -5,3 +5,9 @@ export const SYNC_NOTES = {
   unreadable:
     'This account can no longer read the chat, so its new messages are not archived. Switch sync on again once it can.',
 } as const;
+
+/** Why Telegram backup of a channel switched itself off (channels.backup_note). */
+export const BACKUP_NOTES = {
+  protected:
+    'Content protection was turned on for this chat, so its messages are no longer backed up.',
+} as const;

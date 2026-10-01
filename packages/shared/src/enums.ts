@@ -139,9 +139,53 @@ export const TelegramAuthState = {
 } as const;
 export type TelegramAuthState = (typeof TelegramAuthState)[keyof typeof TelegramAuthState];
 
-/** Where a storage location writes: a folder on the server, or a folder in Google Drive. */
+/**
+ * What a storage location is: a folder on the server or in Google Drive (where media files are
+ * downloaded), or a Telegram chat of the user's that receives backup copies of messages.
+ */
 export const StorageKind = {
   LOCAL: 'LOCAL',
   GOOGLE_DRIVE: 'GOOGLE_DRIVE',
+  TELEGRAM: 'TELEGRAM',
 } as const;
 export type StorageKind = (typeof StorageKind)[keyof typeof StorageKind];
+
+/** The kinds media files are downloaded to; a Telegram backup chat is never one of them. */
+export const DOWNLOAD_STORAGE_KINDS: readonly StorageKind[] = [
+  StorageKind.LOCAL,
+  StorageKind.GOOGLE_DRIVE,
+];
+
+/** Where the backup copy of a message stands in its backup chat (message_backups.status). */
+export const BackupStatus = {
+  PENDING: 'PENDING',
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  SKIPPED: 'SKIPPED',
+} as const;
+export type BackupStatus = (typeof BackupStatus)[keyof typeof BackupStatus];
+
+/** What a running backup does right now (message_backups.stage). */
+export const BackupStage = {
+  /** Reading the source message and opening its file. */
+  FETCHING: 'FETCHING',
+  /** Uploading the file to Telegram as it streams from its source. */
+  UPLOADING: 'UPLOADING',
+  /** Sending the new message. */
+  SENDING: 'SENDING',
+} as const;
+export type BackupStage = (typeof BackupStage)[keyof typeof BackupStage];
+
+/** Why a message is not backed up (with status SKIPPED). */
+export const BackupSkipReason = {
+  /** The source message or its file is gone, and no downloaded copy exists. */
+  NOT_AVAILABLE: 'NOT_AVAILABLE',
+  /** Content protection was turned on for the source chat. */
+  PROTECTED: 'PROTECTED',
+  /** A poll, a location or another kind of message that cannot be recreated. */
+  UNSUPPORTED: 'UNSUPPORTED',
+  /** Larger than Telegram accepts from this account (2000 MiB, 4000 MiB with Premium). */
+  TOO_LARGE: 'TOO_LARGE',
+} as const;
+export type BackupSkipReason = (typeof BackupSkipReason)[keyof typeof BackupSkipReason];

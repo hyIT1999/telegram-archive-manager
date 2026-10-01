@@ -7,6 +7,11 @@ export function driveDisplayPath(folderName: string): string {
   return `My Drive › ${folderName}`;
 }
 
+/** "Telegram › Backups". */
+export function telegramDisplayPath(title: string): string {
+  return `Telegram › ${title}`;
+}
+
 /** Never includes the sealed credentials. */
 export function toStorageLocationDto(location: StorageLocation, channelCount: number): StorageLocationDto {
   const config = locationConfig(location);
@@ -16,6 +21,15 @@ export function toStorageLocationDto(location: StorageLocation, channelCount: nu
     name: location.name,
     displayPath: location.displayPath,
     accountEmail: config.kind === 'GOOGLE_DRIVE' ? config.accountEmail : null,
+    telegram:
+      config.kind === 'TELEGRAM'
+        ? {
+            telegramChatId: config.chatId,
+            type: config.type,
+            username: config.username,
+            isForum: config.isForum,
+          }
+        : null,
     isDefault: location.isDefault,
     builtIn: location.builtIn,
     lastError: location.lastError,

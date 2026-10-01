@@ -13,6 +13,7 @@ import {
   makeStorageCheck,
   makeStorageList,
   makeStorageLocation,
+  makeTelegramLocation,
   makeTelegramStatus,
 } from '../../../testing/fixtures';
 import { nextRequest } from '../../../testing/http';
@@ -253,6 +254,102 @@ describe('ImportWizardPage', () => {
     expect(stepButtons()[3].closest('.step')?.classList).toContain('done');
     expect(stepButtons()[4].disabled).toBe(false);
     expect(button('Save location')).toBeUndefined();
+  });
+
+  it('also backs up to a Telegram chat, chosen with the storage location', async () => {
+    await signedInWith([makeDialog({ title: 'Lessons', type: 'CHANNEL' })]);
+    await chooseAndContinue('Lessons');
+    button('Add to archive')?.click();
+    const channel = makeChannel({ id: CHANNEL_ID, title: 'Lessons', telegramChatId: '-1001234' });
+    (await nextRequest(http, '/api/channels')).flush(channel, {
+      status: 201,
+      statusText: 'Created',
+    });
+    await vi.waitFor(() => expect(button('Choose where to save')).toBeDefined());
+    button('Choose where to save')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Storage location'));
+
+    const computer = makeStorageLocation({
+      name: 'This computer',
+      builtIn: true,
+      isDefault: true,
+      displayPath: 'C:\\Archive',
+    });
+    const backups = makeTelegramLocation();
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(
+      makeStorageList([computer, backups]),
+    );
+    (await nextRequest(http, `${STORAGE_ENDPOINTS.locations}/${computer.id}/check`)).flush(
+      makeStorageCheck(computer),
+    );
+    const lists = () => Array.from(page().querySelectorAll('app-storage-location-list'));
+    // Media never goes to a Telegram chat.
+    await vi.waitFor(() => expect(lists()[0]?.querySelectorAll('.location')).toHaveLength(1));
+    expect(lists()[0]?.textContent).not.toContain('Telegram › Backups');
+    expect(lists()).toHaveLength(1);
+
+    page().querySelector<HTMLButtonElement>('.backup-choice mat-slide-toggle button')?.click();
+    TestBed.tick();
+    (await nextRequest(http, STORAGE_ENDPOINTS.locations)).flush(
+      makeStorageList([computer, backups]),
+    );
+    await vi.waitFor(() => expect(lists()).toHaveLength(2));
+    // A backup chat must be picked before saving.
+    expect(button('Save location')?.disabled).toBe(true);
+    const backupRadio = () =>
+      lists()[1]?.querySelector<HTMLInputElement>('input[type="radio"]') ?? null;
+    await vi.waitFor(() => expect(backupRadio()).not.toBeNull());
+    backupRadio()?.click();
+    await fixture.whenStable();
+
+    button('Save location')?.click();
+    const save = await nextRequest(http, `/api/channels/${CHANNEL_ID}`);
+    expect(save.request.body).toEqual({
+      storageLocationId: computer.id,
+      backupLocationId: backups.id,
+    });
+    const saved = {
+      ...channel,
+      storageLocation: {
+        id: computer.id,
+        kind: 'LOCAL' as const,
+        name: computer.name,
+        displayPath: computer.displayPath,
+      },
+      storageFolder: 'Lessons (-1001234)',
+      backupLocation: {
+        id: backups.id,
+        kind: 'TELEGRAM' as const,
+        name: 'Backups',
+        displayPath: 'Telegram › Backups',
+      },
+    };
+    save.flush(saved);
+    await vi.waitFor(() =>
+      expect(page().querySelector('app-notice[data-tone="success"]')?.textContent).toContain(
+        'Backups go to Telegram › Backups.',
+      ),
+    );
+
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Import mode'));
+    button('Continue')?.click();
+    await vi.waitFor(() => expect(heading()).toBe('Start'));
+    const backupRow = Array.from(page().querySelectorAll('.summary div')).find(
+      (row) => row.querySelector('dt')?.textContent === 'Backed up to',
+    );
+    expect(backupRow?.querySelector('dd')?.textContent).toBe('Telegram › Backups');
+    const backupSwitch = () =>
+      page().querySelector<HTMLButtonElement>('.backup-switch mat-slide-toggle button');
+    expect(backupSwitch()?.getAttribute('aria-checked')).toBe('false');
+
+    backupSwitch()?.click();
+    const update = await nextRequest(http, `/api/channels/${CHANNEL_ID}`);
+    expect(update.request.body).toEqual({ backupEnabled: true });
+    update.flush({ ...saved, backupEnabled: true });
+    await vi.waitFor(() =>
+      expect(text('.backup-switch')).toContain('Once the import has finished'),
+    );
   });
 
   it('explains a location that cannot be saved', async () => {

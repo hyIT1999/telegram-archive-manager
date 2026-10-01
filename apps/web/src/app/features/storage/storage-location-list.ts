@@ -20,17 +20,23 @@ import { NotifyService } from '../../core/services/notify-service';
 import { ErrorState } from '../../shared/components/error-state/error-state';
 import { Notice } from '../../shared/components/notice/notice';
 import { Skeleton } from '../../shared/components/skeleton/skeleton';
-import { type StorageLocationDto, toApiError } from '../../shared/models';
+import { type StorageKind, type StorageLocationDto, toApiError } from '../../shared/models';
 import { BytesPipe } from '../../shared/pipes/bytes-pipe';
 import { GoogleDriveDialog, type GoogleDriveDialogData } from './google-drive-dialog';
 import { LocalFolderDialog, type LocalFolderDialogData } from './local-folder-dialog';
 import { StorageApi } from './storage-api';
+import { backupChatDescription, storageKindIcon } from './storage-kinds';
 import { StorageLocations } from './storage-locations';
+import { TelegramChatDialog, type TelegramChatDialogData } from './telegram-chat-dialog';
+
+/** Radio groups of different lists on one page stay apart. */
+let listSequence = 0;
 
 /**
  * The storage locations, with their free space and state. With `selectable`, one can be picked
  * (the default is picked when nothing is); each card also offers check, default, reconnect and
- * remove, and new locations are added from here.
+ * remove, and new locations are added from here. `kinds` limits the list, e.g. to the places
+ * media downloads to, or to the Telegram chats that receive backups.
  */
 @Component({
   selector: 'app-storage-location-list',
@@ -55,6 +61,8 @@ export class StorageLocationList {
   /** Show the locations as a single choice. */
   readonly selectable = input(false, { transform: booleanAttribute });
   readonly selectedId = model<string | null>(null);
+  /** The kinds listed (and offered to add); null lists every kind. */
+  readonly kinds = input<readonly StorageKind[] | null>(null);
 
   protected readonly store = inject(StorageLocations);
   private readonly api = inject(StorageApi);
@@ -66,8 +74,15 @@ export class StorageLocationList {
 
   protected readonly loadErrorMessage = computed(() => toApiError(this.store.error()).message);
   protected readonly capabilities = computed(() => this.store.list()?.capabilities ?? null);
+  protected readonly radioName = `storage-location-${++listSequence}`;
+  /** Only Telegram chats: the list picks where backups go. */
+  protected readonly backupsOnly = computed(() => {
+    const kinds = this.kinds();
+    return kinds !== null && kinds.length > 0 && kinds.every((kind) => kind === 'TELEGRAM');
+  });
 
   constructor() {
+    this.store.showOnly(this.kinds);
     // Nothing chosen yet: start from the default location.
     effect(() => {
       const fallback = this.store.defaultLocation();
@@ -77,11 +92,28 @@ export class StorageLocationList {
     });
   }
 
-  protected icon(location: StorageLocationDto): string {
-    return location.kind === 'GOOGLE_DRIVE' ? 'add_to_drive' : 'folder';
+  /** Whether locations of this kind are listed, and can be added here. */
+  protected shows(kind: StorageKind): boolean {
+    const kinds = this.kinds();
+    return kinds === null || kinds.includes(kind);
   }
 
-  /** When downloads to the location wait (full, rate limited, access lost); null when they do not. */
+  protected icon(location: StorageLocationDto): string {
+    return storageKindIcon(location.kind);
+  }
+
+  /** The Google account of a Drive, or what kind of Telegram chat receives the backups. */
+  protected meta(location: StorageLocationDto): string | null {
+    if (location.telegram) {
+      return backupChatDescription(location.telegram);
+    }
+    return location.accountEmail;
+  }
+
+  /**
+   * When downloads to the location (backups, for a Telegram chat) wait: full, rate limited, access
+   * lost; null when they do not.
+   */
   protected waitingUntil(location: StorageLocationDto): string | null {
     const until = location.unavailableUntil;
     return until !== null && Date.parse(until) > Date.now() ? until : null;
@@ -95,6 +127,12 @@ export class StorageLocationList {
     }
     if (check?.status === 'failed' || (!check && location.lastError)) {
       return { state: 'failed', text: check?.message ?? location.lastError ?? 'This location cannot be used right now.' };
+    }
+    if (location.kind === 'TELEGRAM') {
+      // Checking asks Telegram, so it only runs from the menu; until then the stored state shows.
+      return check || location.lastCheckedAt
+        ? { state: 'ok', text: 'Ready for backups' }
+        : { state: 'unknown', text: '' };
     }
     const space = check?.space ?? null;
     if (space !== null && space.freeBytes !== null && space.totalBytes !== null) {
@@ -134,8 +172,12 @@ export class StorageLocationList {
     const confirmed = await this.confirmService.ask({
       title: `Remove ${location.name}?`,
       message:
-        'The archive stops using this location. Files already saved there stay where they are.' +
-        (location.kind === 'GOOGLE_DRIVE' ? ' The app also gives up its access to the Google account.' : ''),
+        location.kind === 'TELEGRAM'
+          ? 'The archive stops sending backups to this chat. Copies already there stay in Telegram.'
+          : 'The archive stops using this location. Files already saved there stay where they are.' +
+            (location.kind === 'GOOGLE_DRIVE'
+              ? ' The app also gives up its access to the Google account.'
+              : ''),
       confirmLabel: 'Remove',
       destructive: true,
     });
@@ -186,6 +228,23 @@ export class StorageLocationList {
       .afterClosed()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((result) => this.added(result));
+  }
+
+  protected addTelegram(): void {
+    const telegram = this.capabilities()?.telegram;
+    const data: TelegramChatDialogData = {
+      available: telegram?.available ?? false,
+      reason: telegram?.reason ?? null,
+    };
+    this.dialog
+      .open<TelegramChatDialog, TelegramChatDialogData, StorageLocationDto>(TelegramChatDialog, {
+        data,
+        width: '600px',
+        maxWidth: 'calc(100vw - 32px)',
+      })
+      .afterClosed()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((location) => this.added(location));
   }
 
   private added(location: StorageLocationDto | undefined): void {

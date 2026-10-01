@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BACKUP_SETTINGS_KEY,
   DOWNLOAD_JOB_NAME,
   MAX_DOWNLOAD_CONCURRENCY,
   MediaType,
   defaultDownloadSettings,
   downloadJobOptions,
   isAutoDownloaded,
+  readBackupSettings,
   readDownloadSettings,
+  requestBackupRequestSchema,
   updateSettingsRequestSchema,
 } from '../src/index.js';
 
@@ -64,6 +67,32 @@ describe('download settings', () => {
     expect(
       updateSettingsRequestSchema.safeParse({ downloads: { mediaTypes: ['PDF'] } }).success,
     ).toBe(false);
+  });
+});
+
+describe('backup settings', () => {
+  it('backs up unless paused, and reads stored values like the other settings', () => {
+    expect(BACKUP_SETTINGS_KEY).toBe('backups');
+    expect(readBackupSettings(undefined)).toEqual({ paused: false });
+    expect(readBackupSettings({ paused: true })).toEqual({ paused: true });
+    expect(readBackupSettings({ paused: 'yes' })).toEqual({ paused: false });
+    expect(updateSettingsRequestSchema.parse({ backups: { paused: true } })).toEqual({
+      backups: { paused: true },
+    });
+    expect(updateSettingsRequestSchema.safeParse({ backups: {} }).success).toBe(false);
+  });
+
+  it('asks for one backup, or a new copy that replaces the earlier one by default', () => {
+    expect(requestBackupRequestSchema.parse({})).toEqual({ force: false, replacePrevious: true });
+    expect(requestBackupRequestSchema.parse(undefined)).toEqual({
+      force: false,
+      replacePrevious: true,
+    });
+    expect(requestBackupRequestSchema.parse({ force: true, replacePrevious: false })).toEqual({
+      force: true,
+      replacePrevious: false,
+    });
+    expect(requestBackupRequestSchema.safeParse({ force: 'yes' }).success).toBe(false);
   });
 });
 

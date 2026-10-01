@@ -106,6 +106,8 @@ describe('storage locations (e2e)', () => {
     expect(list.capabilities).toEqual({
       localRoots: [allowedRoot],
       googleDrive: { available: true, reason: null },
+      // Nobody signed in to Telegram in these tests.
+      telegram: { available: false, reason: expect.stringContaining('Sign in to Telegram') },
     });
   });
 

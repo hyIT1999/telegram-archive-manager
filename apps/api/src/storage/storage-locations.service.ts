@@ -6,12 +6,16 @@ import {
   Logger,
   NotFoundException,
   type OnApplicationBootstrap,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma, type StorageLocation } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   ApiErrorCode,
+  BackupErrorCode,
   type CreateLocalLocationRequest,
+  type CreateTelegramLocationRequest,
+  DOWNLOAD_STORAGE_KINDS,
   type LocalFolderListDto,
   type StorageCapabilitiesDto,
   type StorageCheckDto,
@@ -22,32 +26,60 @@ import {
   type StorageSpaceDto,
   type UpdateStorageLocationRequest,
 } from '@tam/shared';
-import { LocalFolderPolicy, LocalStorageDriver, StorageError, sanitizeName } from '@tam/storage';
+import {
+  LocalFolderPolicy,
+  LocalStorageDriver,
+  StorageError,
+  isDriverLocation,
+  sanitizeName,
+} from '@tam/storage';
 import { StorageDrivers } from './storage-drivers.js';
 import { withStorageErrors } from './storage-errors.js';
 import { toStorageLocationDto } from './storage-location.mapper.js';
+import { TelegramLocationsService } from './telegram-locations.service.js';
 import {
   type StorageSettings,
   STORAGE_SETTINGS,
   googleDriveUnavailableReason,
 } from './storage.settings.js';
 
-const WITH_CHANNEL_COUNT = { _count: { select: { channels: true } } } as const;
-type LocationWithCount = StorageLocation & { _count: { channels: number } };
+const WITH_CHANNEL_COUNT = { _count: { select: { channels: true, backupChannels: true } } } as const;
+type LocationWithCount = StorageLocation & {
+  _count: { channels: number; backupChannels: number };
+};
 
 const BUILT_IN_NAME = 'This computer';
+
+function inUseMessage(channels: number, media: number, backedUp: number, backups: number): string {
+  if (channels > 0) {
+    return `${channels} channel(s) save their media here. Choose another location for them first.`;
+  }
+  if (media > 0) {
+    return `${media} archived file(s) are stored here, so the location must stay.`;
+  }
+  if (backedUp > 0) {
+    return `${backedUp} channel(s) back up here. Choose another backup chat for them first.`;
+  }
+  return `${backups} message(s) were backed up here, so the chat must stay.`;
+}
 
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
+/** A backup chat counts the channels backed up into it; a download location, those saving there. */
 function toDto(location: LocationWithCount): StorageLocationDto {
-  return toStorageLocationDto(location, location._count.channels);
+  const count =
+    location.kind === StorageKind.TELEGRAM
+      ? location._count.backupChannels
+      : location._count.channels;
+  return toStorageLocationDto(location, count);
 }
 
 /**
  * Storage locations: the built-in folder from STORAGE_LOCAL_ROOT, folders people add inside the
- * allowed roots, and Google Drive folders (connected by GoogleDriveConnectService).
+ * allowed roots, Google Drive folders (connected by GoogleDriveConnectService), and Telegram chats
+ * that receive backups (TelegramLocationsService).
  */
 @Injectable()
 export class StorageLocationsService implements OnApplicationBootstrap {
@@ -58,6 +90,7 @@ export class StorageLocationsService implements OnApplicationBootstrap {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_SETTINGS) private readonly settings: StorageSettings,
     private readonly drivers: StorageDrivers,
+    private readonly telegram: TelegramLocationsService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -81,15 +114,28 @@ export class StorageLocationsService implements OnApplicationBootstrap {
       orderBy: [{ builtIn: 'desc' }, { createdAt: 'asc' }],
       include: WITH_CHANNEL_COUNT,
     });
-    return { items: rows.map(toDto), capabilities: this.capabilities() };
+    return { items: rows.map(toDto), capabilities: await this.capabilities() };
   }
 
-  capabilities(): StorageCapabilitiesDto {
+  async capabilities(): Promise<StorageCapabilitiesDto> {
     const reason = googleDriveUnavailableReason(this.settings);
+    const telegram = await this.telegram.unavailableReason();
     return {
       localRoots: [...this.settings.policy.roots],
       googleDrive: { available: reason === null, reason },
+      telegram: { available: telegram === null, reason: telegram },
     };
+  }
+
+  /** Adds a Telegram chat of the account that receives backup copies of messages. */
+  async createTelegram(request: CreateTelegramLocationRequest): Promise<StorageLocationDto> {
+    const created = await this.telegram.create(request);
+    return toDto(
+      await this.prisma.storageLocation.findUniqueOrThrow({
+        where: { id: created.id },
+        include: WITH_CHANNEL_COUNT,
+      }),
+    );
   }
 
   browseLocal(folder?: string): Promise<LocalFolderListDto> {
@@ -131,7 +177,14 @@ export class StorageLocationsService implements OnApplicationBootstrap {
   }
 
   async update(id: string, request: UpdateStorageLocationRequest): Promise<StorageLocationDto> {
-    await this.find(id);
+    const current = await this.find(id);
+    if (request.isDefault && !isDriverLocation(current)) {
+      throw new UnprocessableEntityException({
+        code: BackupErrorCode.LOCATION_KIND_NOT_ALLOWED,
+        message:
+          'A Telegram backup chat holds no downloaded files, so it cannot be the default location.',
+      });
+    }
     const location = await this.prisma.$transaction(async (tx) => {
       if (request.isDefault) {
         await tx.storageLocation.updateMany({
@@ -151,9 +204,15 @@ export class StorageLocationsService implements OnApplicationBootstrap {
     return toDto(location);
   }
 
-  /** Writes, reads back and removes a small file, then reports the free space. */
+  /**
+   * Writes, reads back and removes a small file, then reports the free space. A Telegram backup
+   * chat is read again instead, to see whether the account may still post there.
+   */
   async check(id: string): Promise<StorageCheckDto> {
     const location = await this.find(id);
+    if (!isDriverLocation(location)) {
+      return this.checkTelegram(location);
+    }
     let problem: string | null = null;
     let space: StorageSpaceDto | null = null;
     try {
@@ -175,6 +234,23 @@ export class StorageLocationsService implements OnApplicationBootstrap {
     return { location: toDto(updated), ok: problem === null, space };
   }
 
+  private async checkTelegram(location: StorageLocation): Promise<StorageCheckDto> {
+    const { problem, config, displayPath } = await this.telegram.check(location);
+    const updated = await this.prisma.storageLocation.update({
+      where: { id: location.id },
+      data: {
+        lastError: problem,
+        lastCheckedAt: new Date(),
+        config: { ...config },
+        displayPath,
+        // A chat that works again takes backups at once, whatever made them wait.
+        ...(problem === null ? { unavailableUntil: null } : {}),
+      },
+      include: WITH_CHANNEL_COUNT,
+    });
+    return { location: toDto(updated), ok: problem === null, space: null };
+  }
+
   /**
    * Removes a location nothing uses; the files already in its folder stay where they are. A Google
    * grant is revoked so the app keeps no access it no longer needs.
@@ -187,17 +263,16 @@ export class StorageLocationsService implements OnApplicationBootstrap {
         message: 'This location follows STORAGE_LOCAL_ROOT on the server and cannot be removed.',
       });
     }
-    const [channels, media] = await Promise.all([
+    const [channels, media, backedUp, backups] = await Promise.all([
       this.prisma.channel.count({ where: { storageLocationId: id } }),
       this.prisma.media.count({ where: { storageLocationId: id } }),
+      this.prisma.channel.count({ where: { backupLocationId: id } }),
+      this.prisma.messageBackup.count({ where: { storageLocationId: id } }),
     ]);
-    if (channels > 0 || media > 0) {
+    if (channels > 0 || media > 0 || backedUp > 0 || backups > 0) {
       throw new ConflictException({
         code: StorageErrorCode.LOCATION_IN_USE,
-        message:
-          channels > 0
-            ? `${channels} channel(s) save their media here. Choose another location for them first.`
-            : `${media} archived file(s) are stored here, so the location must stay.`,
+        message: inUseMessage(channels, media, backedUp, backups),
       });
     }
     if (location.kind === StorageKind.GOOGLE_DRIVE) {
@@ -207,6 +282,7 @@ export class StorageLocationsService implements OnApplicationBootstrap {
       await tx.storageLocation.delete({ where: { id } });
       if (location.isDefault) {
         const next = await tx.storageLocation.findFirst({
+          where: { kind: { in: [...DOWNLOAD_STORAGE_KINDS] } },
           orderBy: [{ builtIn: 'desc' }, { createdAt: 'asc' }],
         });
         if (next) {

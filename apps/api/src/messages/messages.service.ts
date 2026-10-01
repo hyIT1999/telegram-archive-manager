@@ -11,6 +11,7 @@ import {
   messageTypesOf,
   telegramMessageUrl,
 } from '@tam/shared';
+import { loadMessageBackups } from '../backups/message-backups.js';
 import { cappedTotal, TOTAL_COUNT_ROWS } from '../common/pagination/capped-total.js';
 import { MEDIA_INCLUDE, toMediaDto } from '../media/media.mapper.js';
 import { MESSAGE_TAGS_INCLUDE } from '../tags/tag.mapper.js';
@@ -96,11 +97,12 @@ export class MessagesService {
       throw messageNotFound();
     }
     const channel = message.channel;
-    const [album, replyTo, previous, next] = await Promise.all([
+    const [album, replyTo, previous, next, backups] = await Promise.all([
       this.album(message),
       this.replyTo(message),
       this.neighbour(message, channel, 'newest'),
       this.neighbour(message, channel, 'oldest'),
+      loadMessageBackups(this.prisma, message.id),
     ]);
     const row: MessageSummaryRow = { ...message, channel, media: message.media };
     const titles = await topicTitles(this.prisma, [row, ...album]);
@@ -132,6 +134,7 @@ export class MessagesService {
         message.telegramMessageId,
       ),
       favoritedAt: message.favoritedAt?.toISOString() ?? null,
+      backups,
     };
   }
 

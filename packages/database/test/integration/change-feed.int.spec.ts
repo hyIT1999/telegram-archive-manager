@@ -166,6 +166,39 @@ describe('change notifications', () => {
     expect(await announced()).toEqual([]);
   });
 
+  it('announces Telegram backups once per statement for each channel they touch', async () => {
+    const supergroup = await newChannel('Backed up');
+    const oldGroup = await newChannel('Its old group', { migratedToChannelId: supergroup.id });
+    const chat = await prisma.storageLocation.create({
+      data: {
+        kind: 'TELEGRAM',
+        name: 'Backups',
+        displayPath: 'Telegram › Backups',
+        target: `-100${Date.now()}`,
+        config: {},
+      },
+    });
+    const files = [await newFile(oldGroup.id, 1), await newFile(supergroup.id, 1)];
+    await announced();
+
+    await prisma.messageBackup.createMany({
+      data: files.map((file, index) => ({
+        messageId: file.messageId,
+        storageLocationId: chat.id,
+        channelId: index === 0 ? oldGroup.id : supergroup.id,
+      })),
+    });
+    expect((await announced()).sort()).toEqual(
+      [`backups:${oldGroup.id}`, `backups:${supergroup.id}`].sort(),
+    );
+
+    await prisma.messageBackup.updateMany({
+      where: { channelId: supergroup.id },
+      data: { uploadedBytes: 1_024n },
+    });
+    expect(await announced()).toEqual([`backups:${supergroup.id}`]);
+  });
+
   it('listens again after losing its connection, and says changes may have been missed', async () => {
     await prisma.$queryRaw`
       SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = ${LISTENER_NAME}`;

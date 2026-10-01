@@ -62,7 +62,8 @@
         Channels &amp; groups
       </h2>
       <p class="panel-hint">
-        Pick the chat to archive. Chats with content protection are listed but cannot be archived.
+        Pick the chat to archive. Chats with content protection, and chats that receive backups, are
+        listed but cannot be archived.
       </p>
       <!-- Adding failed because the picked chat left the list or became protected. -->
       @if (!chats.selected()) {
@@ -139,7 +140,28 @@
           by month, with the original file names. You can add a folder on this computer or connect
           Google Drive.
         </p>
-        <app-storage-location-list selectable [(selectedId)]="storageChoice" />
+        <app-storage-location-list
+          selectable
+          [kinds]="downloadKinds"
+          [(selectedId)]="storageChoice"
+        />
+
+        <div class="backup-choice">
+          <mat-slide-toggle [checked]="wantsBackup()" (change)="wantsBackup.set($event.checked)">
+            Also back up to a Telegram chat
+          </mat-slide-toggle>
+          <p class="panel-hint">
+            Optional: copies of the messages are posted in a chat of yours, with their files
+            uploaded again. You can also set this up later on the channel page.
+          </p>
+          @if (wantsBackup()) {
+            <app-storage-location-list
+              selectable
+              [kinds]="backupKinds"
+              [(selectedId)]="backupChoice"
+            />
+          }
+        </div>
 
         @if (storageError(); as message) {
           <app-notice tone="error">{{ message }}</app-notice>
@@ -147,6 +169,9 @@
         @if (storageSaved() && item.storageLocation; as location) {
           <app-notice tone="success" title="Storage location saved">
             Media of {{ item.title }} goes to {{ location.displayPath }} › {{ item.storageFolder }}.
+            @if (item.backupLocation; as backup) {
+              Backups go to {{ backup.displayPath }}.
+            }
             Next, choose what to import.
           </app-notice>
         }
@@ -162,7 +187,7 @@
             <button
               matButton="filled"
               type="button"
-              [disabled]="!storageChoice() || savingStorage()"
+              [disabled]="!storageChoice() || (wantsBackup() && !backupChoice()) || savingStorage()"
               [showProgress]="savingStorage()"
               (click)="saveStorage()"
             >
@@ -215,6 +240,12 @@
               <dd>{{ location.displayPath }} › {{ item.storageFolder }}</dd>
             </div>
           }
+          @if (item.backupLocation; as backup) {
+            <div>
+              <dt>Backed up to</dt>
+              <dd>{{ backup.displayPath }}</dd>
+            </div>
+          }
         </dl>
         <div class="downloads-switch">
           <mat-slide-toggle
@@ -253,6 +284,28 @@
         </div>
         @if (syncError(); as message) {
           <app-notice tone="error">{{ message }}</app-notice>
+        }
+        @if (item.backupLocation) {
+          <div class="backup-switch">
+            <mat-slide-toggle
+              [checked]="item.backupEnabled"
+              [disabled]="savingBackup()"
+              (change)="setBackupEnabled($event)"
+            >
+              Back up to Telegram automatically
+            </mat-slide-toggle>
+            <p class="panel-hint">
+              @if (item.backupEnabled) {
+                Once the import has finished, every message is copied, oldest first, and new ones
+                follow.
+              } @else {
+                Nothing is backed up on its own; switch it on later from the channel page.
+              }
+            </p>
+          </div>
+          @if (backupError(); as message) {
+            <app-notice tone="error">{{ message }}</app-notice>
+          }
         }
         <app-notice tone="info" title="What happens">
           The worker reads the history page by page into the archive, and can be paused, resumed or

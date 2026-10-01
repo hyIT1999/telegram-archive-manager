@@ -1,17 +1,20 @@
 import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
-import type { Channel, Prisma } from '@tam/database';
+import { type Channel, type Prisma, seedMessageBackups } from '@tam/database';
 import { PrismaService } from '@tam/database/nest';
 import {
   ApiErrorCode,
+  BackupErrorCode,
   type ChannelDto,
   type ChannelListQuery,
   ImportErrorCode,
   type Page,
+  StorageKind,
   TelegramErrorCode,
   type UpdateChannelRequest,
 } from '@tam/shared';
-import { channelFolderName } from '@tam/storage';
+import { channelFolderName, isDriverLocation } from '@tam/storage';
 import { z } from 'zod';
+import { stopRunningBackups, withOldGroups } from '../backups/backup-rules.js';
 import { decodeCursor, encodeCursor } from '../common/pagination/cursor.js';
 import { stopRunningDownloads } from '../downloads/download-rules.js';
 import {
@@ -21,6 +24,12 @@ import {
   toChannelDto,
 } from './channel.mapper.js';
 import { loadChannelStats } from './channel-stats.js';
+
+/**
+ * Switching backup on creates a row for every archived message of the channel, which takes a
+ * moment for a large archive.
+ */
+const UPDATE_TRANSACTION = { timeout: 60_000, maxWait: 5_000 } as const;
 
 /** Keyset position in the (createdAt desc, id desc) order. */
 const channelCursorSchema = z
@@ -70,6 +79,10 @@ export class ChannelsService {
    * supergroup follows the download switch; switching off stops running downloads nobody asked
    * for (they keep their partial files and go on when switched on again). Protected chats and old
    * groups never sync; switching sync on clears why it had stopped by itself.
+   *
+   * The backup chat must be a Telegram location, never the channel itself. While backup is on,
+   * every archived message of the channel (and of its old basic group) gets a backup row, so the
+   * panel counts them at once; switching it off takes back running backups nobody asked for.
    */
   async update(id: string, request: UpdateChannelRequest): Promise<ChannelDto> {
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -81,12 +94,16 @@ export class ChannelsService {
       if (request.storageLocationId !== undefined) {
         const location = await tx.storageLocation.findUnique({
           where: { id: request.storageLocationId },
-          select: { id: true },
+          select: { id: true, kind: true },
         });
         if (!location) {
-          throw new NotFoundException({
-            message: 'Storage location not found',
-            code: ApiErrorCode.NOT_FOUND,
+          throw locationNotFound();
+        }
+        if (!isDriverLocation(location)) {
+          throw new UnprocessableEntityException({
+            code: BackupErrorCode.LOCATION_KIND_NOT_ALLOWED,
+            message:
+              'Media is downloaded to a folder or to Google Drive. A Telegram chat can only receive backups.',
           });
         }
         data.storageLocationId = location.id;
@@ -120,8 +137,52 @@ export class ChannelsService {
           data.syncNote = null;
         }
       }
+      let backupLocationId = channel.backupLocationId;
+      if (request.backupLocationId !== undefined) {
+        const location = await tx.storageLocation.findUnique({
+          where: { id: request.backupLocationId },
+          select: { id: true, kind: true, target: true },
+        });
+        if (!location) {
+          throw locationNotFound();
+        }
+        if (location.kind !== StorageKind.TELEGRAM) {
+          throw new UnprocessableEntityException({
+            code: BackupErrorCode.LOCATION_KIND_NOT_ALLOWED,
+            message: 'Backups go to a Telegram chat. Add one under Settings → Storage locations.',
+          });
+        }
+        if (location.target === channel.telegramChatId.toString()) {
+          throw new UnprocessableEntityException({
+            code: BackupErrorCode.BACKUP_CHAT_ARCHIVED,
+            message: 'A channel cannot be backed up into itself.',
+          });
+        }
+        backupLocationId = location.id;
+        data.backupLocationId = location.id;
+      }
+      const backupEnabled = request.backupEnabled ?? channel.backupEnabled;
+      if (request.backupEnabled !== undefined) {
+        if (request.backupEnabled) {
+          assertBackupable(channel, backupLocationId);
+          data.backupNote = null;
+        }
+        data.backupEnabled = request.backupEnabled;
+        if (!request.backupEnabled) {
+          await stopRunningBackups(tx, await withOldGroups(tx, id));
+        }
+      }
+      const backupStarts =
+        (request.backupEnabled === true && !channel.backupEnabled) ||
+        (request.backupLocationId !== undefined && backupLocationId !== channel.backupLocationId);
+      if (backupEnabled && backupStarts && backupLocationId !== null) {
+        await seedMessageBackups(tx, {
+          channelIds: await withOldGroups(tx, id),
+          storageLocationId: backupLocationId,
+        });
+      }
       return tx.channel.update({ where: { id }, data, include: CHANNEL_INCLUDE });
-    });
+    }, UPDATE_TRANSACTION);
     return this.withStats(updated);
   }
 
@@ -147,6 +208,16 @@ export class ChannelsService {
       throw new UnprocessableEntityException({
         code: TelegramErrorCode.CHAT_PROTECTED,
         message: 'This chat has content protection enabled, so it cannot be archived.',
+      });
+    }
+    const backupChat = await this.prisma.storageLocation.findUnique({
+      where: { kind_target: { kind: StorageKind.TELEGRAM, target: telegramChatId } },
+      select: { id: true },
+    });
+    if (backupChat) {
+      throw new UnprocessableEntityException({
+        code: BackupErrorCode.CHAT_IS_BACKUP_TARGET,
+        message: 'This chat receives backups, so archiving it would copy the copies.',
       });
     }
     const details = {
@@ -196,6 +267,39 @@ export class ChannelsService {
 
 function channelNotFound(): NotFoundException {
   return new NotFoundException({ message: 'Channel not found', code: ApiErrorCode.NOT_FOUND });
+}
+
+function locationNotFound(): NotFoundException {
+  return new NotFoundException({
+    message: 'Storage location not found',
+    code: ApiErrorCode.NOT_FOUND,
+  });
+}
+
+/**
+ * Protected chats are never backed up, an upgraded group follows its supergroup, and backups need
+ * a backup chat.
+ */
+function assertBackupable(channel: Channel, backupLocationId: string | null): void {
+  if (channel.isProtected) {
+    throw new UnprocessableEntityException({
+      code: TelegramErrorCode.CHAT_PROTECTED,
+      message: 'This chat has content protection enabled, so it is never backed up.',
+    });
+  }
+  if (channel.migratedToChannelId !== null) {
+    throw new UnprocessableEntityException({
+      code: ImportErrorCode.CHANNEL_MIGRATED,
+      message:
+        'This group was upgraded to a supergroup; back up the supergroup, which includes it.',
+    });
+  }
+  if (backupLocationId === null) {
+    throw new UnprocessableEntityException({
+      code: BackupErrorCode.BACKUP_CHAT_MISSING,
+      message: 'Choose the Telegram chat that receives the backups first.',
+    });
+  }
 }
 
 /** Protected chats are never archived, and an upgraded group gets no new messages. */

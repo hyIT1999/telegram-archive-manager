@@ -7,6 +7,7 @@ import { AccountSettings } from '../account/account-settings';
 import { StorageLocationList } from '../storage/storage-location-list';
 import { TelegramConnect } from '../telegram/telegram-connect';
 import { TelegramSession } from '../telegram/telegram-session';
+import { BackupSettingsPanel } from './backup-settings';
 import { DownloadSettingsPanel } from './download-settings';
 import { SyncSettingsPanel } from './sync-settings';
 
@@ -15,6 +16,7 @@ import { SyncSettingsPanel } from './sync-settings';
   providers: [TelegramSession],
   imports: [
     AccountSettings,
+    BackupSettingsPanel,
     DownloadSettingsPanel,
     MatButtonToggle,
     MatButtonToggleGroup,
@@ -50,7 +52,8 @@ import { SyncSettingsPanel } from './sync-settings';
       <h2 id="storage-title" class="panel-title">Storage locations</h2>
       <p class="panel-hint">
         Where archived media is saved: folders on this computer or Google Drive. Each channel uses
-        one; the default applies to channels that did not choose.
+        one; the default applies to channels that did not choose. Telegram chats listed here receive
+        backup copies of messages instead.
       </p>
       <app-storage-location-list />
     </section>
@@ -72,6 +75,16 @@ import { SyncSettingsPanel } from './sync-settings';
         channel switches its sync on or off on its page.
       </p>
       <app-sync-settings />
+    </section>
+
+    <section class="surface-card panel" aria-labelledby="backup-title">
+      <h2 id="backup-title" class="panel-title">Telegram backup</h2>
+      <p class="panel-hint">
+        Copies of archived messages that the Telegram account posts in chats of its own, with their
+        files uploaded again. Add the chats under Storage locations; each channel chooses its chat
+        and switches its backup on its page.
+      </p>
+      <app-backup-settings />
     </section>
 
     <section class="surface-card panel" aria-labelledby="appearance-title">

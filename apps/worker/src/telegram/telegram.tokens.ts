@@ -1,6 +1,7 @@
 import { ApiErrorCode } from '@tam/shared';
 import {
   type Chat,
+  type TelegramBackupWriter,
   TelegramError,
   type TelegramHistoryReader,
   type TelegramLoginApi,
@@ -16,8 +17,12 @@ export const TELEGRAM_REDIS = Symbol('TELEGRAM_REDIS');
 /** Gives services the live Telegram API (TelegramConnection in production, fakes in tests). */
 export const TELEGRAM_API_PROVIDER = Symbol('TELEGRAM_API_PROVIDER');
 
-/** The adapter operations the worker uses: login, the chat list, history and media files. */
-export interface TelegramApi extends TelegramLoginApi, TelegramHistoryReader, TelegramMediaReader {
+/**
+ * The adapter operations the worker uses: login, the chat list, history, media files, and the
+ * backup copies it sends.
+ */
+export interface TelegramApi
+  extends TelegramLoginApi, TelegramHistoryReader, TelegramMediaReader, TelegramBackupWriter {
   getChats(): Promise<Chat[]>;
 }
 

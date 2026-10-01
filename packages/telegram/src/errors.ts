@@ -20,7 +20,10 @@ export class FloodWaitError extends TelegramError {
 
 /** The file reference expired; refetch the message and resume the download. */
 export class FileReferenceExpiredError extends TelegramError {
-  constructor() {
+  constructor(
+    /** Which file of the request (an album), when Telegram says. */
+    readonly index: number | null = null,
+  ) {
     super('File reference expired', 'FILE_REFERENCE_EXPIRED');
   }
 }
@@ -79,5 +82,68 @@ export class AuthRequiredError extends TelegramError {
 export class LoginStepError extends TelegramError {
   constructor(code: TelegramErrorCode, message: string) {
     super(message, code);
+  }
+}
+
+/**
+ * The account may not post (files) in the chat: it lost its admin rights, was banned, or the chat
+ * restricts sending. Fixed in Telegram, not by retrying.
+ */
+export class ChatWriteForbiddenError extends TelegramError {
+  constructor(message = 'This Telegram account may not post in the backup chat') {
+    super(message, 'CHAT_WRITE_FORBIDDEN');
+  }
+}
+
+/** Telegram's anti-spam limit for this account (PEER_FLOOD): sending must stop for hours. */
+export class PeerFloodError extends TelegramError {
+  constructor() {
+    super('Telegram limits how much this account may send right now (PEER_FLOOD)', 'PEER_FLOOD');
+  }
+}
+
+/** The forum topic to post in was deleted or closed. */
+export class TopicUnavailableError extends TelegramError {
+  constructor(message = 'The forum topic was deleted or closed') {
+    super(message, 'TOPIC_UNAVAILABLE');
+  }
+}
+
+/** The caption is longer than Telegram accepts with a file from this account. */
+export class CaptionTooLongError extends TelegramError {
+  constructor() {
+    super('The caption is longer than Telegram accepts with a file', 'CAPTION_TOO_LONG');
+  }
+}
+
+/** Telegram refused the formatting of a text (ENTITY_*); the text goes without it. */
+export class EntitiesRejectedError extends TelegramError {
+  constructor(reason: string) {
+    super(`Telegram refused the formatting of the text (${reason})`, 'ENTITIES_REJECTED');
+  }
+}
+
+/** A part of an uploaded file is missing on Telegram's side: upload that file again. */
+export class UploadIncompleteError extends TelegramError {
+  constructor(
+    reason: string,
+    /** Index of the album file concerned, when Telegram says. */
+    readonly fileIndex: number | null = null,
+  ) {
+    super(`Telegram lost part of an uploaded file (${reason})`, 'UPLOAD_INCOMPLETE');
+  }
+}
+
+/** A random id was sent before: the message it belongs to was already posted. */
+export class RandomIdDuplicateError extends TelegramError {
+  constructor() {
+    super('This message was already sent (RANDOM_ID_DUPLICATE)', 'RANDOM_ID_DUPLICATE');
+  }
+}
+
+/** Larger than Telegram accepts from this account (2000 MiB, or 4000 MiB with Premium). */
+export class FileTooLargeError extends TelegramError {
+  constructor(message = 'The file is larger than Telegram accepts from this account') {
+    super(message, 'FILE_TOO_LARGE');
   }
 }

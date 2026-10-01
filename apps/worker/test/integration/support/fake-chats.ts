@@ -91,6 +91,8 @@ export function chatInfo(id: string, overrides: Partial<Chat> = {}): Chat {
     isProtected: false,
     memberCount: 10,
     migratedFromChatId: null,
+    canPost: false,
+    canManageTopics: false,
     ...overrides,
   };
 }

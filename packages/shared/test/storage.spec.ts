@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_DRIVE_FOLDER_NAME,
+  DOWNLOAD_STORAGE_KINDS,
   StorageErrorCode,
   StorageKind,
   connectGoogleDriveRequestSchema,
   createLocalLocationRequestSchema,
+  createTelegramLocationRequestSchema,
   googleDriveFlowParamSchema,
   localFoldersQuerySchema,
   updateChannelRequestSchema,
@@ -13,7 +15,8 @@ import {
 
 describe('storage location contracts', () => {
   it('mirrors the database enum', () => {
-    expect(Object.values(StorageKind)).toEqual(['LOCAL', 'GOOGLE_DRIVE']);
+    expect(Object.values(StorageKind)).toEqual(['LOCAL', 'GOOGLE_DRIVE', 'TELEGRAM']);
+    expect(DOWNLOAD_STORAGE_KINDS).toEqual(['LOCAL', 'GOOGLE_DRIVE']);
     expect(StorageErrorCode.PATH_NOT_ALLOWED).toBe('PATH_NOT_ALLOWED');
   });
 
@@ -61,5 +64,27 @@ describe('storage location contracts', () => {
     expect(updateChannelRequestSchema.parse({ downloadMedia: false })).toEqual({ downloadMedia: false });
     expect(updateChannelRequestSchema.safeParse({ downloadMedia: 'no' }).success).toBe(false);
     expect(updateChannelRequestSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('adds a Telegram backup chat by its id, named after the chat unless told', () => {
+    expect(createTelegramLocationRequestSchema.parse({ telegramChatId: '-1001234567890' })).toEqual({
+      telegramChatId: '-1001234567890',
+    });
+    expect(
+      createTelegramLocationRequestSchema.parse({ telegramChatId: '-1001', name: ' Backups ' }),
+    ).toEqual({ telegramChatId: '-1001', name: 'Backups' });
+    expect(createTelegramLocationRequestSchema.safeParse({ telegramChatId: '@chat' }).success).toBe(
+      false,
+    );
+  });
+
+  it('chooses a channel backup chat and switches its automatic backup', () => {
+    const id = '0199a0b1-0000-7000-8000-000000000002';
+    expect(updateChannelRequestSchema.parse({ backupLocationId: id, backupEnabled: true })).toEqual({
+      backupLocationId: id,
+      backupEnabled: true,
+    });
+    expect(updateChannelRequestSchema.safeParse({ backupLocationId: 'chat' }).success).toBe(false);
+    expect(updateChannelRequestSchema.safeParse({ backupEnabled: 'yes' }).success).toBe(false);
   });
 });

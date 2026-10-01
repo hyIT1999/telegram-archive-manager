@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { PrismaModule } from '@tam/database/nest';
 import { AuthModule } from './auth/auth.module.js';
 import { SessionGuard } from './auth/session.guard.js';
+import { BackupsModule } from './backups/backups.module.js';
 import { ChannelsModule } from './channels/channels.module.js';
 import { createValidationPipe } from './common/validation/validation.pipe.js';
 import { configModuleOptions } from './config/config-module.js';
@@ -43,6 +44,7 @@ const DEFAULT_THROTTLE = { name: 'default', limit: 300, ttl: 60_000 };
     }),
     AuthModule,
     HealthModule,
+    BackupsModule,
     ChannelsModule,
     EventsModule,
     FavoritesModule,

@@ -161,6 +161,14 @@ function plural(count: number, unit: string): string {
   return `${count} ${unit}${count === 1 ? '' : 's'}`;
 }
 
+/**
+ * Whether a chat may be archived: not with content protection, and not a chat that receives
+ * backups (archiving it would copy the copies).
+ */
+export function archivable(chat: TelegramDialogDto): boolean {
+  return !chat.isProtected && chat.backupLocationId === null;
+}
+
 export type ChatFilter = 'all' | 'channels' | 'groups';
 
 /** Chats whose title or username contains the query (ignoring case and accents) and type. */
