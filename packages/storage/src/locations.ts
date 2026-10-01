@@ -10,7 +10,7 @@ import {
   GoogleOAuthClient,
 } from './google/google-oauth.js';
 import { LocalStorageDriver } from './local/local-storage-driver.js';
-import type { StorageDriver, StorageKind } from './storage-driver.js';
+import type { LocationKind, StorageDriver, StorageKind } from './storage-driver.js';
 
 /** The server lacks what a storage location needs (Google client, STORAGE_SECRET_KEY, …). */
 export class StorageUnavailableError extends StorageError {}
@@ -25,18 +25,40 @@ export interface GoogleDriveLocationConfig {
   accountEmail: string | null;
 }
 
+/** A Telegram backup chat: the worker sends copies of messages there, never through a driver. */
+export interface TelegramLocationConfig {
+  /** Marked chat id (-100…), as a decimal string. */
+  chatId: string;
+  title: string;
+  username: string | null;
+  type: 'CHANNEL' | 'SUPERGROUP';
+  /** Topics of an archived forum are recreated in it. */
+  isForum: boolean;
+}
+
 export type LocationConfig =
   | ({ kind: 'LOCAL' } & LocalLocationConfig)
-  | ({ kind: 'GOOGLE_DRIVE' } & GoogleDriveLocationConfig);
+  | ({ kind: 'GOOGLE_DRIVE' } & GoogleDriveLocationConfig)
+  | ({ kind: 'TELEGRAM' } & TelegramLocationConfig);
 
 /** The columns of a storage_locations row that decide how to reach it. */
 export interface StorageLocationRecord {
   id: string;
-  kind: StorageKind;
-  /** Non-secret settings: { path } or { folderId, folderName, accountEmail }. */
+  kind: LocationKind;
+  /** Non-secret settings: { path }, { folderId, folderName, accountEmail } or a Telegram chat. */
   config: unknown;
   /** Sealed credentials (a Google refresh token); null for folders on the server. */
   secretEnc: Uint8Array | null;
+}
+
+/** A storage location files are written to (it has a driver). */
+export type DriverLocationRecord = StorageLocationRecord & { kind: StorageKind };
+
+/** True for the locations files are written to; false for Telegram backup chats. */
+export function isDriverLocation<T extends { kind: LocationKind }>(
+  location: T,
+): location is T & { kind: StorageKind } {
+  return location.kind === 'LOCAL' || location.kind === 'GOOGLE_DRIVE';
 }
 
 function text(config: Record<string, unknown>, name: string): string {
@@ -57,6 +79,17 @@ export function locationConfig(
       : {};
   if (location.kind === 'LOCAL') {
     return { kind: 'LOCAL', path: text(config, 'path') };
+  }
+  if (location.kind === 'TELEGRAM') {
+    const username = config['username'];
+    return {
+      kind: 'TELEGRAM',
+      chatId: text(config, 'chatId'),
+      title: text(config, 'title'),
+      username: typeof username === 'string' && username !== '' ? username : null,
+      type: config['type'] === 'CHANNEL' ? 'CHANNEL' : 'SUPERGROUP',
+      isForum: config['isForum'] === true,
+    };
   }
   const email = config['accountEmail'];
   return {
@@ -117,7 +150,7 @@ export class LocationDriverFactory {
     return new GoogleDriveApi(tokens, { ...this.options.driveOptions, endpoints: this.endpoints });
   }
 
-  forLocation(location: StorageLocationRecord): StorageDriver {
+  forLocation(location: DriverLocationRecord): StorageDriver {
     const version = `${JSON.stringify(location.config)}|${Buffer.from(location.secretEnc ?? new Uint8Array()).toString('base64')}`;
     const cached = this.cache.get(location.id);
     if (cached?.version === version) {
@@ -163,10 +196,14 @@ export class LocationDriverFactory {
     return this.options.secrets;
   }
 
-  private create(location: StorageLocationRecord): StorageDriver {
+  private create(location: DriverLocationRecord): StorageDriver {
     const config = locationConfig(location);
     if (config.kind === 'LOCAL') {
       return new LocalStorageDriver(config.path);
+    }
+    if (config.kind === 'TELEGRAM') {
+      // The types keep backup chats out; this guards rows read without them.
+      throw new StorageUnavailableError('A Telegram backup chat holds no downloaded files.');
     }
     const tokens = new GoogleAccessTokens(this.oauth(), this.refreshToken(location));
     return new GoogleDriveStorageDriver(this.driveApi(tokens), config.folderId);

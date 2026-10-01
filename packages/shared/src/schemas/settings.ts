@@ -95,6 +95,30 @@ export function readSyncSettings(stored: unknown): SyncSettings {
   return parsed.success ? parsed.data : defaultSyncSettings();
 }
 
+const backupSettingFields = {
+  /** Stops every Telegram backup, messages asked for one by one included. */
+  paused: z.boolean(),
+};
+
+/** How messages are backed up to Telegram (app_settings key "backups"). */
+export const backupSettingsSchema = z.object({
+  paused: backupSettingFields.paused.default(false),
+});
+export type BackupSettings = z.output<typeof backupSettingsSchema>;
+
+/** The app_settings key holding BackupSettings. */
+export const BACKUP_SETTINGS_KEY = 'backups';
+
+export function defaultBackupSettings(): BackupSettings {
+  return backupSettingsSchema.parse({});
+}
+
+/** Reads stored settings; anything unreadable falls back to the defaults. */
+export function readBackupSettings(stored: unknown): BackupSettings {
+  const parsed = backupSettingsSchema.safeParse(stored ?? {});
+  return parsed.success ? parsed.data : defaultBackupSettings();
+}
+
 function changesSomething(value: Record<string, unknown>): boolean {
   return Object.values(value).some((field) => field !== undefined);
 }
@@ -112,6 +136,11 @@ export const updateSettingsRequestSchema = z
       .partial()
       .refine(changesSomething, { message: 'Nothing to change' })
       .optional(),
+    backups: z
+      .object(backupSettingFields)
+      .partial()
+      .refine(changesSomething, { message: 'Nothing to change' })
+      .optional(),
   })
   .refine(changesSomething, { message: 'Nothing to change' });
 export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
@@ -120,6 +149,7 @@ export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
 export interface SettingsDto {
   downloads: DownloadSettings;
   sync: SyncSettings;
+  backups: BackupSettings;
   /** Server limits shown for information; they change in the server's .env. */
   disk: {
     /** Downloads to a folder on the server stop before its disk has less free space (MIN_FREE_DISK_MB). */

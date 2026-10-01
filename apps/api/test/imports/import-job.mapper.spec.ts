@@ -27,6 +27,9 @@ const channel: Channel = {
   downloadMedia: true,
   downloadNote: null,
   topicsRefreshedAt: null,
+  backupLocationId: null,
+  backupEnabled: false,
+  backupNote: null,
   createdAt: created,
   updatedAt: created,
 };

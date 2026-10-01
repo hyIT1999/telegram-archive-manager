@@ -15,7 +15,8 @@ export const LIVE_EVENTS_PATH = '/api/events';
  * - `import.job`: an import or sync job as `GET /api/import-jobs/:id` returns it, after any
  *   change (progress, status, its downloads);
  * - `channel.changed`: a channel changed (settings, sync, the archived range);
- * - `downloads.changed`: downloads of a channel (or of its old basic group) changed.
+ * - `downloads.changed`: downloads of a channel (or of its old basic group) changed;
+ * - `backups.changed`: Telegram backups of a channel (or of its old basic group) changed.
  */
 export type LiveEvent =
   | { type: 'ready' }
@@ -24,7 +25,8 @@ export type LiveEvent =
   | { type: 'session.ended' }
   | { type: 'import.job'; job: ImportJobDto }
   | { type: 'channel.changed'; channelId: string }
-  | { type: 'downloads.changed'; channelId: string };
+  | { type: 'downloads.changed'; channelId: string }
+  | { type: 'backups.changed'; channelId: string };
 
 export type LiveEventType = LiveEvent['type'];
 

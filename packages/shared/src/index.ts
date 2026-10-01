@@ -12,6 +12,7 @@ export * from './schemas/storage.js';
 export * from './schemas/telegram.js';
 export * from './schemas/imports.js';
 export * from './schemas/media.js';
+export * from './schemas/backups.js';
 export * from './schemas/settings.js';
 export * from './schemas/messages.js';
 export * from './schemas/search.js';

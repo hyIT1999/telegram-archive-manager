@@ -6,6 +6,7 @@ export {
   refreshMediaCountersOf,
   type FinishedDownloadStatus,
 } from './media-counters.js';
+export { type SeedMessageBackupsOptions, seedMessageBackups } from './message-backups.js';
 export {
   CHANGE_CHANNEL,
   type Change,

@@ -8,14 +8,30 @@ export const EMPTY_CHANNEL_STATS: Readonly<ChannelStatsDto> = Object.freeze({
   storageBytes: 0,
 });
 
-/** What channel queries load next to the row (`include`), so the DTO can name the location. */
-export const CHANNEL_INCLUDE = { storageLocation: true } as const;
+/**
+ * What channel queries load next to the row (`include`), so the DTO can name the download
+ * location and the backup chat.
+ */
+export const CHANNEL_INCLUDE = { storageLocation: true, backupLocation: true } as const;
 
-export type ChannelWithStorage = Channel & { storageLocation: StorageLocation | null };
+export type ChannelWithStorage = Channel & {
+  storageLocation: StorageLocation | null;
+  backupLocation: StorageLocation | null;
+};
+
+function locationRef(location: StorageLocation | null): ChannelDto['storageLocation'] {
+  return location
+    ? {
+        id: location.id,
+        kind: location.kind,
+        name: location.name,
+        displayPath: location.displayPath,
+      }
+    : null;
+}
 
 /** BIGINT columns become strings; access_hash and cursors never leave the server. */
 export function toChannelDto(channel: ChannelWithStorage, stats: ChannelStatsDto): ChannelDto {
-  const location = channel.storageLocation;
   return {
     id: channel.id,
     telegramChatId: channel.telegramChatId.toString(),
@@ -31,17 +47,13 @@ export function toChannelDto(channel: ChannelWithStorage, stats: ChannelStatsDto
     backfillComplete: channel.backfillComplete,
     lastSyncedAt: channel.lastSyncedAt?.toISOString() ?? null,
     migratedToChannelId: channel.migratedToChannelId,
-    storageLocation: location
-      ? {
-          id: location.id,
-          kind: location.kind,
-          name: location.name,
-          displayPath: location.displayPath,
-        }
-      : null,
+    storageLocation: locationRef(channel.storageLocation),
     storageFolder: channel.storageFolder,
     downloadMedia: channel.downloadMedia,
     downloadNote: channel.downloadNote,
+    backupLocation: locationRef(channel.backupLocation),
+    backupEnabled: channel.backupEnabled,
+    backupNote: channel.backupNote,
     createdAt: channel.createdAt.toISOString(),
     updatedAt: channel.updatedAt.toISOString(),
     stats: { ...stats },

@@ -10,8 +10,8 @@
       }
     </span>
     <span class="path">{{ location.displayPath }}</span>
-    @if (location.accountEmail) {
-      <span class="meta">{{ location.accountEmail }}</span>
+    @if (meta(location); as meta) {
+      <span class="meta">{{ meta }}</span>
     }
     @let state = status(location);
     @if (state.text) {
@@ -33,7 +33,8 @@
     @if (waitingUntil(location); as until) {
       <span class="status" data-state="waiting">
         <mat-icon aria-hidden="true">schedule</mat-icon>
-        Downloads to it wait until {{ until | date: 'shortTime' }}
+        {{ location.kind === 'TELEGRAM' ? 'Backups' : 'Downloads' }} to it wait until
+        {{ until | date: 'shortTime' }}
       </span>
     }
   </span>
@@ -46,8 +47,12 @@
     (retry)="store.reload()"
   />
 } @else if (store.list(); as list) {
-  <div class="locations" [attr.role]="selectable() ? 'radiogroup' : 'list'" aria-label="Storage locations">
-    @for (location of list.items; track location.id) {
+  <div
+    class="locations"
+    [attr.role]="selectable() ? 'radiogroup' : 'list'"
+    [attr.aria-label]="backupsOnly() ? 'Backup chats' : 'Storage locations'"
+  >
+    @for (location of store.items(); track location.id) {
       <div
         class="location"
         [attr.role]="selectable() ? null : 'listitem'"
@@ -57,8 +62,8 @@
           <label class="choice">
             <input
               type="radio"
-              name="storage-location"
               class="radio"
+              [name]="radioName"
               [checked]="location.id === selectedId()"
               (change)="choose(location)"
             />
@@ -83,7 +88,7 @@
             <mat-icon>fact_check</mat-icon>
             Check again
           </button>
-          @if (!location.isDefault) {
+          @if (!location.isDefault && location.kind !== 'TELEGRAM') {
             <button mat-menu-item type="button" (click)="makeDefault(location)">
               <mat-icon>star</mat-icon>
               Use as default
@@ -104,28 +109,45 @@
         </mat-menu>
       </div>
     } @empty {
-      <app-notice icon="folder_off">
-        No storage location yet. Add a folder on this computer or connect Google Drive.
-      </app-notice>
+      @if (backupsOnly()) {
+        <app-notice icon="send">
+          No backup chat yet. Add a Telegram channel or supergroup of yours where this account may
+          post.
+        </app-notice>
+      } @else {
+        <app-notice icon="folder_off">
+          No storage location yet. Add a folder on this computer or connect Google Drive.
+        </app-notice>
+      }
     }
   </div>
 
   <div class="add">
-    <button
-      matButton="tonal"
-      type="button"
-      [disabled]="list.capabilities.localRoots.length === 0"
-      (click)="addLocal()"
-    >
-      <mat-icon>create_new_folder</mat-icon>
-      Folder on this computer
-    </button>
-    <button matButton="tonal" type="button" (click)="connectGoogle()">
-      <mat-icon>add_to_drive</mat-icon>
-      Google Drive
-    </button>
+    @if (shows('LOCAL')) {
+      <button
+        matButton="tonal"
+        type="button"
+        [disabled]="list.capabilities.localRoots.length === 0"
+        (click)="addLocal()"
+      >
+        <mat-icon>create_new_folder</mat-icon>
+        Folder on this computer
+      </button>
+    }
+    @if (shows('GOOGLE_DRIVE')) {
+      <button matButton="tonal" type="button" (click)="connectGoogle()">
+        <mat-icon>add_to_drive</mat-icon>
+        Google Drive
+      </button>
+    }
+    @if (shows('TELEGRAM')) {
+      <button matButton="tonal" type="button" (click)="addTelegram()">
+        <mat-icon>send</mat-icon>
+        Telegram chat
+      </button>
+    }
   </div>
-  @if (list.capabilities.localRoots.length === 0) {
+  @if (shows('LOCAL') && list.capabilities.localRoots.length === 0) {
     <p class="hint">
       Folders on this computer can be added once STORAGE_LOCAL_ROOTS (or STORAGE_LOCAL_ROOT) is set
       on the server.

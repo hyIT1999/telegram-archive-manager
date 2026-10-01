@@ -199,6 +199,7 @@ describe('media, downloads and settings (e2e)', () => {
           concurrency: 2,
         },
         sync: { intervalMinutes: 15 },
+        backups: { paused: false },
         disk: { minFreeDiskMb: 2048 },
       });
     });

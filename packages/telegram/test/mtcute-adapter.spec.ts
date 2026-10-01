@@ -181,6 +181,8 @@ describe('MtcuteTelegramAdapter — chats', () => {
           isProtected: false,
           memberCount: null,
           migratedFromChatId: null,
+          canPost: false,
+          canManageTopics: false,
         },
         {
           id: '-200',
@@ -192,6 +194,8 @@ describe('MtcuteTelegramAdapter — chats', () => {
           isProtected: false,
           memberCount: 5,
           migratedFromChatId: null,
+          canPost: false,
+          canManageTopics: false,
         },
         {
           id: String(-1_000_000_000_000 - 400),
@@ -203,6 +207,8 @@ describe('MtcuteTelegramAdapter — chats', () => {
           isProtected: true,
           memberCount: 1_234,
           migratedFromChatId: null,
+          canPost: true,
+          canManageTopics: true,
         },
       ]);
     });
@@ -527,6 +533,7 @@ describe('MtcuteTelegramAdapter — imports', () => {
         isPinned: false,
         isHidden: true,
         date: new Date((1_700_000_000 + 1) * 1000),
+        createdByMe: false,
       });
       expect(topics[1]).toMatchObject({ id: 2, title: 'Lesson 2', isPinned: true });
       expect(topics[6]).toMatchObject({ id: 7, isClosed: true });

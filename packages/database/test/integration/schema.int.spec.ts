@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
-import { createPrismaClient, type PrismaClient } from '../../src/index.js';
+import { createPrismaClient, type PrismaClient, seedMessageBackups } from '../../src/index.js';
 
 let prisma: PrismaClient;
 let chatSeq = 0n;
@@ -319,5 +319,113 @@ describe('download queue columns', () => {
     expect(
       (await prisma.downloadJob.findUniqueOrThrow({ where: { mediaId: media.id } })).size,
     ).toBe(2_500n);
+  });
+});
+
+describe('Telegram backups', () => {
+  let targetSeq = 0;
+
+  function backupChat(extra: { isDefault?: boolean } = {}) {
+    targetSeq += 1;
+    return prisma.storageLocation.create({
+      data: {
+        kind: 'TELEGRAM',
+        name: `Backup ${targetSeq}`,
+        displayPath: `Telegram › Backup ${targetSeq}`,
+        target: `-100777${targetSeq}`,
+        config: {},
+        ...extra,
+      },
+    });
+  }
+
+  async function message(
+    channelId: string,
+    telegramMessageId: number,
+    type: 'TEXT' | 'VIDEO' | 'POLL' | 'SERVICE' | 'WEBPAGE',
+    withFile = false,
+  ) {
+    const row = await prisma.message.create({
+      data: { ...messageRow(channelId, telegramMessageId), type },
+    });
+    if (withFile) {
+      await prisma.media.create({
+        data: {
+          messageId: row.id,
+          telegramFileId: `chat:${telegramMessageId}:b-${row.id}`,
+          telegramFileUniqueId: `b-${row.id}`,
+          type: 'VIDEO',
+          size: 4_096n,
+        },
+      });
+    }
+    return row;
+  }
+
+  it('never lets a backup chat be the default download location', async () => {
+    await expect(backupChat({ isDefault: true })).rejects.toThrow(
+      /storage_locations_telegram_never_default/,
+    );
+  });
+
+  it('creates one row per message, skips what cannot be recreated, and never twice', async () => {
+    const supergroup = await newChannel('Lessons');
+    const oldGroup = await newChannel('Lessons (old group)');
+    const chat = await backupChat();
+    const text = await message(supergroup.id, 1, 'TEXT');
+    const video = await message(supergroup.id, 2, 'VIDEO', true);
+    const lostFile = await message(supergroup.id, 3, 'VIDEO');
+    const poll = await message(supergroup.id, 4, 'POLL');
+    await message(supergroup.id, 5, 'SERVICE');
+    const link = await message(supergroup.id, 6, 'WEBPAGE');
+    const older = await message(oldGroup.id, 1, 'TEXT');
+    const channelIds = [supergroup.id, oldGroup.id];
+
+    expect(await seedMessageBackups(prisma, { channelIds, storageLocationId: chat.id })).toBe(6);
+    const rows = await prisma.messageBackup.findMany({
+      where: { storageLocationId: chat.id },
+      select: { messageId: true, channelId: true, status: true, skipReason: true, size: true },
+    });
+    const byMessage = new Map(rows.map((row) => [row.messageId, row]));
+    expect(byMessage.get(text.id)).toMatchObject({
+      status: 'PENDING',
+      skipReason: null,
+      size: null,
+    });
+    expect(byMessage.get(video.id)).toMatchObject({ status: 'PENDING', size: 4_096n });
+    expect(byMessage.get(lostFile.id)).toMatchObject({
+      status: 'SKIPPED',
+      skipReason: 'NOT_AVAILABLE',
+    });
+    expect(byMessage.get(poll.id)).toMatchObject({ status: 'SKIPPED', skipReason: 'UNSUPPORTED' });
+    expect(byMessage.get(link.id)).toMatchObject({ status: 'PENDING' });
+    expect(byMessage.get(older.id)).toMatchObject({ channelId: oldGroup.id });
+    expect(rows).toHaveLength(6);
+
+    // Running again, or for one message, adds nothing; a second backup chat gets its own rows.
+    expect(await seedMessageBackups(prisma, { channelIds, storageLocationId: chat.id })).toBe(0);
+    const other = await backupChat();
+    expect(
+      await seedMessageBackups(prisma, {
+        channelIds,
+        storageLocationId: other.id,
+        messageIds: [video.id],
+      }),
+    ).toBe(1);
+    expect(await seedMessageBackups(prisma, { channelIds: [], storageLocationId: other.id })).toBe(
+      0,
+    );
+  });
+
+  it('keeps a backup chat that holds copies, and removes the rows with their message', async () => {
+    const channel = await newChannel('Kept');
+    const chat = await backupChat();
+    const text = await message(channel.id, 1, 'TEXT');
+    await seedMessageBackups(prisma, { channelIds: [channel.id], storageLocationId: chat.id });
+
+    await expect(prisma.storageLocation.delete({ where: { id: chat.id } })).rejects.toThrow();
+    await prisma.message.delete({ where: { id: text.id } });
+    expect(await prisma.messageBackup.count({ where: { storageLocationId: chat.id } })).toBe(0);
+    await prisma.storageLocation.delete({ where: { id: chat.id } });
   });
 });

@@ -78,6 +78,12 @@ export interface TelegramDialogDto {
   memberCount: number | null;
   /** The archive channel created from this chat, if any. */
   archivedChannelId: string | null;
+  /** The account may post here (owner, or admin allowed to post): it can receive backups. */
+  canPost: boolean;
+  /** The account may create forum topics here. */
+  canManageTopics: boolean;
+  /** The backup location made from this chat, if any (such a chat is never archived). */
+  backupLocationId: string | null;
   lastSeenAt: string;
 }
 

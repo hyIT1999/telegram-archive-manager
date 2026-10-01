@@ -2,6 +2,7 @@ import type { TestRequest } from '@angular/common/http/testing';
 import type {
   ApiErrorBody,
   AuthUserDto,
+  ChannelBackupDto,
   ChannelDownloadsDto,
   ChannelDto,
   ForumTopicDto,
@@ -9,6 +10,7 @@ import type {
   ImportJobDto,
   MediaDto,
   MediaSummaryDto,
+  MessageBackupDto,
   MessageDto,
   MessagePageDto,
   MessageSummaryDto,
@@ -104,6 +106,9 @@ export function makeChannel(overrides: Partial<ChannelDto> = {}): ChannelDto {
     storageFolder: null,
     downloadMedia: true,
     downloadNote: null,
+    backupLocation: null,
+    backupEnabled: false,
+    backupNote: null,
     createdAt: '2026-09-01T10:00:00.000Z',
     updatedAt: '2026-09-23T21:15:00.000Z',
     stats: { messages: 4_812, media: 640, downloadedMedia: 600, storageBytes: 3 * 1024 ** 3 },
@@ -171,6 +176,7 @@ export function makeStorageLocation(
     name: `Archive ${locationSequence}`,
     displayPath: `D:\\Archive\\Folder ${locationSequence}`,
     accountEmail: null,
+    telegram: null,
     isDefault: false,
     builtIn: false,
     lastError: null,
@@ -208,10 +214,84 @@ export function makeChannelDownloads(
   };
 }
 
-/** The settings as the server starts: download everything, two at a time; check every 15 min. */
+/** A backup chat: a private supergroup with topics, where the account may post. */
+export function makeTelegramLocation(
+  overrides: Partial<StorageLocationDto> = {},
+): StorageLocationDto {
+  return makeStorageLocation({
+    kind: 'TELEGRAM',
+    name: 'Backups',
+    displayPath: 'Telegram › Backups',
+    telegram: {
+      telegramChatId: '-1009876543210',
+      type: 'SUPERGROUP',
+      username: null,
+      isForum: true,
+    },
+    ...overrides,
+  });
+}
+
+/**
+ * The backup of a channel into "Backups": 2 of 10 messages copied, one uploading, nothing
+ * verified yet.
+ */
+export function makeChannelBackup(overrides: Partial<ChannelBackupDto> = {}): ChannelBackupDto {
+  return {
+    channelId: '0199a0b1-0000-7000-8000-000000000001',
+    backupEnabled: true,
+    backupNote: null,
+    paused: false,
+    chat: {
+      id: '0199a0b1-0000-7000-8000-5000000000b1',
+      name: 'Backups',
+      displayPath: 'Telegram › Backups',
+      telegramChatId: '-1009876543210',
+      isForum: true,
+      unavailableUntil: null,
+      lastError: null,
+    },
+    messages: { pending: 7, active: 1, completed: 2, failed: 0, skipped: 0 },
+    bytes: { total: 10 * 1024 ** 3, uploaded: 2 * 1024 ** 3, remaining: 8 * 1024 ** 3 },
+    active: [],
+    failures: [],
+    verify: { running: false, verifiedAt: null, ok: 0, problems: 0, problemSamples: [] },
+    ...overrides,
+  };
+}
+
+/** A message's copy in "Backups", sent on 25 September. */
+export function makeMessageBackup(overrides: Partial<MessageBackupDto> = {}): MessageBackupDto {
+  return {
+    chat: {
+      id: '0199a0b1-0000-7000-8000-5000000000b1',
+      name: 'Backups',
+      displayPath: 'Telegram › Backups',
+    },
+    status: 'COMPLETED',
+    stage: null,
+    skipReason: null,
+    error: null,
+    attempts: 1,
+    size: 90 * 1024 ** 2,
+    uploadedBytes: 90 * 1024 ** 2,
+    requested: false,
+    url: 'https://t.me/c/9876543210/1001',
+    completedAt: '2026-09-25T10:00:00.000Z',
+    verifiedAt: null,
+    verifyError: null,
+    ...overrides,
+  };
+}
+
+/**
+ * The settings as the server starts: download everything, two at a time; check every 15 min;
+ * backups not paused.
+ */
 export function makeSettings(
   overrides: Partial<SettingsDto['downloads']> = {},
   sync: Partial<SettingsDto['sync']> = {},
+  backups: Partial<SettingsDto['backups']> = {},
 ): SettingsDto {
   return {
     downloads: {
@@ -231,6 +311,7 @@ export function makeSettings(
       ...overrides,
     },
     sync: { intervalMinutes: 15, ...sync },
+    backups: { paused: false, ...backups },
     disk: { minFreeDiskMb: 2048 },
   };
 }
@@ -257,6 +338,7 @@ export function makeStorageList(
     capabilities: {
       localRoots: ['D:\\Archive'],
       googleDrive: { available: true, reason: null },
+      telegram: { available: true, reason: null },
       ...capabilities,
     },
   };
@@ -303,6 +385,9 @@ export function makeDialog(overrides: Partial<TelegramDialogDto> = {}): Telegram
     isForum: false,
     memberCount: 120,
     archivedChannelId: null,
+    canPost: false,
+    canManageTopics: false,
+    backupLocationId: null,
     lastSeenAt: '2026-09-24T08:00:00.000Z',
     ...overrides,
   };
@@ -401,6 +486,7 @@ export function makeMessageDetail(overrides: Partial<MessageDto> = {}): MessageD
     nextId: null,
     telegramUrl: null,
     favoritedAt: null,
+    backups: [],
     ...overrides,
   };
 }

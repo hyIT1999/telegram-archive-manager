@@ -89,7 +89,7 @@
         <label
           class="chat"
           [class.selected]="row.chat.telegramChatId === chats.selectedId()"
-          [class.locked]="row.chat.isProtected"
+          [class.locked]="row.why !== null"
         >
           <input
             type="radio"
@@ -97,23 +97,34 @@
             class="radio"
             [value]="row.chat.telegramChatId"
             [checked]="row.chat.telegramChatId === chats.selectedId()"
-            [disabled]="row.chat.isProtected"
+            [disabled]="row.why !== null"
             (change)="chats.select(row.chat)"
           />
           <span class="avatar" aria-hidden="true">{{ row.initials }}</span>
           <span class="text">
             <span class="title">{{ row.chat.title }}</span>
             <span class="meta">{{ row.description }}</span>
-            @if (row.chat.isProtected) {
-              <span class="why">Content protection is on, so this chat cannot be archived.</span>
+            @if (row.why; as why) {
+              <span class="why">{{ why }}</span>
             }
           </span>
-          @if (row.chat.isProtected || row.chat.archivedChannelId || row.chat.isForum) {
+          @if (
+            row.chat.isProtected ||
+            row.chat.archivedChannelId ||
+            row.chat.backupLocationId ||
+            row.chat.isForum
+          ) {
             <span class="badges">
               @if (row.chat.isProtected) {
                 <span class="badge badge-protected">
                   <mat-icon aria-hidden="true">lock</mat-icon>
                   Protected
+                </span>
+              }
+              @if (row.chat.backupLocationId) {
+                <span class="badge badge-backup">
+                  <mat-icon aria-hidden="true">send</mat-icon>
+                  Backup chat
                 </span>
               }
               @if (row.chat.archivedChannelId) {

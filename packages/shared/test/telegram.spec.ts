@@ -86,6 +86,26 @@ describe('telegram RPC contract', () => {
     ).toBe(false);
   });
 
+  it('names the chat to check as a backup chat, and the channel whose copies to verify', () => {
+    const request = {
+      id,
+      replyTo: `${telegramRpcChannels('tam').replyPrefix}api-1`,
+      deadline: Date.now() + 30_000,
+      call: { method: 'backup.checkChat', telegramChatId: '-1001234567890' },
+    };
+    expect(telegramRpcRequestSchema.parse(request).call).toEqual(request.call);
+    expect(
+      telegramRpcRequestSchema.safeParse({
+        ...request,
+        call: { method: 'backup.checkChat', telegramChatId: '@backups' },
+      }).success,
+    ).toBe(false);
+    expect(
+      telegramRpcRequestSchema.parse({ ...request, call: { method: 'backup.verify', channelId: id } })
+        .call,
+    ).toEqual({ method: 'backup.verify', channelId: id });
+  });
+
   it('distinguishes success and failure replies', () => {
     expect(telegramRpcReplySchema.parse({ id, ok: true })).toEqual({ id, ok: true });
     const failure = telegramRpcReplySchema.parse({

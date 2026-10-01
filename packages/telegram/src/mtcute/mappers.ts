@@ -1,14 +1,23 @@
 import {
+  Audio,
   type Chat as MtChat,
   type Message as MtMessage,
   type MessageMedia as MtMessageMedia,
+  type Photo as MtPhoto,
+  type RawDocument as MtRawDocument,
   type User as MtUser,
+  Photo,
+  RawDocument,
+  Video,
+  Voice,
   getMarkedPeerId,
   type tl,
 } from '@mtcute/core';
 import { ChatType, MediaType, MessageType } from '@tam/shared';
 import { encodeFileId } from '../file-id.js';
 import type {
+  BackupChatMessage,
+  BackupFileAttributes,
   Chat,
   ForumTopic,
   ForwardInfo,
@@ -32,6 +41,7 @@ export function mapForumTopic(raw: tl.RawForumTopic): ForumTopic {
     isPinned: raw.pinned === true,
     isHidden: raw.hidden === true,
     date: new Date(raw.date * 1000),
+    createdByMe: raw.my === true,
   };
 }
 
@@ -63,6 +73,39 @@ export function mapChat(chat: MtChat): Chat | null {
     memberCount: chat.membersCount,
     // Only available from the full chat; resolved when an import starts.
     migratedFromChatId: null,
+    ...rightsOf(raw),
+  };
+}
+
+/** Rights to send files in a supergroup; a barred member cannot back files up there. */
+function barredFromFiles(rights: tl.RawChatBannedRights | undefined): boolean {
+  return (
+    rights?.sendMessages === true ||
+    rights?.sendMedia === true ||
+    rights?.sendVideos === true ||
+    rights?.sendDocs === true
+  );
+}
+
+/**
+ * Whether the account may post files and create topics here. Only channels and supergroups can
+ * receive backups: basic groups have neither message links nor topics.
+ */
+function rightsOf(raw: tl.TypeChat): Pick<Chat, 'canPost' | 'canManageTopics'> {
+  if (raw._ !== 'channel' || raw.left === true) {
+    return { canPost: false, canManageTopics: false };
+  }
+  const owner = raw.creator === true;
+  const admin = raw.adminRights;
+  if (raw.broadcast === true) {
+    return { canPost: owner || admin?.postMessages === true, canManageTopics: false };
+  }
+  const member = !barredFromFiles(raw.bannedRights) && !barredFromFiles(raw.defaultBannedRights);
+  const topics =
+    raw.bannedRights?.manageTopics !== true && raw.defaultBannedRights?.manageTopics !== true;
+  return {
+    canPost: owner || admin !== undefined || member,
+    canManageTopics: raw.forum === true && (owner || admin?.manageTopics === true || topics),
   };
 }
 
@@ -277,4 +320,129 @@ function toJsonSafe(value: unknown): unknown {
 
 function isLong(value: object): value is { toString(): string } {
   return 'low' in value && 'high' in value && 'unsigned' in value;
+}
+
+/**
+ * Formatting kinds sent again as they were stored (the inverse of mapEntity). Mentions of users
+ * and custom emoji need references this account may not have (and custom emoji need Premium):
+ * their text stays, unformatted.
+ */
+const SENDABLE_ENTITIES: Readonly<Record<string, readonly string[]>> = {
+  bold: [],
+  italic: [],
+  underline: [],
+  strike: [],
+  spoiler: [],
+  code: [],
+  pre: ['language'],
+  textUrl: ['url'],
+  url: [],
+  email: [],
+  phone: [],
+  mention: [],
+  hashtag: [],
+  cashtag: [],
+  botCommand: [],
+  bankCard: [],
+  blockquote: ['collapsed'],
+};
+
+/** The stored formatting of a text as Telegram takes it when sending; unknown kinds are left out. */
+export function toTlEntities(entities: readonly MessageEntity[]): tl.TypeMessageEntity[] {
+  return entities.flatMap((entity) => {
+    const fields = SENDABLE_ENTITIES[entity.kind];
+    if (!fields || !Number.isInteger(entity.offset) || !Number.isInteger(entity.length)) {
+      return [];
+    }
+    const params: Record<string, unknown> = {};
+    for (const field of fields) {
+      const value = entity.params?.[field];
+      if (typeof value === 'string' || typeof value === 'boolean') {
+        params[field] = value;
+      }
+    }
+    if (entity.kind === 'textUrl' && typeof params['url'] !== 'string') {
+      return [];
+    }
+    if (entity.kind === 'pre' && typeof params['language'] !== 'string') {
+      params['language'] = '';
+    }
+    const name = `messageEntity${entity.kind.charAt(0).toUpperCase()}${entity.kind.slice(1)}`;
+    return [{ _: name, offset: entity.offset, length: entity.length, ...params } as tl.TypeMessageEntity];
+  });
+}
+
+/** How a file of an archived message is sent again, from what Telegram says about it now. */
+export function backupAttributesOf(file: MtPhoto | MtRawDocument): BackupFileAttributes {
+  const base: BackupFileAttributes = {
+    kind: 'document',
+    fileName: null,
+    mimeType: null,
+    width: null,
+    height: null,
+    duration: null,
+    supportsStreaming: false,
+    performer: null,
+    title: null,
+  };
+  if (file instanceof Photo) {
+    return { ...base, kind: 'photo', mimeType: 'image/jpeg', width: file.width, height: file.height };
+  }
+  const document = { ...base, fileName: file.fileName, mimeType: file.mimeType || null };
+  if (file instanceof Video) {
+    const video = file.raw.attributes.find(
+      (attribute): attribute is tl.RawDocumentAttributeVideo =>
+        attribute._ === 'documentAttributeVideo',
+    );
+    return {
+      ...document,
+      kind: file.isRound ? 'video_note' : file.isAnimation ? 'animation' : 'video',
+      width: file.width,
+      height: file.height,
+      duration: file.duration,
+      supportsStreaming: video?.supportsStreaming === true,
+    };
+  }
+  if (file instanceof Audio) {
+    return {
+      ...document,
+      kind: 'audio',
+      duration: file.duration,
+      performer: file.performer,
+      title: file.title,
+    };
+  }
+  if (file instanceof Voice) {
+    return { ...document, kind: 'voice', duration: file.duration };
+  }
+  // Documents, and stickers (sent again as their file).
+  return document;
+}
+
+/** A message of a backup chat, as Verify and crash recovery compare it. */
+export function mapBackupChatMessage(message: MtMessage): BackupChatMessage {
+  const raw = message.raw;
+  const reply = raw.replyTo?._ === 'messageReplyHeader' ? raw.replyTo : null;
+  const media = message.media;
+  const file = media instanceof Photo || media instanceof RawDocument ? media : null;
+  return {
+    id: message.id,
+    date: message.date,
+    isOutgoing: message.isOutgoing,
+    isForwarded: raw._ === 'message' && raw.fwdFrom !== undefined,
+    isService: message.isService,
+    groupedId: message.groupedId ? message.groupedId.toString() : null,
+    threadId: reply?.forumTopic ? (reply.replyToTopId ?? reply.replyToMsgId ?? null) : null,
+    text: message.text,
+    media: file
+      ? {
+          type: mapMedia(file, '0', String(message.id))[0]?.type ?? null,
+          fileName: file instanceof Photo ? null : file.fileName,
+          size: sizeOf(file.fileSize),
+          fileUniqueId: file.uniqueFileId,
+          width: file instanceof Photo ? file.width : null,
+          height: file instanceof Photo ? file.height : null,
+        }
+      : null,
+  };
 }

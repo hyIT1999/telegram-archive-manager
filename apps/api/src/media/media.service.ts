@@ -19,6 +19,7 @@ import {
 import {
   type StorageDriver,
   THUMBNAIL_FOLDER,
+  isDriverLocation,
   thumbnailContentType,
   thumbnailPath,
 } from '@tam/storage';
@@ -194,7 +195,9 @@ export class MediaService {
     if (
       media.downloadStatus !== DownloadStatus.DOWNLOADED ||
       media.storageKey === null ||
-      location === null
+      location === null ||
+      // Files are written to folders and Drive; a Telegram backup chat never holds one here.
+      !isDriverLocation(location)
     ) {
       throw new ConflictException({
         code: DownloadErrorCode.MEDIA_NOT_DOWNLOADED,

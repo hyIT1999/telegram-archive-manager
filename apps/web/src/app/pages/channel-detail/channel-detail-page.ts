@@ -8,6 +8,7 @@ import { filter, merge } from 'rxjs';
 import { LiveEvents } from '../../core/live/live-events';
 import { liveRefresh } from '../../core/live/live-refresh';
 import { channelHandle, chatTypeLabel, telegramUrl } from '../../features/channels/channel-labels';
+import { ChannelBackupPanel } from '../../features/backups/channel-backup-panel';
 import { ChannelsApi } from '../../features/channels/channels-api';
 import { ChannelDownloadsPanel } from '../../features/downloads/channel-downloads-panel';
 import { ChannelImportPanel } from '../../features/imports/channel-import-panel';
@@ -25,6 +26,7 @@ import { BytesPipe } from '../../shared/pipes/bytes-pipe';
 @Component({
   selector: 'app-channel-detail-page',
   imports: [
+    ChannelBackupPanel,
     ChannelDownloadsPanel,
     ChannelImportPanel,
     ChannelSyncPanel,
@@ -91,7 +93,7 @@ export class ChannelDetailPage {
     return channel ? chatTypeLabel(channel.type) : '';
   });
 
-  /** A switch of the downloads or sync panel changed the channel. */
+  /** A switch of the downloads, sync or backup panel changed the channel. */
   protected updated(channel: ChannelDto): void {
     this.channel.set(channel);
   }

@@ -23,6 +23,7 @@ import { PageHeader } from '../../shared/components/page-header/page-header';
 import { type ChannelDto, type ImportJobDto, detailString, toApiError } from '../../shared/models';
 import { channelHandle, channelInitials, chatTypeLabel } from '../channels/channel-labels';
 import { ChannelsApi, type CreatedChannel } from '../channels/channels-api';
+import { BACKUP_KINDS, DOWNLOAD_KINDS } from '../storage/storage-kinds';
 import { StorageLocationList } from '../storage/storage-location-list';
 import { ChatPicker } from '../telegram/chat-picker';
 import { TelegramChats } from '../telegram/telegram-chats';
@@ -89,6 +90,8 @@ export class ImportWizardPage {
   private readonly stepTitle = viewChild<ElementRef<HTMLElement>>('stepTitle');
 
   protected readonly steps = WIZARD_STEPS;
+  protected readonly downloadKinds = DOWNLOAD_KINDS;
+  protected readonly backupKinds = BACKUP_KINDS;
 
   /** The furthest step whose prerequisites are met. */
   protected readonly reachable = computed(() => {
@@ -148,15 +151,31 @@ export class ImportWizardPage {
     source: this.channel,
     computation: (channel, previous) => channel?.storageLocation?.id ?? previous?.value ?? null,
   });
+  /** Also back up to a Telegram chat (step 4, optional); on when the channel already does. */
+  protected readonly wantsBackup = linkedSignal<ChannelDto | null, boolean>({
+    source: this.channel,
+    computation: (channel, previous) =>
+      (channel?.backupLocation ?? null) !== null || (previous?.value ?? false),
+  });
+  /** The backup chat picked in step 4; starts from the channel's own. */
+  protected readonly backupChoice = linkedSignal<ChannelDto | null, string | null>({
+    source: this.channel,
+    computation: (channel, previous) => channel?.backupLocation?.id ?? previous?.value ?? null,
+  });
   protected readonly storageSaved = computed(() => {
-    const saved = this.channel()?.storageLocation?.id;
-    return saved !== undefined && saved === this.storageChoice();
+    const channel = this.channel();
+    const saved = channel?.storageLocation?.id;
+    const backupSaved =
+      !this.wantsBackup() || (channel?.backupLocation?.id ?? null) === this.backupChoice();
+    return saved !== undefined && saved === this.storageChoice() && backupSaved;
   });
   protected readonly savingStorage = signal(false);
   protected readonly savingDownloads = signal(false);
   protected readonly downloadsError = signal<string | null>(null);
   protected readonly savingSync = signal(false);
   protected readonly syncError = signal<string | null>(null);
+  protected readonly savingBackup = signal(false);
+  protected readonly backupError = signal<string | null>(null);
   protected readonly storageError = linkedSignal<string | null, string | null>({
     source: this.storageChoice,
     computation: () => null,
@@ -253,13 +272,24 @@ export class ImportWizardPage {
   protected saveStorage(): void {
     const channel = this.channel();
     const storageLocationId = this.storageChoice();
-    if (!channel || !storageLocationId || this.savingStorage()) {
+    const backupLocationId = this.wantsBackup() ? this.backupChoice() : null;
+    if (
+      !channel ||
+      !storageLocationId ||
+      (this.wantsBackup() && !backupLocationId) ||
+      this.savingStorage()
+    ) {
       return;
     }
     this.savingStorage.set(true);
     this.storageError.set(null);
     this.channelsApi
-      .update(channel.id, { storageLocationId })
+      .update(channel.id, {
+        storageLocationId,
+        ...(backupLocationId && backupLocationId !== channel.backupLocation?.id
+          ? { backupLocationId }
+          : {}),
+      })
       .pipe(
         finalize(() => this.savingStorage.set(false)),
         takeUntilDestroyed(this.destroyRef),
@@ -288,6 +318,29 @@ export class ImportWizardPage {
         next: (updated) => this.channel.set(updated),
         error: (error: unknown) => {
           this.downloadsError.set(toApiError(error).message);
+          change.source.checked = !change.checked;
+        },
+      });
+  }
+
+  /** Switches the channel's automatic Telegram backup (saved at once). */
+  protected setBackupEnabled(change: MatSlideToggleChange): void {
+    const channel = this.channel();
+    if (!channel || this.savingBackup()) {
+      return;
+    }
+    this.savingBackup.set(true);
+    this.backupError.set(null);
+    this.channelsApi
+      .update(channel.id, { backupEnabled: change.checked })
+      .pipe(
+        finalize(() => this.savingBackup.set(false)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated) => this.channel.set(updated),
+        error: (error: unknown) => {
+          this.backupError.set(toApiError(error).message);
           change.source.checked = !change.checked;
         },
       });

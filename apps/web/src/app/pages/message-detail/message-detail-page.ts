@@ -4,6 +4,7 @@ import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { Router, RouterLink } from '@angular/router';
+import { MessageBackup } from '../../features/backups/message-backup';
 import { FavoriteButton } from '../../features/favorites/favorite-button';
 import { ImageViewer } from '../../features/media/image-viewer/image-viewer';
 import { viewerImages } from '../../features/media/image-viewer/viewer-image';
@@ -38,6 +39,9 @@ import {
 } from '../../shared/models';
 import { BytesPipe } from '../../shared/pipes/bytes-pipe';
 
+/** Messages that cannot be recreated in a Telegram backup chat. */
+const NOT_BACKED_UP = new Set<MessageDto['type']>(['SERVICE', 'POLL', 'OTHER']);
+
 const MEDIA_TYPES = new Set([
   ...CATEGORY_TYPES.videos,
   ...CATEGORY_TYPES.images,
@@ -48,8 +52,8 @@ const MEDIA_TYPES = new Set([
 /**
  * One message: its file in the right viewer (video and audio player, image viewer, PDF preview,
  * file card), or a Download button while the file is not in the archive yet; its album, formatted
- * text, favorite heart and tags, where it sits in Telegram, and the previous and next message of
- * the same topic and kind.
+ * text, favorite heart and tags, where it sits in Telegram, its Telegram backup, and the previous
+ * and next message of the same topic and kind.
  */
 @Component({
   selector: 'app-message-detail-page',
@@ -63,6 +67,7 @@ const MEDIA_TYPES = new Set([
     MatButton,
     MatIcon,
     MediaDownloadControl,
+    MessageBackup,
     MessageText,
     Notice,
     PageHeader,
@@ -173,6 +178,11 @@ export class MessageDetailPage {
   protected readonly albumPosition = computed(() => {
     const data = this.data();
     return data ? data.album.findIndex((item) => item.id === data.id) + 1 : 0;
+  });
+  /** Whether the message can have a copy in a Telegram backup chat. */
+  protected readonly backupable = computed(() => {
+    const data = this.data();
+    return data !== undefined && !NOT_BACKED_UP.has(data.type);
   });
   protected readonly serviceLabel = computed(() => {
     const data = this.data();

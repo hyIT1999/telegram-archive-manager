@@ -39,6 +39,12 @@ export interface ChannelDto {
   downloadMedia: boolean;
   /** Why automatic downloads stopped by themselves, e.g. the chat can no longer be read. */
   downloadNote: string | null;
+  /** The Telegram chat that receives backup copies of the messages; null until chosen. */
+  backupLocation: ChannelStorageLocationDto | null;
+  /** Every message is backed up automatically, new ones included. */
+  backupEnabled: boolean;
+  /** Why backups stopped by themselves, e.g. the backup chat refused posts. */
+  backupNote: string | null;
   createdAt: string;
   updatedAt: string;
   stats: ChannelStatsDto;
@@ -60,6 +66,10 @@ export const updateChannelRequestSchema = z
     downloadMedia: z.boolean().optional(),
     /** Keep the channel up to date with new messages. */
     syncEnabled: z.boolean().optional(),
+    /** The Telegram chat (a location of kind TELEGRAM) that receives backup copies. */
+    backupLocationId: z.uuid().optional(),
+    /** Back up every message automatically. */
+    backupEnabled: z.boolean().optional(),
   })
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'Nothing to change',

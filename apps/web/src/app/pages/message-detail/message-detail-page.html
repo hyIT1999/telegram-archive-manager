@@ -296,6 +296,18 @@
         </dl>
       </section>
 
+      @if (backupable()) {
+        <section class="surface-card panel" aria-labelledby="backup-title">
+          <h2 id="backup-title" class="section-title">Telegram backup</h2>
+          <app-message-backup
+            [messageId]="item.id"
+            [channelId]="item.channel.id"
+            [backups]="item.backups"
+            [album]="item.album.length > 1"
+          />
+        </section>
+      }
+
       @if (media(); as file) {
         <section class="surface-card panel" aria-labelledby="file-title">
           <h2 id="file-title" class="section-title">File</h2>

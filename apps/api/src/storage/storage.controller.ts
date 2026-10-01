@@ -3,6 +3,7 @@ import { Throttle } from '@nestjs/throttler';
 import {
   type ConnectGoogleDriveRequest,
   type CreateLocalLocationRequest,
+  type CreateTelegramLocationRequest,
   type GoogleDriveConnectDto,
   type GoogleDriveFlowParam,
   type GoogleDrivePollDto,
@@ -15,6 +16,7 @@ import {
   type UpdateStorageLocationRequest,
   connectGoogleDriveRequestSchema,
   createLocalLocationRequestSchema,
+  createTelegramLocationRequestSchema,
   googleDriveFlowParamSchema,
   idParamSchema,
   localFoldersQuerySchema,
@@ -45,6 +47,18 @@ export class StorageController {
     @Body({ schema: createLocalLocationRequestSchema }) request: CreateLocalLocationRequest,
   ): Promise<StorageLocationDto> {
     return this.locations.createLocal(request);
+  }
+
+  /**
+   * Adds a Telegram chat of the account (from its chat list) that receives backup copies. The
+   * worker reads the chat first: the account must be allowed to post (and to create topics in a
+   * forum), and the chat must not be archived itself.
+   */
+  @Post('telegram')
+  createTelegram(
+    @Body({ schema: createTelegramLocationRequestSchema }) request: CreateTelegramLocationRequest,
+  ): Promise<StorageLocationDto> {
+    return this.locations.createTelegram(request);
   }
 
   @Patch('locations/:id')

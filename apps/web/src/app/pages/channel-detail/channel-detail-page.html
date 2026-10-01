@@ -106,6 +106,12 @@
             }
           </dd>
         </div>
+        @if (item.backupLocation; as backup) {
+          <div>
+            <dt>Backed up to</dt>
+            <dd>{{ backup.displayPath }}</dd>
+          </div>
+        }
         <div>
           <dt>History</dt>
           <dd>{{ item.backfillComplete ? 'Fully imported' : 'Not fully imported yet' }}</dd>
@@ -139,6 +145,10 @@
 
     <section class="surface-card panel" aria-labelledby="channel-downloads-title">
       <app-channel-downloads-panel [channel]="item" (channelChange)="updated($event)" />
+    </section>
+
+    <section class="surface-card panel" aria-labelledby="channel-backup-title">
+      <app-channel-backup-panel [channel]="item" (channelChange)="updated($event)" />
     </section>
   </div>
 } @else {

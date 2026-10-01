@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthRequiredError,
   ChatUnavailableError,
+  EntitiesRejectedError,
   FileReferenceExpiredError,
+  FileTooLargeError,
   FloodWaitError,
   LoginStepError,
   TelegramError,
   TelegramTimeoutError,
+  UploadIncompleteError,
   toTelegramError,
 } from '../src/index.js';
 
@@ -70,6 +73,21 @@ describe('toTelegramError', () => {
     expect((payment as LoginStepError).code).toBe('PAYMENT_REQUIRED');
     const signUp = toTelegramError(new MtUnsupportedError('Signup is no longer supported by Telegram for non-official clients'));
     expect((signUp as LoginStepError).code).toBe('SIGN_UP_REQUIRED');
+  });
+
+  it('tells what went wrong while sending a backup', () => {
+    const expired = toTelegramError(rpc(400, 'FILE_REFERENCE_2_EXPIRED'));
+    expect(expired).toMatchObject({ index: 2 });
+    expect(toTelegramError(rpc(400, 'FILE_REFERENCE_EXPIRED'))).toMatchObject({ index: null });
+    const missing = toTelegramError(rpc(400, 'FILE_PART_5_MISSING'));
+    expect(missing).toBeInstanceOf(UploadIncompleteError);
+    expect(missing.message).toContain('FILE_PART_5_MISSING');
+    expect(toTelegramError(rpc(400, 'FILE_PARTS_INVALID'))).toBeInstanceOf(UploadIncompleteError);
+    expect(toTelegramError(rpc(400, 'ENTITY_BOUNDS_INVALID'))).toBeInstanceOf(EntitiesRejectedError);
+    expect(toTelegramError(rpc(420, 'FLOOD_PREMIUM_WAIT_7'))).toMatchObject({ seconds: 7 });
+    expect(
+      toTelegramError(new MtArgumentError('File is too large (max 4000 parts, got 5000)')),
+    ).toBeInstanceOf(FileTooLargeError);
   });
 
   it('keeps unknown Telegram errors recognizable and other errors untouched', () => {

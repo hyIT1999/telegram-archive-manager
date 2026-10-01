@@ -4,7 +4,7 @@ import { REDIS_KEYS } from '@tam/shared';
 import { AuthRequiredError, type Chat } from '@tam/telegram';
 import type { Redis } from 'ioredis';
 import { errorMessage } from '../common/error-message.js';
-import { SYNC_NOTES } from '../common/sync-notes.js';
+import { BACKUP_NOTES, SYNC_NOTES } from '../common/sync-notes.js';
 import { ACCOUNT_KEY, TelegramAuthService } from './telegram-auth.service.js';
 import {
   TELEGRAM_API_PROVIDER,
@@ -75,17 +75,26 @@ export class TelegramDialogsService {
             isProtected: chat.isProtected,
             memberCount: chat.memberCount,
           };
+          const rights = { canPost: chat.canPost, canManageTopics: chat.canManageTopics };
           await tx.telegramDialog.upsert({
             where: { telegramChatId },
-            create: { telegramChatId, ...details, lastSeenAt: seenAt },
-            update: { ...details, lastSeenAt: seenAt },
+            create: { telegramChatId, ...details, ...rights, lastSeenAt: seenAt },
+            update: { ...details, ...rights, lastSeenAt: seenAt },
           });
-          // Archived channels follow Telegram; one that turned protected stops syncing.
+          // Archived channels follow Telegram; one that turned protected stops syncing and
+          // backing up.
           await tx.channel.updateMany({
             where: { telegramChatId },
             data: {
               ...details,
-              ...(chat.isProtected ? { syncEnabled: false, syncNote: SYNC_NOTES.protected } : {}),
+              ...(chat.isProtected
+                ? {
+                    syncEnabled: false,
+                    syncNote: SYNC_NOTES.protected,
+                    backupEnabled: false,
+                    backupNote: BACKUP_NOTES.protected,
+                  }
+                : {}),
             },
           });
         }
@@ -97,6 +106,42 @@ export class TelegramDialogsService {
       },
       { timeout: 120_000, maxWait: 10_000 },
     );
+  }
+
+  /**
+   * Reads one chat again (a backup chat, or one about to become one) into the chat list: its
+   * title and forum flag, and whether the account may post and create topics there. The api
+   * decides from the stored row once this resolves.
+   */
+  async checkChat(chatId: string): Promise<void> {
+    await this.auth.requireReady();
+    let chat: Chat;
+    try {
+      chat = await this.telegram.api.refreshChat(chatId);
+    } catch (error) {
+      if (error instanceof AuthRequiredError) {
+        await this.auth.markSessionRevoked();
+      }
+      throw error;
+    }
+    const telegramChatId = BigInt(chat.id);
+    const details = {
+      title: chat.title,
+      username: chat.username,
+      type: chat.type,
+      accessHash: chat.accessHash === null ? null : BigInt(chat.accessHash),
+      isForum: chat.isForum,
+      isProtected: chat.isProtected,
+      memberCount: chat.memberCount,
+      canPost: chat.canPost,
+      canManageTopics: chat.canManageTopics,
+      lastSeenAt: new Date(),
+    };
+    await this.prisma.telegramDialog.upsert({
+      where: { telegramChatId },
+      create: { telegramChatId, ...details },
+      update: details,
+    });
   }
 
   /** The api reports the chat list as `refreshing` while this flag exists. */

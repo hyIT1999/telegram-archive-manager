@@ -14,6 +14,13 @@ export interface Chat {
   memberCount: number | null;
   /** Marked id of the basic group this supergroup was upgraded from. */
   migratedFromChatId: string | null;
+  /**
+   * The account may post messages with files here: the owner, an admin allowed to post, or (in a
+   * supergroup) a member not barred from sending. Such a chat can receive backups.
+   */
+  canPost: boolean;
+  /** The account may create forum topics here. */
+  canManageTopics: boolean;
 }
 
 export interface MessageEntity {
@@ -116,6 +123,8 @@ export interface ForumTopic {
   isHidden: boolean;
   /** When the topic was created. */
   date: Date;
+  /** This account created the topic. */
+  createdByMe: boolean;
 }
 
 export interface TelegramUser {
@@ -178,3 +187,109 @@ export type UpdateEvent =
   | { kind: 'delete_messages'; chatId: string | null; messageIds: string[] };
 
 export type UpdateHandler = (event: UpdateEvent) => void | Promise<void>;
+
+// ---------------------------------------------------------------------------
+// Backups: copies of archived messages sent as NEW messages to a chat of the account's.
+// ---------------------------------------------------------------------------
+
+/** How a file is sent again, with the attributes Telegram shows (player, duration, name…). */
+export interface BackupFileAttributes {
+  kind: 'photo' | 'video' | 'animation' | 'video_note' | 'audio' | 'voice' | 'document';
+  fileName: string | null;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
+  /** Seconds. */
+  duration: number | null;
+  /** A video that can play before it is fully downloaded. */
+  supportsStreaming: boolean;
+  /** Audio only. */
+  performer: string | null;
+  title: string | null;
+}
+
+/** The file of an archived message, opened for uploading again. */
+export interface BackupSourceFile {
+  /** Its bytes, read from Telegram as the upload consumes them (never stored on disk). */
+  stream: ReadableStream<Uint8Array>;
+  size: number;
+  attributes: BackupFileAttributes;
+}
+
+/** What to upload: the bytes (from Telegram or from a downloaded copy) and how to send them. */
+export interface BackupFileInput {
+  stream: ReadableStream<Uint8Array>;
+  size: number;
+  attributes: BackupFileAttributes;
+  /** JPEG, at most 200 KB and 320 px, shown before a video loads; null for none. */
+  thumbnail: Uint8Array | null;
+}
+
+/**
+ * A file uploaded for a backup chat and stored by Telegram, not sent yet. JSON-safe, so an album
+ * that is interrupted keeps the files already uploaded.
+ */
+export interface UploadedBackupFile {
+  kind: 'photo' | 'document';
+  id: string;
+  accessHash: string;
+  /** Base64. */
+  fileReference: string;
+}
+
+/** Text with its formatting, as the archive stored it. */
+export interface BackupText {
+  text: string;
+  entities: MessageEntity[];
+}
+
+export interface BackupMediaItem {
+  file: UploadedBackupFile;
+  caption: BackupText | null;
+}
+
+/** One new message: a text, one file, or an album (up to 10 files, each with its caption). */
+export type BackupPayload =
+  | { kind: 'text'; text: BackupText; disableWebPreview: boolean }
+  | { kind: 'media'; items: BackupMediaItem[] };
+
+export interface SendBackupOptions {
+  /** The forum topic of the backup chat; null outside forums (and for General). */
+  threadId: number | null;
+  /**
+   * One per message to send, stored before sending: Telegram refuses a random id it has seen,
+   * so repeating a send whose outcome is unknown cannot post twice.
+   */
+  randomIds: readonly bigint[];
+}
+
+/** A message the backup chat received, in the order of the random ids. */
+export interface SentBackupMessage {
+  messageId: number;
+  /** Album id in the backup chat. */
+  groupedId: string | null;
+}
+
+/** A message of a backup chat, as Verify and crash recovery read it. */
+export interface BackupChatMessage {
+  id: number;
+  date: Date;
+  /** Sent by this account. */
+  isOutgoing: boolean;
+  /** Carries a "Forwarded from" header (a backup never does). */
+  isForwarded: boolean;
+  isService: boolean;
+  groupedId: string | null;
+  /** Forum topic; null outside forums and in General. */
+  threadId: number | null;
+  /** The text, or the caption of a file. */
+  text: string;
+  media: {
+    type: MediaType | null;
+    fileName: string | null;
+    size: number | null;
+    fileUniqueId: string;
+    width: number | null;
+    height: number | null;
+  } | null;
+}

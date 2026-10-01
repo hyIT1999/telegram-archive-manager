@@ -1,0 +1,266 @@
+<h2 id="channel-backup-title" class="panel-title">Telegram backup</h2>
+
+@if (channel().isProtected) {
+  <p class="hint">Content protection is on for this chat, so it is never backed up.</p>
+} @else if (channel().migratedToChannelId; as supergroupId) {
+  <p class="hint">
+    This group was upgraded to a supergroup. Its messages are backed up with
+    <a [routerLink]="['/channels', supergroupId]">the supergroup</a>.
+  </p>
+} @else if (!channel().backupLocation || choosing()) {
+  <p class="hint">
+    Copies of the messages are posted in a Telegram chat of yours, with their files uploaded again
+    (nothing is forwarded), so they stay when the originals are deleted.
+  </p>
+  @if (choosing()) {
+    <app-storage-location-list selectable [kinds]="backupKinds" [(selectedId)]="choice" />
+    @if (channel().backupLocation) {
+      <p class="hint">
+        Messages already backed up are copied again into the new chat; the copies in the current
+        chat stay there.
+      </p>
+    }
+    @if (actionError(); as message) {
+      <app-notice tone="error">{{ message }}</app-notice>
+    }
+    <div class="actions">
+      @if (channel().backupLocation) {
+        <button matButton type="button" (click)="closePicker()">Cancel</button>
+      }
+      <button
+        matButton="filled"
+        type="button"
+        [disabled]="!choice() || choice() === channel().backupLocation?.id || savingChat()"
+        [showProgress]="savingChat()"
+        (click)="saveChat()"
+      >
+        Use this chat
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    </div>
+  } @else {
+    <div class="actions">
+      <button matButton="tonal" type="button" (click)="openPicker()">
+        <mat-icon>send</mat-icon>
+        Choose a backup chat
+      </button>
+    </div>
+  }
+} @else if (loadError(); as message) {
+  <app-notice tone="error">{{ message }}</app-notice>
+  <div class="actions">
+    <button matButton="tonal" type="button" (click)="reload()">
+      <mat-icon>refresh</mat-icon>
+      Try again
+    </button>
+  </div>
+} @else if (data(); as item) {
+  @if (item.chat; as chat) {
+    <div class="location">
+      <mat-icon aria-hidden="true">send</mat-icon>
+      <span>
+        Sent to <strong>{{ chat.name }}</strong> ({{ chat.displayPath }})
+        @if (chat.isForum) {
+          · topic by topic
+        }
+      </span>
+      <button matButton type="button" class="change" (click)="openPicker()">Change</button>
+    </div>
+    @if (chat.unavailableUntil) {
+      <app-notice tone="warning" title="The backup chat waits">
+        Backups to it continue at {{ chat.unavailableUntil | date: 'shortTime' }}.
+        {{ chat.lastError }}
+      </app-notice>
+    } @else if (chat.lastError) {
+      <app-notice tone="warning" title="The backup chat has a problem">
+        {{ chat.lastError }} Check it again under <a routerLink="/settings">Settings</a>.
+      </app-notice>
+    }
+  }
+
+  <div class="switch">
+    <mat-slide-toggle
+      [checked]="item.backupEnabled"
+      [disabled]="switching()"
+      (change)="toggle($event)"
+    >
+      Back up automatically
+    </mat-slide-toggle>
+    <p class="hint">
+      @if (item.backupEnabled) {
+        Every message is copied, oldest first, and new ones follow. Nothing is sent while an import
+        of the channel runs.
+      } @else {
+        Nothing is backed up on its own. Messages you back up one by one, on their page, still are.
+      }
+    </p>
+  </div>
+
+  @if (item.backupNote; as note) {
+    <app-notice tone="warning" title="Backups stopped">{{ note }}</app-notice>
+  }
+  @if (item.paused) {
+    <app-notice tone="info" icon="pause_circle">
+      Every backup is paused. <a routerLink="/settings">Resume backups in Settings</a>.
+    </app-notice>
+  }
+
+  @if (wanted(); as wanted) {
+    @if (wanted.messages > 0) {
+      <div class="progress">
+        <mat-progress-bar
+          mode="determinate"
+          [value]="wanted.percent"
+          [attr.aria-label]="'Telegram backup of ' + channel().title"
+        />
+        <p class="hint">
+          {{ item.messages.completed }} of {{ wanted.messages }} messages ·
+          {{ item.bytes.uploaded | bytes }} of {{ wanted.bytes | bytes }}
+          @if (timeLeft(); as left) {
+            · about {{ left }} left at the current speed
+          }
+        </p>
+      </div>
+    } @else {
+      <p class="hint">No messages to back up yet.</p>
+    }
+  }
+
+  <dl class="counts">
+    <div>
+      <dt>Waiting</dt>
+      <dd>{{ item.messages.pending }}</dd>
+    </div>
+    <div>
+      <dt>Uploading</dt>
+      <dd>{{ item.messages.active }}</dd>
+    </div>
+    <div>
+      <dt>Backed up</dt>
+      <dd>{{ item.messages.completed }}</dd>
+    </div>
+    <div>
+      <dt>Failed</dt>
+      <dd>{{ item.messages.failed }}</dd>
+    </div>
+    <div>
+      <dt>Skipped</dt>
+      <dd>{{ item.messages.skipped }}</dd>
+    </div>
+  </dl>
+
+  @if (active().length > 0) {
+    <ul class="active" aria-label="Backing up now">
+      @for (row of active(); track row.item.messageId) {
+        <li>
+          <a class="name" [routerLink]="['/messages', row.item.messageId]">{{ row.item.name }}</a>
+          <mat-progress-bar
+            [mode]="row.percent === null ? 'query' : 'determinate'"
+            [value]="row.percent ?? 0"
+            [attr.aria-label]="row.item.name"
+          />
+          <p class="hint">
+            {{ row.stageLabel }}
+            @if (row.item.size !== null) {
+              · {{ row.item.uploadedBytes | bytes }} of {{ row.item.size | bytes }}
+            }
+            @if (speedText(row); as speed) {
+              · {{ speed }}
+            }
+            @if (row.item.requested) {
+              · asked for
+            }
+          </p>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (item.failures.length > 0) {
+    <div class="problems">
+      <h3 class="subtitle">Latest failures</h3>
+      <ul>
+        @for (failure of item.failures; track failure.messageId) {
+          <li>
+            <a [routerLink]="['/messages', failure.messageId]">{{ failure.name }}</a>
+            <span class="hint">
+              {{ failure.error ?? 'Failed' }} · {{ failure.attempts }}
+              {{ failure.attempts === 1 ? 'attempt' : 'attempts' }}
+            </span>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  @if (retried(); as queued) {
+    <app-notice tone="success"
+      >{{ queued }} failed {{ queued === 1 ? 'message is' : 'messages are' }} back in
+      line.</app-notice
+    >
+  }
+  @if (actionError(); as message) {
+    <app-notice tone="error">{{ message }}</app-notice>
+  }
+
+  <div class="verify">
+    <h3 class="subtitle">Verify</h3>
+    @if (item.verify.running) {
+      <p class="hint running" role="status">
+        <mat-progress-spinner mode="indeterminate" diameter="16" />
+        Checking the copies in Telegram…
+      </p>
+    } @else if (item.verify.verifiedAt; as verifiedAt) {
+      <p class="hint">
+        Last checked {{ verifiedAt | date: 'medium' }}: {{ item.verify.ok }} as expected
+        @if (item.verify.problems > 0) {
+          · {{ item.verify.problems }} with a problem
+        }
+      </p>
+    } @else {
+      <p class="hint">
+        Verify reads every copy back from the backup chat: that it exists, is not a forward, and has
+        the right file, size and text.
+      </p>
+    }
+    @if (item.verify.problemSamples.length > 0) {
+      <ul class="problems">
+        @for (problem of item.verify.problemSamples; track problem.messageId) {
+          <li>
+            <a [routerLink]="['/messages', problem.messageId]">{{ problem.name }}</a>
+            <span class="hint">{{ problem.error }}</span>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+
+  <div class="actions">
+    @if (item.messages.failed > 0) {
+      <button
+        matButton="tonal"
+        type="button"
+        [disabled]="retrying()"
+        [showProgress]="retrying()"
+        (click)="retryFailed()"
+      >
+        <mat-icon>replay</mat-icon>
+        Retry {{ item.messages.failed }} failed
+        <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+      </button>
+    }
+    <button
+      matButton="tonal"
+      type="button"
+      [disabled]="verifying() || item.verify.running || item.messages.completed === 0"
+      [showProgress]="verifying()"
+      (click)="verify()"
+    >
+      <mat-icon>fact_check</mat-icon>
+      Verify backup
+      <mat-progress-spinner progressIndicator mode="indeterminate" diameter="18" />
+    </button>
+  </div>
+} @else {
+  <app-skeleton variant="line" [count]="3" label="Loading the backup…" />
+}

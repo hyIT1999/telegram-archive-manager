@@ -2,14 +2,22 @@ import { MtArgumentError, MtPeerNotFoundError, MtTimeoutError, MtUnsupportedErro
 import { TelegramErrorCode } from '@tam/shared';
 import {
   AuthRequiredError,
+  CaptionTooLongError,
   ChatProtectedError,
   ChatUnavailableError,
+  ChatWriteForbiddenError,
+  EntitiesRejectedError,
   FileReferenceExpiredError,
+  FileTooLargeError,
   FloodWaitError,
   LoginStepError,
   NotAForumError,
+  PeerFloodError,
+  RandomIdDuplicateError,
   TelegramError,
   TelegramTimeoutError,
+  TopicUnavailableError,
+  UploadIncompleteError,
 } from '../errors.js';
 
 /** Telegram answers meaning the stored session is gone. */
@@ -32,6 +40,18 @@ const CHAT_GONE = new Set([
   'CHAT_ID_INVALID',
   'PEER_ID_INVALID',
 ]);
+
+/** Telegram answers meaning the account may not post (files) in the chat. */
+const WRITE_FORBIDDEN = new Set([
+  'CHAT_WRITE_FORBIDDEN',
+  'CHAT_ADMIN_REQUIRED',
+  'CHAT_RESTRICTED',
+  'CHAT_GUEST_SEND_FORBIDDEN',
+  'USER_BANNED_IN_CHANNEL',
+]);
+
+/** Telegram answers meaning the forum topic to post in is gone or closed. */
+const TOPIC_GONE = new Set(['TOPIC_DELETED', 'TOPIC_CLOSED', 'TOPIC_ID_INVALID']);
 
 const LOGIN_ERRORS: Readonly<Record<string, [TelegramErrorCode, string]>> = {
   PHONE_NUMBER_INVALID: [TelegramErrorCode.PHONE_NUMBER_INVALID, 'Telegram does not accept this phone number'],
@@ -64,6 +84,9 @@ export function toTelegramError(error: unknown): Error {
       'Telegram does not know this chat for this account; refresh the chat list and try again',
     );
   }
+  if (error instanceof MtArgumentError && /file is too large/i.test(error.message)) {
+    return new FileTooLargeError();
+  }
   if (error instanceof MtArgumentError && /payment is required/i.test(error.message)) {
     return new LoginStepError(
       TelegramErrorCode.PAYMENT_REQUIRED,
@@ -93,7 +116,30 @@ function fromRpcError(error: tl.RpcError): TelegramError {
     return new FloodWaitError(seconds);
   }
   if (text.startsWith('FILE_REFERENCE_')) {
-    return new FileReferenceExpiredError();
+    // FILE_REFERENCE_%d_…: the index of the file among those of the request (an album).
+    const index = (error as { duration?: unknown }).duration;
+    return new FileReferenceExpiredError(typeof index === 'number' ? index : null);
+  }
+  if (text === 'FILE_PART_%d_MISSING' || text === 'FILE_PARTS_INVALID' || text === 'MD5_CHECKSUM_INVALID') {
+    return new UploadIncompleteError(text.replace('%d', String((error as { which?: unknown }).which ?? '')));
+  }
+  if (text === 'RANDOM_ID_DUPLICATE') {
+    return new RandomIdDuplicateError();
+  }
+  if (text === 'PEER_FLOOD') {
+    return new PeerFloodError();
+  }
+  if (WRITE_FORBIDDEN.has(text) || /^CHAT_SEND_[A-Z_]+_FORBIDDEN$/.test(text)) {
+    return new ChatWriteForbiddenError();
+  }
+  if (TOPIC_GONE.has(text)) {
+    return new TopicUnavailableError();
+  }
+  if (text === 'MEDIA_CAPTION_TOO_LONG') {
+    return new CaptionTooLongError();
+  }
+  if (text.startsWith('ENTITY_') || text === 'ENTITIES_TOO_LONG') {
+    return new EntitiesRejectedError(text);
   }
   if (SESSION_GONE.has(text)) {
     return new AuthRequiredError();

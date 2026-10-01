@@ -6,6 +6,7 @@ import {
   type StorageDriver,
   StorageUnavailableError,
   channelFolderName,
+  isDriverLocation,
 } from '@tam/storage';
 import { LOCATION_DRIVERS, MEDIA_SETTINGS, type MediaSettings } from './media-settings.js';
 
@@ -51,7 +52,8 @@ export class StorageTargets {
         : await this.prisma.storageLocation.findUnique({
             where: { id: channel.storageLocationId },
           });
-    if (!location) {
+    // A Telegram backup chat never holds downloads (the api refuses it as a download location).
+    if (!location || !isDriverLocation(location)) {
       return null;
     }
     let driver: StorageDriver;
@@ -75,6 +77,9 @@ export class StorageTargets {
     const locations = await this.prisma.storageLocation.findMany({ where: { kind: 'LOCAL' } });
     const dirs = new Set<string>();
     for (const location of locations) {
+      if (!isDriverLocation(location)) {
+        continue;
+      }
       try {
         const dir = this.drivers.forLocation(location).stagingDir();
         if (dir) {

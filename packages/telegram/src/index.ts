@@ -6,8 +6,16 @@ export * from './file-id.js';
 export { EncryptedAuthKeysRepository } from './mtcute/encrypted-auth-keys.js';
 export { createSessionStorage, type SessionStorage, type SessionStorageOptions } from './mtcute/session-storage.js';
 export { toTelegramError, translateErrors } from './mtcute/error-mapping.js';
-export { mapChat, mapMedia, mapMessage, mapUser, messageTypeOf } from './mtcute/mappers.js';
 export {
+  mapChat,
+  mapMedia,
+  mapMessage,
+  mapUser,
+  messageTypeOf,
+  toTlEntities,
+} from './mtcute/mappers.js';
+export {
+  BACKUP_STREAM_BUFFER,
   DEFAULT_STALL_TIMEOUT_MS,
   DEFAULT_THUMBNAIL_TIMEOUT_MS,
   DOWNLOAD_RESUME_ALIGNMENT,

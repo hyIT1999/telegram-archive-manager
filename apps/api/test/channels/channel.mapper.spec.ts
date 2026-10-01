@@ -30,9 +30,13 @@ const channel: ChannelWithStorage = {
   downloadMedia: true,
   downloadNote: null,
   topicsRefreshedAt: null,
+  backupLocationId: null,
+  backupEnabled: false,
+  backupNote: null,
   createdAt: new Date('2026-08-01T00:00:00.000Z'),
   updatedAt: new Date('2026-09-01T10:00:00.000Z'),
   storageLocation: null,
+  backupLocation: null,
 };
 
 const drive: StorageLocation = {
@@ -83,6 +87,9 @@ describe('toChannelDto', () => {
       storageFolder: null,
       downloadMedia: true,
       downloadNote: null,
+      backupLocation: null,
+      backupEnabled: false,
+      backupNote: null,
       createdAt: '2026-08-01T00:00:00.000Z',
       updatedAt: '2026-09-01T10:00:00.000Z',
       stats: { messages: 10, media: 4, downloadedMedia: 2, storageBytes: 2048 },
@@ -116,5 +123,35 @@ describe('toChannelDto', () => {
     });
     expect(dto.storageFolder).toBe('Lịch sử (-100)');
     expect(JSON.stringify(dto)).not.toContain('drive-folder-id');
+  });
+
+  it('names the Telegram backup chat and whether backup runs', () => {
+    const chat: StorageLocation = {
+      ...drive,
+      id: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a61',
+      kind: 'TELEGRAM',
+      name: 'Backups',
+      displayPath: 'Telegram › Backups',
+      target: '-1007770001',
+      config: { chatId: '-1007770001', title: 'Backups', type: 'SUPERGROUP', isForum: true },
+      secretEnc: null,
+    };
+    const dto = toChannelDto(
+      {
+        ...channel,
+        backupLocationId: chat.id,
+        backupEnabled: true,
+        backupNote: null,
+        backupLocation: chat,
+      },
+      EMPTY_CHANNEL_STATS,
+    );
+    expect(dto.backupLocation).toEqual({
+      id: chat.id,
+      kind: 'TELEGRAM',
+      name: 'Backups',
+      displayPath: 'Telegram › Backups',
+    });
+    expect(dto.backupEnabled).toBe(true);
   });
 });

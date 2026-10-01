@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { type StorageLocation, refreshMediaCountersOf } from '@tam/database';
+import { isDriverLocation } from '@tam/storage';
 import { PrismaService } from '@tam/database/nest';
 import {
   ApiErrorCode,
@@ -179,7 +180,9 @@ export class ChannelDownloadsService {
     }
     let freeBytes: number | null = null;
     try {
-      freeBytes = (await this.drivers.forLocation(location).space()).freeBytes;
+      if (isDriverLocation(location)) {
+        freeBytes = (await this.drivers.forLocation(location).space()).freeBytes;
+      }
     } catch {
       // Unreachable right now (Drive offline, folder gone): the location check says why.
     }

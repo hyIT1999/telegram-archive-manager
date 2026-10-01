@@ -8,6 +8,7 @@ import {
   LocationDriverFactory,
   type SecretSealer,
   StorageUnavailableError,
+  isDriverLocation,
   locationConfig,
   secretContext,
 } from '../src/index.js';
@@ -38,6 +39,19 @@ describe('storage location settings', () => {
         config: { folderId: 'f1', folderName: 'Archive', accountEmail: null },
       }),
     ).toEqual({ kind: 'GOOGLE_DRIVE', folderId: 'f1', folderName: 'Archive', accountEmail: null });
+    expect(
+      locationConfig({
+        kind: 'TELEGRAM',
+        config: { chatId: '-1001234567890', title: 'Backups', type: 'SUPERGROUP', isForum: true },
+      }),
+    ).toEqual({
+      kind: 'TELEGRAM',
+      chatId: '-1001234567890',
+      title: 'Backups',
+      username: null,
+      type: 'SUPERGROUP',
+      isForum: true,
+    });
   });
 
   it('refuses settings that do not fit the kind', () => {
@@ -46,6 +60,13 @@ describe('storage location settings', () => {
       /folderId/,
     );
     expect(() => locationConfig({ kind: 'LOCAL', config: null })).toThrow();
+    expect(() => locationConfig({ kind: 'TELEGRAM', config: { title: 'x' } })).toThrow(/chatId/);
+  });
+
+  it('tells download locations from Telegram backup chats', () => {
+    expect(isDriverLocation({ kind: 'LOCAL' })).toBe(true);
+    expect(isDriverLocation({ kind: 'GOOGLE_DRIVE' })).toBe(true);
+    expect(isDriverLocation({ kind: 'TELEGRAM' })).toBe(false);
   });
 });
 
@@ -119,5 +140,20 @@ describe('LocationDriverFactory', () => {
       }),
     ).toThrow(StorageUnavailableError);
     expect(() => factory.seal('x', 'secret')).toThrow(StorageUnavailableError);
+  });
+
+  it('never builds a driver for a Telegram backup chat, even from an untyped row', () => {
+    const factory = new LocationDriverFactory({
+      secrets: null,
+      google: null,
+      googleUnavailableReason: 'no',
+    });
+    const row = {
+      id: 'chat',
+      kind: 'TELEGRAM',
+      config: { chatId: '-1001', title: 'Backups', type: 'CHANNEL', isForum: false },
+      secretEnc: null,
+    } as unknown as Parameters<LocationDriverFactory['forLocation']>[0];
+    expect(() => factory.forLocation(row)).toThrow(/Telegram backup chat/);
   });
 });

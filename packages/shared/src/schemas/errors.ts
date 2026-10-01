@@ -99,6 +99,27 @@ export const StorageErrorCode = {
 } as const;
 export type StorageErrorCode = (typeof StorageErrorCode)[keyof typeof StorageErrorCode];
 
+/** Outcomes of Telegram backup requests (backup chats, a channel's backup, "Back up now"). */
+export const BackupErrorCode = {
+  /** The account may not post in that chat: choose one you own or where you may post. */
+  BACKUP_CHAT_NOT_WRITABLE: 'BACKUP_CHAT_NOT_WRITABLE',
+  /** A forum where the account may not create topics, so topics cannot be mirrored. */
+  BACKUP_CHAT_NO_TOPICS: 'BACKUP_CHAT_NO_TOPICS',
+  /** The chat is archived as a source; backing up into it would copy the copies. */
+  BACKUP_CHAT_ARCHIVED: 'BACKUP_CHAT_ARCHIVED',
+  /** The chat receives backups, so it cannot be archived. */
+  CHAT_IS_BACKUP_TARGET: 'CHAT_IS_BACKUP_TARGET',
+  /** A download location must be a folder or Google Drive; a backup chat must be Telegram. */
+  LOCATION_KIND_NOT_ALLOWED: 'LOCATION_KIND_NOT_ALLOWED',
+  /** The channel has no backup chat chosen yet. */
+  BACKUP_CHAT_MISSING: 'BACKUP_CHAT_MISSING',
+  /** The message's backup is running right now; try again when it has finished. */
+  BACKUP_ACTIVE: 'BACKUP_ACTIVE',
+  /** A service message, a poll or another kind that cannot be recreated. */
+  BACKUP_NOT_SUPPORTED: 'BACKUP_NOT_SUPPORTED',
+} as const;
+export type BackupErrorCode = (typeof BackupErrorCode)[keyof typeof BackupErrorCode];
+
 /** Outcomes of media requests (GET /api/media/:id/content, POST …/download, …/cancel). */
 export const DownloadErrorCode = {
   /** The file cannot be cancelled from its current status. */

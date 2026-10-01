@@ -180,8 +180,19 @@ app-page-header {
 }
 
 .downloads-switch,
-.sync-switch {
+.sync-switch,
+.backup-switch {
   display: grid;
   gap: 4px;
   margin-bottom: 16px;
+}
+
+.backup-choice {
+  display: grid;
+  gap: 4px;
+  margin-top: 16px;
+
+  app-storage-location-list {
+    margin-top: 8px;
+  }
 }

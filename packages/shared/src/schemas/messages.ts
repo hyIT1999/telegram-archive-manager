@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MessageType } from '../enums.js';
+import type { MessageBackupDto } from './backups.js';
 import { type Page, csvList, cursorQuerySchema, isoDateOrDateTimeSchema } from './common.js';
 import type { MediaDto, MediaSummaryDto } from './media.js';
 import type { TagRefDto } from './tags.js';
@@ -234,6 +235,8 @@ export interface MessageDto extends MessageSummaryDto {
   telegramUrl: string | null;
   /** When it became a favorite. */
   favoritedAt: string | null;
+  /** Its copies in Telegram backup chats. */
+  backups: MessageBackupDto[];
 }
 
 /** POST and DELETE /api/messages/:id/favorite */

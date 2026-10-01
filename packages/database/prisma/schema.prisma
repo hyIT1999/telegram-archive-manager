@@ -7,8 +7,9 @@
 // - Every index is declared here (including GIN, trigram and partial indexes) so that
 //   `prisma migrate dev` never drops them. Hand-written SQL in migrations is limited to
 //   extensions, the `tam_simple` text search configuration, the search_vector triggers, the
-//   change-notification triggers (pg_notify on channel `tam_changes`, read by the api for SSE)
-//   and the triggers that fill download_jobs.channel_id/size from the file.
+//   change-notification triggers (pg_notify on channel `tam_changes`, read by the api for SSE),
+//   the triggers that fill download_jobs.channel_id/size from the file, and the check that a
+//   Telegram backup chat is never the default download location.
 // - Binary media never lives in PostgreSQL; `media.storage_key` points into object storage.
 
 generator client {
@@ -135,6 +136,40 @@ enum TelegramAuthState {
 enum StorageKind {
   LOCAL
   GOOGLE_DRIVE
+  /// A Telegram chat (channel or forum supergroup) that receives backup copies of messages.
+  /// Never a download location, never the default.
+  TELEGRAM
+}
+
+/// Where the backup copy of a message stands in one backup chat.
+enum BackupStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+/// What a running backup does right now.
+enum BackupStage {
+  /// Reading the source message and opening its file.
+  FETCHING
+  /// Streaming the file from its source into an upload to the backup chat.
+  UPLOADING
+  /// The send is under way: after a crash, the backup chat is read before anything is sent again.
+  SENDING
+}
+
+/// Why a message is not backed up (with status SKIPPED).
+enum BackupSkipReason {
+  /// The source message or its file is gone and no downloaded copy exists.
+  NOT_AVAILABLE
+  /// Content protection was turned on for the source chat.
+  PROTECTED
+  /// A kind of message that cannot be recreated (poll, location, service message…).
+  UNSUPPORTED
+  /// Larger than Telegram accepts from this account (2000 MiB, or 4000 MiB with Premium).
+  TOO_LARGE
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +257,10 @@ model TelegramDialog {
   isProtected        Boolean  @default(false) @map("is_protected")
   memberCount        Int?     @map("member_count")
   migratedFromChatId BigInt?  @map("migrated_from_chat_id")
+  /// The account may post messages here (owner, or admin allowed to post): a possible backup chat.
+  canPost            Boolean  @default(false) @map("can_post")
+  /// The account may create forum topics here (needed to back up a forum into it).
+  canManageTopics    Boolean  @default(false) @map("can_manage_topics")
   lastSeenAt         DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
 
   @@map("telegram_dialogs")
@@ -231,17 +270,21 @@ model TelegramDialog {
 // Storage locations (where downloaded media is written)
 // ---------------------------------------------------------------------------
 
-/// A folder on the server or in a Google Drive. Channels choose one; each media row remembers
-/// the location its file was written to, so changing a channel's location never loses files.
+/// A folder on the server or in a Google Drive (download locations), or a Telegram chat that
+/// receives backup copies (kind TELEGRAM). Channels choose one download location and optionally
+/// one backup chat; each media row remembers the location its file was written to, so changing
+/// a channel's location never loses files.
 model StorageLocation {
   id               String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
   kind             StorageKind
   name             String
-  /// Where files go, for people: an absolute folder, or "My Drive › <folder>".
+  /// Where files go, for people: an absolute folder, "My Drive › <folder>" or "Telegram › <chat>".
   displayPath      String      @map("display_path")
-  /// Identity of the target: the folder path (case-folded on Windows) or the Drive folder id.
+  /// Identity of the target: the folder path (case-folded on Windows), the Drive folder id, or
+  /// the Telegram chat's marked id.
   target           String
-  /// Non-secret settings: { path } or { folderId, folderName, accountEmail }.
+  /// Non-secret settings: { path }, { folderId, folderName, accountEmail } or
+  /// { chatId, title, username, type, isForum }.
   config           Json
   /// AES-256-GCM sealed credentials (Google refresh token, STORAGE_SECRET_KEY); api/worker only.
   secretEnc        Bytes?      @map("secret_enc")
@@ -258,8 +301,11 @@ model StorageLocation {
   createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  channels Channel[]
-  media    Media[]
+  channels       Channel[]       @relation("ChannelStorageLocation")
+  backupChannels Channel[]       @relation("ChannelBackupLocation")
+  media          Media[]
+  messageBackups MessageBackup[]
+  backupTopics   BackupTopic[]
 
   @@unique([kind, target])
   @@unique([isDefault], map: "storage_locations_one_default", where: raw("is_default"))
@@ -307,18 +353,30 @@ model Channel {
   downloadNote        String?   @map("download_note")
   /// When the worker last read the forum topics from Telegram (forums only).
   topicsRefreshedAt   DateTime? @map("topics_refreshed_at") @db.Timestamptz(3)
+  /// The Telegram chat (a storage location of kind TELEGRAM) that receives backup copies of
+  /// this channel's messages.
+  backupLocationId    String?   @map("backup_location_id") @db.Uuid
+  /// Back up every message automatically, new ones included. Off by default; "Back up now"
+  /// works for single messages while it is off, as long as a backup chat is chosen.
+  backupEnabled       Boolean   @default(false) @map("backup_enabled")
+  /// Why backups stopped by themselves (content protection, the backup chat refused posts…).
+  backupNote          String?   @map("backup_note")
   createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   migratedTo      Channel?         @relation("ChannelMigration", fields: [migratedToChannelId], references: [id], onDelete: SetNull)
   migratedFrom    Channel[]        @relation("ChannelMigration")
-  storageLocation StorageLocation? @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+  storageLocation StorageLocation? @relation("ChannelStorageLocation", fields: [storageLocationId], references: [id], onDelete: Restrict)
+  backupLocation  StorageLocation? @relation("ChannelBackupLocation", fields: [backupLocationId], references: [id], onDelete: Restrict)
   messages        Message[]
   importJobs      ImportJob[]
   forumTopics     ForumTopic[]
+  messageBackups  MessageBackup[]
+  backupTopics    BackupTopic[]
 
   @@index([migratedToChannelId])
   @@index([storageLocationId])
+  @@index([backupLocationId])
   @@map("channels")
 }
 
@@ -352,9 +410,10 @@ model Message {
   createdAt         DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime                 @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  channel Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channel Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
   media   Media[]
   tags    MessageTag[]
+  backups MessageBackup[]
 
   @@unique([channelId, telegramMessageId])
   @@index([channelId, telegramDate(sort: Desc), telegramMessageId(sort: Desc)])
@@ -556,6 +615,101 @@ model DownloadJob {
   /// The waiting files in the order the worker takes them: asked for first, then smallest.
   @@index([requestedAt, size, id], map: "download_jobs_queue_idx", where: raw("(status = 'PENDING'::\"DownloadJobStatus\")"))
   @@map("download_jobs")
+}
+
+// ---------------------------------------------------------------------------
+// Telegram backups (copies of archived messages in a Telegram chat of the user's)
+// ---------------------------------------------------------------------------
+
+/// The backup copy of one archived message in one backup chat: a NEW message (never a forward)
+/// whose file was uploaded again. One row per message and backup chat; the source message's
+/// metadata stays in messages/media, this row only describes the copy.
+model MessageBackup {
+  id                 String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  messageId          String            @map("message_id") @db.Uuid
+  storageLocationId  String            @map("storage_location_id") @db.Uuid
+  /// The source message's channel, copied at insert: per-channel counts read one table.
+  channelId          String            @map("channel_id") @db.Uuid
+  status             BackupStatus      @default(PENDING)
+  stage              BackupStage?
+  skipReason         BackupSkipReason? @map("skip_reason")
+  /// Incremented whenever the worker takes the row; every write checks it (ownership).
+  runSeq             Int               @default(0) @map("run_seq")
+  /// The worker process running it (host:pid:uuid); a quiet row of another process is taken back.
+  owner              String?
+  /// Failed tries (waiting for Telegram does not count).
+  attempts           Int               @default(0)
+  /// The next try waits until then.
+  notBefore          DateTime?         @map("not_before") @db.Timestamptz(3)
+  /// Set by "Back up now": goes first, even while automatic backup is off.
+  requestedAt        DateTime?         @map("requested_at") @db.Timestamptz(3)
+  /// "Back up again": send a new copy although one exists.
+  force              Boolean           @default(false)
+  /// Delete the earlier copies (replaced_message_ids) once the new one is sent.
+  replacePrevious    Boolean           @default(false) @map("replace_previous")
+  /// The file's size (media.size), for progress; null for text.
+  size               BigInt?
+  uploadedBytes      BigInt            @default(0) @map("uploaded_bytes")
+  /// Telegram random_id of the send, stored before it: repeating the send cannot post twice.
+  randomId           BigInt?           @map("random_id")
+  /// The file already uploaded to Telegram ({kind, id, accessHash, fileReference}) while the
+  /// rest of its album uploads; cleared once sent.
+  uploadedMedia      Json?             @map("uploaded_media")
+  /// What was sent (file name, size, SHA-256 of the bytes; SHA-256 of the text): after a crash
+  /// the backup chat is matched against these, and Verify compares them.
+  sentName           String?           @map("sent_name")
+  sentSize           BigInt?           @map("sent_size")
+  sentSha256         String?           @map("sent_sha256") @db.Char(64)
+  sentTextHash       String?           @map("sent_text_hash") @db.Char(64)
+  /// The copy: marked chat id, message id, forum topic and album id in the backup chat.
+  backupChatId       BigInt?           @map("backup_chat_id")
+  backupMessageId    Int?              @map("backup_message_id")
+  backupThreadId     Int?              @map("backup_thread_id")
+  backupGroupedId    BigInt?           @map("backup_grouped_id")
+  /// Follow-up text messages (a caption longer than Telegram allows with a media file).
+  extraMessageIds    Int[]             @default([]) @map("extra_message_ids")
+  /// Earlier copies, deleted once this one is sent when replace_previous is set.
+  replacedMessageIds Int[]             @default([]) @map("replaced_message_ids")
+  error              String?
+  lastAttemptAt      DateTime?         @map("last_attempt_at") @db.Timestamptz(3)
+  completedAt        DateTime?         @map("completed_at") @db.Timestamptz(3)
+  /// Outcome of the last Verify; verify_error is null when the copy was found as expected.
+  verifiedAt         DateTime?         @map("verified_at") @db.Timestamptz(3)
+  verifyError        String?           @map("verify_error")
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  message         Message         @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  storageLocation StorageLocation @relation(fields: [storageLocationId], references: [id], onDelete: Restrict)
+  channel         Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, storageLocationId])
+  /// Counts per channel and status (backup panel).
+  @@index([channelId, status])
+  /// The work of each backup chat.
+  @@index([storageLocationId, status])
+  @@map("message_backups")
+}
+
+/// A forum topic the worker created in a backup chat for one topic of an archived forum.
+model BackupTopic {
+  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  storageLocationId String   @map("storage_location_id") @db.Uuid
+  channelId         String   @map("channel_id") @db.Uuid
+  /// The topic in the archived forum (messages.thread_id).
+  sourceTopicId     Int      @map("source_topic_id")
+  /// The topic in the backup chat.
+  backupTopicId     Int      @map("backup_topic_id")
+  title             String
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  storageLocation StorageLocation @relation(fields: [storageLocationId], references: [id], onDelete: Cascade)
+  channel         Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([storageLocationId, channelId, sourceTopicId])
+  @@index([channelId])
+  @@map("backup_topics")
 }
 
 model AppSetting {

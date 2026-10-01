@@ -34,6 +34,16 @@ export const telegramRpcCallSchema = z.discriminatedUnion('method', [
   z.object({ method: z.literal('dialogs.refresh') }),
   /** Reads the forum topics of an archived channel into forum_topics. */
   z.object({ method: z.literal('topics.refresh'), channelId: z.uuid() }),
+  /**
+   * Reads one chat again (title, forum, whether the account may post and create topics) into
+   * telegram_dialogs, before it becomes, or while it is, a backup chat.
+   */
+  z.object({
+    method: z.literal('backup.checkChat'),
+    telegramChatId: z.string().regex(/^-?\d{1,20}$/),
+  }),
+  /** Starts checking the backup copies of a channel; results land in message_backups. */
+  z.object({ method: z.literal('backup.verify'), channelId: z.uuid() }),
 ]);
 export type TelegramRpcCall = z.infer<typeof telegramRpcCallSchema>;
 export type TelegramRpcMethod = TelegramRpcCall['method'];

@@ -3,7 +3,7 @@ import { rxResource, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
 import { type TelegramDialogDto, type TelegramDialogListDto, toApiError } from '../../shared/models';
 import { TelegramApi } from './telegram-api';
-import { type ChatFilter, filterChats, telegramActionError } from './telegram-labels';
+import { type ChatFilter, archivable, filterChats, telegramActionError } from './telegram-labels';
 import { TELEGRAM_POLLING, TelegramSession } from './telegram-session';
 
 /**
@@ -44,7 +44,7 @@ export class TelegramChats {
   readonly selected = computed<TelegramDialogDto | null>(() => {
     const id = this.selectedId();
     return (
-      this.list()?.items.find((chat) => chat.telegramChatId === id && !chat.isProtected) ?? null
+      this.list()?.items.find((chat) => chat.telegramChatId === id && archivable(chat)) ?? null
     );
   });
 
@@ -89,7 +89,7 @@ export class TelegramChats {
   }
 
   select(chat: TelegramDialogDto): void {
-    if (!chat.isProtected) {
+    if (archivable(chat)) {
       this.selectedId.set(chat.telegramChatId);
     }
   }

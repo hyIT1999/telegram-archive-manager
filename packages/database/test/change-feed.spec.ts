@@ -8,6 +8,7 @@ describe('change payloads', () => {
     expect(parseChange(`job:${id}`)).toEqual({ kind: 'job', id });
     expect(parseChange(`channel:${id}`)).toEqual({ kind: 'channel', id });
     expect(parseChange(`downloads:${id}`)).toEqual({ kind: 'downloads', id });
+    expect(parseChange(`backups:${id}`)).toEqual({ kind: 'backups', id });
   });
 
   it('ignores anything else', () => {
